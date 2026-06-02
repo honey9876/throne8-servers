@@ -12,6 +12,7 @@ import sharp from 'sharp';
 import Constants from '@/shared/constants.util';
 import { CoverPhoto, User } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
+import CacheUtil from '@/shared/cache.util';
 
 // ==================== INTERFACES ====================
 
@@ -160,6 +161,9 @@ class CoverPhotoService {
                 isActive: cover.isActive,
                 correlationId,
             });
+
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
 
             return {
                 coverId: coverId,
@@ -396,6 +400,9 @@ class CoverPhotoService {
                 correlationId,
             });
 
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
+
             return {
                 coverId: existingCover.coverId,
                 cloudinaryPublicId: existingCover.cloudinaryPublicId,
@@ -447,6 +454,9 @@ class CoverPhotoService {
                 userId,
                 correlationId,
             });
+
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
 
             return cover;
 
@@ -519,6 +529,9 @@ class CoverPhotoService {
                 correlationId,
             });
 
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
+
             return {
                 coverId: cover.coverId,
                 deletedAt: cover.deletedAt,
@@ -574,6 +587,9 @@ class CoverPhotoService {
                 correlationId,
             });
 
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
+
             return {
                 coverId: cover.coverId,
                 isArchived: cover.isArchived,
@@ -628,6 +644,9 @@ class CoverPhotoService {
                 userId,
                 correlationId,
             });
+
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
 
             return {
                 coverId: cover.coverId,

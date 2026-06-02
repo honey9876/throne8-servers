@@ -121,6 +121,14 @@ class HeadlineService {
 
             // Clear cache
             await this.invalidateHeadlineCache('all');
+            try {
+                await Promise.all([
+                    CacheUtil.del(`user:profile:${userId}`),
+                    CacheUtil.del(`user:${userId}`)
+                ]);
+            } catch (cacheErr) {
+                logger.warn('Failed to clear profile cache during headline creation', { error: cacheErr.message });
+            }
 
             // Emit event
             headlineEmitter.emit('headline:created', {

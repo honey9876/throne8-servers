@@ -19,7 +19,7 @@ import userEmitter from '@/shared/events/emitters/user.emitter.js';
 import Constants from '@/shared/constants.util.js';
 import AuditProducer from '@/shared/kafka/producers/audit.producer';
 import NotificationService from './notification.service';
-import { User } from '@/shared/models/index.models';
+import { User, ProfilePhoto, CoverPhoto, Headline } from '@/shared/models/index.models';
 
 import {
     UserRepository,
@@ -693,6 +693,23 @@ class AuthService {
             }
 
             const profile = this.buildProfileResponse(user);
+
+            // ✅ Resolve active profile photo, cover photo, and headline
+            try {
+                const [activePhoto, activeCover, activeHeadline] = await Promise.all([
+                    ProfilePhoto.findOne({ userId, isActive: true, isDeleted: false }).lean().exec(),
+                    CoverPhoto.findOne({ userId, isActive: true, isDeleted: false }).lean().exec(),
+                    Headline.findOne({ userId, 'flags.isDeleted': false }).sort({ createdAt: -1 }).lean().exec()
+                ]);
+                profile.profileImage = activePhoto ? activePhoto.cloudinarySecureUrl : null;
+                profile.coverImage = activeCover ? activeCover.cloudinarySecureUrl : null;
+                profile.headline = activeHeadline ? activeHeadline.title : null;
+            } catch (err: any) {
+                LoggerUtil.warn('Failed to resolve profile/cover photo URLs or headline', {
+                    error: err.message,
+                    userId
+                });
+            }
 
             // Optional stats
             if (options.includeStats) {

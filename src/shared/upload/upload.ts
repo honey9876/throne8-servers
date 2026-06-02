@@ -121,7 +121,7 @@ const mediaFileFilter = (req: Request, file: Express.Multer.File, callback: File
  */
 const uploadSingleConfig = multer({
     storage: memoryStorage,
-    fileFilter: imageFileFilter,
+    fileFilter: mediaFileFilter,
     limits: {
         fileSize: uploadConfig.maxFileSize,
         files: 1,

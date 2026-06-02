@@ -12,6 +12,7 @@ import sharp from 'sharp';
 import { ProfilePhoto, User } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
 import Constants from '@/shared/constants.util';
+import CacheUtil from '@/shared/cache.util';
 
 // ==================== INTERFACES ====================
 
@@ -148,6 +149,9 @@ class ProfilePhotoService {
                 isActive: photo.isActive,
                 correlationId,
             });
+
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
 
             return {
                 photoId: photoId, // ✅ photoId use karo
@@ -496,6 +500,9 @@ class ProfilePhotoService {
                 correlationId,
             });
 
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
+
             return {
                 photoId: existingPhoto.photoId,
                 cloudinaryPublicId: existingPhoto.cloudinaryPublicId,
@@ -547,6 +554,9 @@ class ProfilePhotoService {
                 userId,
                 correlationId,
             });
+
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
 
             return photo;
 
@@ -619,6 +629,9 @@ class ProfilePhotoService {
                 correlationId,
             });
 
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
+
             return {
                 photoId: photo.photoId,
                 deletedAt: photo.deletedAt,
@@ -674,6 +687,9 @@ class ProfilePhotoService {
                 correlationId,
             });
 
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
+
             return {
                 photoId: photo.photoId,
                 isArchived: photo.isArchived,
@@ -728,6 +744,9 @@ class ProfilePhotoService {
                 userId,
                 correlationId,
             });
+
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
 
             return {
                 photoId: photo.photoId,
