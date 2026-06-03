@@ -38,13 +38,13 @@ const sanitizeInput = (req: Request, res: Response, next: NextFunction) => {
  */
 const createSkillSchema = Joi.object({
     skillName: Joi.string()
-        .min(2)
+        .min(1)
         .max(100)
-        .pattern(/^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()]+$/)
+        .pattern(/^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()/&]*$/)
         .trim()
         .required()
         .messages({
-            'string.min': 'Skill name must be at least 2 characters',
+            'string.min': 'Skill name must be at least 1 character',
             'string.max': 'Skill name cannot exceed 100 characters',
             'string.pattern.base': 'Skill name must start with a letter or number',
             'string.empty': 'Skill name cannot be empty',
@@ -91,15 +91,15 @@ const createSkillSchema = Joi.object({
  */
 const updateSkillSchema = Joi.object({
     skillName: Joi.string()
-        .min(2)
+        .min(1)
         .max(100)
-        .pattern(/^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()]+$/)
+        .pattern(/^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()/&]*$/)
         .trim()
         .optional()
         .messages({
-            'string.min': 'Skill name must be at least 2 characters',
+            'string.min': 'Skill name must be at least 1 character',
             'string.max': 'Skill name cannot exceed 100 characters',
-            'string.pattern.base': 'Skill name must start with a letter or number',
+            'string.pattern.base': 'Skill name must start with a letter or number and contain valid characters',
         }),
 
     category: Joi.string()
@@ -249,7 +249,7 @@ router.post(
             console.log('🎯 CREATE SKILL ROUTE HIT');
             await SkillController.createSkill(req as any, res);
             console.log('✅ CREATE SKILL ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ CREATE SKILL ROUTE ERROR:', error);
             next(error);
         }
@@ -271,7 +271,7 @@ router.get(
             console.log('🎯 GET ALL SKILLS ROUTE HIT');
             await SkillController.getAllSkills(req as any, res);
             console.log('✅ GET ALL SKILLS ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ GET ALL SKILLS ROUTE ERROR:', error);
             next(error);
         }
@@ -292,7 +292,7 @@ router.get(
             console.log('🎯 GET SKILL BY ID ROUTE HIT');
             await SkillController.getSkillById(req as any, res);
             console.log('✅ GET SKILL BY ID ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ GET SKILL BY ID ROUTE ERROR:', error);
             next(error);
         }
@@ -315,7 +315,7 @@ router.put(
             console.log('🎯 UPDATE SKILL ROUTE HIT');
             await SkillController.updateSkill(req as any, res);
             console.log('✅ UPDATE SKILL ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ UPDATE SKILL ROUTE ERROR:', error);
             next(error);
         }
@@ -336,7 +336,7 @@ router.delete(
             console.log('🎯 DELETE SKILL ROUTE HIT');
             await SkillController.deleteSkill(req as any, res);
             console.log('✅ DELETE SKILL ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ DELETE SKILL ROUTE ERROR:', error);
             next(error);
         }
@@ -357,7 +357,7 @@ router.post(
             console.log('🎯 ARCHIVE SKILL ROUTE HIT');
             await SkillController.archiveSkill(req as any, res);
             console.log('✅ ARCHIVE SKILL ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ ARCHIVE SKILL ROUTE ERROR:', error);
             next(error);
         }
@@ -378,7 +378,7 @@ router.post(
             console.log('🎯 RESTORE SKILL ROUTE HIT');
             await SkillController.restoreSkill(req as any, res);
             console.log('✅ RESTORE SKILL ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ RESTORE SKILL ROUTE ERROR:', error);
             next(error);
         }
@@ -401,7 +401,7 @@ router.post(
             console.log('🎯 PIN SKILL ROUTE HIT');
             await SkillController.pinSkill(req as any, res);
             console.log('✅ PIN SKILL ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ PIN SKILL ROUTE ERROR:', error);
             next(error);
         }
@@ -422,7 +422,7 @@ router.post(
             console.log('🎯 UNPIN SKILL ROUTE HIT');
             await SkillController.unpinSkill(req as any, res);
             console.log('✅ UNPIN SKILL ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ UNPIN SKILL ROUTE ERROR:', error);
             next(error);
         }
@@ -443,7 +443,7 @@ router.post(
             console.log('🎯 REQUEST ENDORSEMENT ROUTE HIT');
             await SkillController.requestEndorsement(req as any, res);
             console.log('✅ REQUEST ENDORSEMENT ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ REQUEST ENDORSEMENT ROUTE ERROR:', error);
             next(error);
         }
@@ -464,7 +464,7 @@ router.post(
             console.log('🎯 TOGGLE ENDORSEMENT VISIBILITY ROUTE HIT');
             await SkillController.toggleEndorsementVisibility(req as any, res);
             console.log('✅ TOGGLE ENDORSEMENT VISIBILITY ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ TOGGLE ENDORSEMENT VISIBILITY ROUTE ERROR:', error);
             next(error);
         }
@@ -485,7 +485,7 @@ router.post(
             console.log('🎯 REORDER SKILLS ROUTE HIT');
             await SkillController.reorderSkills(req as any, res);
             console.log('✅ REORDER SKILLS ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ REORDER SKILLS ROUTE ERROR:', error);
             next(error);
         }
@@ -507,7 +507,7 @@ router.get(
             console.log('🎯 EXPORT SKILLS ROUTE HIT');
             await SkillController.exportSkills(req as any, res);
             console.log('✅ EXPORT SKILLS ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ EXPORT SKILLS ROUTE ERROR:', error);
             next(error);
         }
@@ -529,7 +529,7 @@ router.get(
             console.log('🎯 GET SKILL SUGGESTIONS ROUTE HIT');
             await SkillController.getSkillSuggestions(req as any, res);
             console.log('✅ GET SKILL SUGGESTIONS ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ GET SKILL SUGGESTIONS ROUTE ERROR:', error);
             next(error);
         }
@@ -550,7 +550,7 @@ router.post(
             console.log('🎯 TAKE SKILL ASSESSMENT ROUTE HIT');
             await SkillController.takeSkillAssessment(req as any, res);
             console.log('✅ TAKE SKILL ASSESSMENT ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ TAKE SKILL ASSESSMENT ROUTE ERROR:', error);
             next(error);
         }

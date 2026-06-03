@@ -66,7 +66,7 @@ class SkillService {
             // Step 3: Check duplicate skill name
             const existingSkill = await Skill.findOne({
                 userId: data.userId,
-                skillName: { $regex: new RegExp(`^${data.skillName}$`, 'i') },
+                skillName: { $regex: new RegExp(`^${data.skillName.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'i') },
                 isDeleted: false,
             });
 
@@ -271,7 +271,7 @@ class SkillService {
                 // Check duplicate
                 const existing = await Skill.findOne({
                     userId,
-                    skillName: { $regex: new RegExp(`^${updates.skillName}$`, 'i') },
+                    skillName: { $regex: new RegExp(`^${updates.skillName.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'i') },
                     skillId: { $ne: skillId },
                     isDeleted: false,
                 });

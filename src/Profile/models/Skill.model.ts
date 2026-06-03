@@ -128,11 +128,11 @@ const SkillSchema = new Schema<ISkill, ISkillModel>(
             type: String,
             required: [true, 'Skill name is required'],
             trim: true,
-            minlength: [2, 'Skill name must be at least 2 characters'],
+            minlength: [1, 'Skill name must be at least 1 character'],
             maxlength: [100, 'Skill name cannot exceed 100 characters'],
             validate: {
-                validator: (v: string) => /^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()]+$/.test(v),
-                message: 'Skill name must start with a letter or number',
+                validator: (v: string) => /^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()/&]*$/.test(v),
+                message: 'Skill name must start with a letter or number and contain valid characters',
             },
             index: true,
         },
@@ -349,7 +349,7 @@ SkillSchema.statics.findByUserId = async function (userId: string, includeArchiv
         return await this.find(query)
             .sort({ isPinned: -1, pinnedOrder: 1, endorsementCount: -1 })  // Pinned first (1,2,3), then by endorsements
             .exec();
-    } catch (error : any) {
+    } catch (error: any) {
         LoggerUtil.error('Find skills by userId failed', {
             error: (error as Error).message,
             userId,
@@ -364,7 +364,7 @@ SkillSchema.statics.findByUserId = async function (userId: string, includeArchiv
 SkillSchema.statics.getUserSkillCount = async function (userId: string): Promise<number> {
     try {
         return await this.countDocuments({ userId, isDeleted: false });
-    } catch (error : any) {
+    } catch (error: any) {
         LoggerUtil.error('Get skill count failed', {
             error: (error as Error).message,
             userId,
@@ -385,7 +385,7 @@ SkillSchema.statics.getSkillsByIndustry = async function (userId: string, indust
         })
             .sort({ endorsementCount: -1 })
             .exec();
-    } catch (error : any) {
+    } catch (error: any) {
         LoggerUtil.error('Get skills by industry failed', {
             error: (error as Error).message,
             userId,
@@ -408,7 +408,7 @@ SkillSchema.statics.getSuggestedSkills = async function (userId: string): Promis
             .sort({ createdAt: -1 })
             .limit(10)
             .exec();
-    } catch (error : any) {
+    } catch (error: any) {
         LoggerUtil.error('Get suggested skills failed', {
             error: (error as Error).message,
             userId,
@@ -431,7 +431,7 @@ SkillSchema.statics.reorderSkills = async function (userId: string, skillIds: st
 
         await this.bulkWrite(bulkOps);
         return true;
-    } catch (error : any) {
+    } catch (error: any) {
         LoggerUtil.error('Reorder skills failed', {
             error: (error as Error).message,
             userId,
@@ -450,7 +450,7 @@ SkillSchema.statics.findActiveById = async function (skillId: string, userId: st
             userId,
             isDeleted: false,
         }).exec();
-    } catch (error : any) {
+    } catch (error: any) {
         LoggerUtil.error('Find active skill by ID failed', {
             error: (error as Error).message,
             skillId,
@@ -473,7 +473,7 @@ SkillSchema.statics.getPinnedSkills = async function (userId: string): Promise<I
             .sort({ pinnedOrder: 1 })
             .limit(3)
             .exec();
-    } catch (error : any) {
+    } catch (error: any) {
         LoggerUtil.error('Get pinned skills failed', {
             error: (error as Error).message,
             userId,
@@ -494,7 +494,7 @@ SkillSchema.statics.getTopEndorsedSkills = async function (userId: string, limit
             .sort({ endorsementCount: -1 })
             .limit(limit)
             .exec();
-    } catch (error : any) {
+    } catch (error: any) {
         LoggerUtil.error('Get top endorsed skills failed', {
             error: (error as Error).message,
             userId,
