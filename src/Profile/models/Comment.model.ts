@@ -43,6 +43,7 @@ export interface IComment extends Document {
     parentCommentId?: string;
     threadDepth: number;
     replyCount: number;
+    imageUrl?: string;
 }
 
 export interface ICommentModel extends Model<IComment> {
@@ -80,8 +81,10 @@ const CommentSchema = new Schema<IComment, ICommentModel>(
         },
         content: {
             type: String,
-            required: true,
-            minlength: 1,
+            required: function(this: IComment) {
+                // Content is required only if there is no image
+                return !this.imageUrl;
+            },
             maxlength: 2000,
             trim: true,
         },
@@ -113,6 +116,10 @@ const CommentSchema = new Schema<IComment, ICommentModel>(
         replyCount: {
             type: Number,
             default: 0
+        },
+        imageUrl: {
+            type: String,
+            default: null
         },
         reactions: {
             like: [{ type: String }],

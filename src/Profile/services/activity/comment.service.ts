@@ -7,7 +7,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Comment, Post, User } from '@/shared/models/index.models';
+import { Comment, Post, User, ProfilePhoto } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
 
 // ==================== INTERFACES ====================
@@ -19,6 +19,7 @@ interface CreateCommentResult {
     content: string;
     likesCount: number;
     createdAt: Date;
+    imageUrl?: string;
 }
 
 // ==================== COMMENT SERVICE ====================
@@ -32,7 +33,8 @@ class CommentService {
         userId: string,
         postId: string,
         content: string,
-        parentCommentId?: string
+        parentCommentId?: string,
+        imageUrl?: string
     ): Promise<CreateCommentResult> {
         const correlationId = uuidv4();
 
@@ -93,9 +95,10 @@ class CommentService {
                 commentId,
                 postId,
                 userId,
-                content,
+                content: content ? content : undefined,
                 parentCommentId,
-                threadDepth
+                threadDepth,
+                imageUrl
             });
 
             await comment.save();
@@ -127,6 +130,7 @@ class CommentService {
                 content: comment.content,
                 likesCount: comment.likesCount,
                 createdAt: comment.createdAt,
+                imageUrl: comment.imageUrl,
             };
 
         } catch (error: any) {
@@ -153,17 +157,49 @@ class CommentService {
                 correlationId,
             });
 
-            const comments = await Comment.findByPostId(postId);
+            let comments = await Comment.findByPostId(postId);
+            comments = JSON.parse(JSON.stringify(comments)); // convert to plain objects if not already lean
+
+            // Extract user IDs to fetch dynamic user data
+            const userIds = [...new Set(comments.map((c: any) => c.userId))];
+
+            // Fetch Users and ProfilePhotos
+            const users = await User.find({ userId: { $in: userIds } }).lean();
+            const profilePhotos = await ProfilePhoto.find({ userId: { $in: userIds }, isActive: true }).lean();
+
+            const userMap = users.reduce((acc: any, user: any) => {
+                acc[user.userId] = user;
+                return acc;
+            }, {});
+
+            const photoMap = profilePhotos.reduce((acc: any, photo: any) => {
+                acc[photo.userId] = photo.cloudinarySecureUrl;
+                return acc;
+            }, {});
+
+            // Map user details to comments
+            const mappedComments = comments.map((comment: any) => {
+                const userObj = userMap[comment.userId];
+                const authorName = userObj 
+                    ? (userObj.firstName ? `${userObj.firstName} ${userObj.lastName || ''}`.trim() : userObj.username)
+                    : 'Unknown User';
+                
+                return {
+                    ...comment,
+                    authorName,
+                    avatar: photoMap[comment.userId] || null,
+                };
+            });
 
             LoggerUtil.info('Comments fetched successfully', {
                 postId,
-                count: comments.length,
+                count: mappedComments.length,
                 correlationId,
             });
 
             return {
-                comments,
-                total: comments.length,
+                comments: mappedComments,
+                total: mappedComments.length,
             };
 
         } catch (error: any) {

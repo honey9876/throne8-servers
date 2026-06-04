@@ -13,6 +13,7 @@ import AuditProducer from '@/shared/kafka/producers/audit.producer';
 import { LoggerUtil } from '@/shared/logger.util';
 import ResponseUtil from '@/shared/response.util';
 import { Comment } from '@/shared/models/index.models';
+import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
 
 // ==================== INTERFACES ====================
 
@@ -57,10 +58,31 @@ class CommentController {
                 correlationId,
             });
 
+            let imageUrl = undefined;
+            if (req.file) {
+                try {
+                    const result: any = await new Promise((resolve, reject) => {
+                        const stream = cloudinary.uploader.upload_stream(
+                            { folder: 'comments' },
+                            (error: any, res: any) => {
+                                if (error) reject(error);
+                                else resolve(res);
+                            }
+                        );
+                        stream.end(req.file!.buffer);
+                    });
+                    imageUrl = result.secure_url;
+                } catch (err: any) {
+                    LoggerUtil.error('Failed to upload comment image', { error: err.message });
+                }
+            }
+
             const result = await CommentService.createComment(
                 userId,
                 postId,
-                content
+                content || '',
+                undefined,
+                imageUrl
             );
 
             // Audit log (non-blocking)

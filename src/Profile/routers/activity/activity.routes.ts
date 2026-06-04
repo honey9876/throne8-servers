@@ -237,6 +237,7 @@ router.delete(
 router.post(
     '/create-comment/comments',
     AuthMiddleware.authenticate as any,
+    upload.uploadSingle('image'),
     validateCreateComment,
     // rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
     CommentController.createComment as any
