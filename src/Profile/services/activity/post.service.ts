@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
 import sharp from 'sharp';
 import Constants from '@/shared/constants.util';
-import { Post, User } from '@/shared/models/index.models';
+import { Post, User, ProfilePhoto, Headline } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
 import { IPostEntry } from '@/Profile/models/Post.model';
 import NotificationService from '@/notifications/services/notification.service';
@@ -530,8 +530,41 @@ class PostService {
         try {
             LoggerUtil.info('Fetching all posts for home feed', { currentUserId, correlationId });
 
+            // 1. Fetch all posts documents
             const allUserDocs = await Post.find({}).lean();
 
+            // 2. Extract unique userIds form  the post documents
+            const userIds = [...new Set(allUserDocs.map((doc:any) => doc.userId))];
+
+            // 3. Fetch user details for all those userIds
+            const users = await User.find({ userId: { $in: userIds } })
+                .select('userId username firstName lastName profilePhotoId headlineId')
+                .lean();
+            
+            // Fetch Profile Photos and Headlines for the users
+            const profilePhotos = await ProfilePhoto.find({ userId: { $in: userIds }, isActive: true }).lean();
+            const headlines = await Headline.find({ userId: { $in: userIds }, isDeleted: false }).lean();
+            
+            const photoMap = profilePhotos.reduce((acc: any, photo: any) => {
+                acc[photo.userId] = photo.cloudinarySecureUrl;
+                return acc;
+            }, {});
+
+            const headlineMap = headlines.reduce((acc: any, hl: any) => {
+                acc[hl.userId] = hl.title || hl.headline;
+                return acc;
+            }, {});
+
+            // 4. Create a fast lookup map for the users
+            const userMap = users.reduce((acc: any, user: any) => {
+                acc[user.userId] = {
+                    ...user,
+                    profileImage: photoMap[user.userId],
+                    headline: headlineMap[user.userId]
+                };
+                return acc;
+            }, {});
+                
             // ✅ cleanPost helper — same logic, lean() use hota hai isliye plain objects milte hain
             const cleanPost = (obj: any): any => {
                 if (!obj.images?.length) delete obj.images;
@@ -552,6 +585,9 @@ class PostService {
             let allPosts: any[] = [];
 
             allUserDocs.forEach((doc: any) => {
+                //adding this 
+                const author = userMap[doc.userId] || {};
+
                 const entries = (doc.posts || [])
                     .filter((p: any) => !p.isDeleted && (includeArchived || !p.isArchived))
                     .map((p: any) => cleanPost({
@@ -559,6 +595,10 @@ class PostService {
                         userId: doc.userId,
                         documentPostId: doc.postId,
                         isLikedByCurrentUser: (p.likedBy || []).includes(currentUserId),
+                        //added this to get the users name avatar and headline
+                        authorName: author.firstName ? `${author.firstName} ${author.lastName || ''}`.trim() : (author.username || 'Unknown User'),
+                        authorAvatar: author.profileImage || 'https://i.pravatar.cc/150?img=12',
+                        authorHeadline: author.headline || '' 
                     }));
                 allPosts.push(...entries);
             });
