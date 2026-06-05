@@ -1021,15 +1021,15 @@ export const validateCreateComment = (req: Request, res: Response, next: NextFun
                 'any.required': 'Post ID is required',
             }),
         content: Joi.string()
-            .min(Constants.ACTIVITY_VALIDATION.COMMENT.MIN_LENGTH)
             .max(Constants.ACTIVITY_VALIDATION.COMMENT.MAX_LENGTH)
-            .required()
+            .optional()
+            .allow('')
             .messages({
                 'string.min': `Comment must be at least ${Constants.ACTIVITY_VALIDATION.COMMENT.MIN_LENGTH} character`,
                 'string.max': `Comment cannot exceed ${Constants.ACTIVITY_VALIDATION.COMMENT.MAX_LENGTH} characters`,
                 'any.required': 'Comment content is required',
             }),
-    });
+    }).unknown(true);
 
     const { error, value } = schema.validate(req.body, { abortEarly: false });
 
