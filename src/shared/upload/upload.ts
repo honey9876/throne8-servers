@@ -206,7 +206,7 @@ export const uploadSingle = (fieldName: string = 'photo') => {
                     fieldName,
                     duration: `${duration}ms`
                 });
-                return next(new AppError('No file uploaded', 400));
+                return next(); // Proceed without file, controllers will handle it
             }
 
             logger.info('✅ [UPLOAD SUCCESS] File uploaded successfully', {
@@ -283,7 +283,7 @@ export const uploadMultiple = (fieldName: string = 'photos', maxCount: number = 
                     fieldName,
                     duration: `${duration}ms`
                 });
-                return next(new AppError('No files uploaded', 400));
+                return next(); // Proceed without files, controllers will handle it
             }
 
             const files = req.files as Express.Multer.File[];

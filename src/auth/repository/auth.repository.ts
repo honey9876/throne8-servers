@@ -167,12 +167,27 @@ export class UserRepository {
             query.location = { $regex: filters.location, $options: 'i' };
         }
         if (filters.search) {
-            const searchRegex = { $regex: filters.search, $options: 'i' };
-            query.$or = [
-                { email: searchRegex },
-                { firstName: searchRegex },
-                { lastName: searchRegex },
-            ];
+            const searchParts = filters.search.trim().split(/\s+/);
+            if (searchParts.length > 1) {
+                query.$or = [
+                    { email: { $regex: filters.search, $options: 'i' } },
+                    {
+                        $and: searchParts.map((part: string) => ({
+                            $or: [
+                                { firstName: { $regex: part, $options: 'i' } },
+                                { lastName: { $regex: part, $options: 'i' } },
+                            ]
+                        }))
+                    }
+                ];
+            } else {
+                const searchRegex = { $regex: filters.search, $options: 'i' };
+                query.$or = [
+                    { email: searchRegex },
+                    { firstName: searchRegex },
+                    { lastName: searchRegex },
+                ];
+            }
         }
 
         const sort: Record<string, 1 | -1> =

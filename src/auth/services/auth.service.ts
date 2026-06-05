@@ -19,7 +19,7 @@ import userEmitter from '@/shared/events/emitters/user.emitter.js';
 import Constants from '@/shared/constants.util.js';
 import AuditProducer from '@/shared/kafka/producers/audit.producer';
 import NotificationService from './notification.service';
-import { User, ProfilePhoto, CoverPhoto, Headline } from '@/shared/models/index.models';
+import { User, ProfilePhoto, CoverPhoto, Headline, Experience, Education } from '@/shared/models/index.models';
 
 import {
     UserRepository,
@@ -711,6 +711,34 @@ class AuthService {
                 });
             }
 
+            // ✅ Populate full experienceList & educationList so frontend doesn't need N+1 individual fetches
+            // This replaces the old pattern where frontend received only experienceIds[]
+            // and had to call GET /get-experience/:id for each one (causing rate-limit issues)
+            try {
+                const [experienceList, educationList] = await Promise.all([
+                    Experience.find({
+                        userId,
+                        'flags.isDeleted': false,
+                        'flags.isArchived': false
+                    }).sort({ startDate: -1 }).lean().exec(),
+                    Education.find({
+                        userId,
+                        'flags.isDeleted': false,
+                        'flags.isArchived': false
+                    }).sort({ startDate: -1 }).lean().exec()
+                ]);
+                profile.experienceList = experienceList || [];
+                profile.educationList = educationList || [];
+            } catch (err: any) {
+                LoggerUtil.warn('Failed to populate experienceList/educationList', {
+                    error: err.message,
+                    userId
+                });
+                // Fallback: frontend will use experienceIds to fetch individually
+                profile.experienceList = [];
+                profile.educationList = [];
+            }
+
             // Optional stats
             if (options.includeStats) {
                 const [activeSessions, activeDevices] = await Promise.all([
@@ -946,6 +974,18 @@ class AuthService {
             const { users, total, totalPages } =
                 await UserRepository.findAllPaginated(params);
 
+            const userIds = users.map((u: any) => u.userId);
+            const activePhotos = await ProfilePhoto.find({
+                userId: { $in: userIds },
+                isActive: true,
+                isDeleted: false
+            }).lean().exec();
+
+            const photoMap = new Map();
+            activePhotos.forEach((photo: any) => {
+                photoMap.set(photo.userId, photo.cloudinarySecureUrl);
+            });
+
             const formattedUsers = users.map((user: any) => ({
                 userId: user.userId,
                 email: user.email,
@@ -967,6 +1007,7 @@ class AuthService {
                 totalLogins: user.metadata?.totalLogins || 0,
                 createdAt: user.createdAt,
                 updatedAt: user.updatedAt,
+                profileImage: photoMap.get(user.userId) || null,
             }));
 
             return { users: formattedUsers, total, totalPages };
