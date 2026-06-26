@@ -4,6 +4,7 @@ import { getIO } from '@/socket';
 import { LoggerUtil as logger } from '@/shared/logger.util';
 import Connection from '@/connections/models/Connection';
 import User from '@/auth/models/User.model';
+import ProfilePhoto from '@/Profile/models/ProfilePhoto.model';
 
 class NotificationService {
 
@@ -22,7 +23,13 @@ class NotificationService {
             if (!poster) return;
 
             const posterName = `${poster.firstName} ${poster.lastName || ''}`.trim();
-            const posterPhoto = poster.profilePhotoId || null;
+            let posterPhoto = null;
+            if (poster.profilePhotoId) {
+                const photo = await ProfilePhoto.findOne({ photoId: poster.profilePhotoId }).lean();
+                if (photo) {
+                    posterPhoto = photo.cloudinarySecureUrl;
+                }
+            }
 
             // 2. Get all active connections of the poster
             const connections = await Connection.find({
@@ -100,7 +107,7 @@ class NotificationService {
         userId: string,
         page = 1,
         limit = 20
-    ): Promise<{ notifications: INotification[]; unreadCount: number; total: number }> {
+    ): Promise<{ notifications: any[]; unreadCount: number; total: number }> {
         const skip = (page - 1) * limit;
 
         const [notifications, unreadCount, total] = await Promise.all([
@@ -113,7 +120,22 @@ class NotificationService {
             Notification.countDocuments({ recipientId: userId }),
         ]);
 
-        return { notifications, unreadCount, total };
+        // Fix existing UUID senderPhotos
+        const photoIds = notifications.map(n => n.senderPhoto).filter(p => p && !p.startsWith('http'));
+        const photoMap = new Map();
+        if (photoIds.length > 0) {
+            const photos = await ProfilePhoto.find({ photoId: { $in: photoIds } }).lean();
+            photos.forEach(p => photoMap.set(p.photoId, p.cloudinarySecureUrl));
+        }
+
+        const mappedNotifications = notifications.map(n => {
+            if (n.senderPhoto && !n.senderPhoto.startsWith('http') && photoMap.has(n.senderPhoto)) {
+                n.senderPhoto = photoMap.get(n.senderPhoto);
+            }
+            return n;
+        });
+
+        return { notifications: mappedNotifications, unreadCount, total };
     }
 
     /** Mark one notification as read */
