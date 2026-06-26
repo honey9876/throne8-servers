@@ -45,8 +45,10 @@ const authenticateSocket = async (socket: Socket): Promise<string | null> => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
 
     // Verify user exists and is active
-    const user = await User.findById(decoded.userId).select('_id isActive');
-    
+    // BUG FIX: must select 'status' — selecting '_id isActive' left status=undefined,
+    // so user.status !== 'active' was always true → blocked ALL socket connections.
+    const user = await User.findById(decoded.userId).select('_id status isActive');
+
     if (!user || user.status !== 'active') {
       LoggerUtil.warn(`⚠️  Invalid or inactive user for socket: ${socket.id}`);
       return null;
@@ -111,12 +113,26 @@ export const setupSocketHandlers = (io: Server): void => {
     socket.data.userId = userId;
 
     // Get user details for live room handler
-    const user = await User.findById(userId).select('name');
-    const userName = user?.username || 'Unknown User';
+    // BUG FIX: select both 'username' and 'name' — User model may use either field
+    const user = await User.findById(userId).select('username name firstName lastName');
+    const userName =
+      user?.username ||
+      (user as any)?.name ||
+      ((user as any)?.firstName ? `${(user as any).firstName} ${(user as any).lastName || ''}`.trim() : '') ||
+      'Unknown User';
 
-    // Attach userName to socket for live room events
+    // BUG FIX: set BOTH socket.data.userName AND (socket as any).userName.
+    // liveRoomHandler reads socket.data.userName — it was always undefined before.
+    socket.data.userName = userName;
     (socket as any).userId = userId;
     (socket as any).userName = userName;
+
+    // ⚡ CRITICAL: Join the user's personal socket room.
+    // This is required for WebRTC P2P signaling (offer/answer/ICE).
+    // liveRoomHandler uses io.to(`user:${targetUserId}`) to send signals
+    // directly to a specific peer — without this, all WebRTC signals are dropped.
+    socket.join(`user:${userId}`);
+    LoggerUtil.info(`📡 User ${userId} joined personal room user:${userId}`);
 
     // ==========================================
     // JOIN GROUP ROOM

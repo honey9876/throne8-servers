@@ -18,6 +18,7 @@ import { LoggerUtil } from '@/shared/logger.util';
 import Message from '../models/Message.model';
 import GroupMember from '../models/GroupMember.model';
 import { MessageType } from '../enums/MessageType.enum';
+import ProfilePhoto from '@/Profile/models/ProfilePhoto.model';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_CONTENT_LENGTH = 2_000;
@@ -122,16 +123,27 @@ export const handleChatEvents = (io: Server, socket: Socket, userId: string): vo
 
       // Single populate call with all needed paths
       await message.populate([
-        { path: 'sender', select: 'name avatar email' },
+        { path: 'sender', select: 'name profilePhotoId email firstName lastName username' },
         ...(replyTo ? [{ path: 'replyTo', select: 'content sender' }] : []),
       ]);
+
+      let senderPayload: any = message.sender;
+      if (senderPayload && senderPayload.profilePhotoId) {
+        try {
+          const photo = await ProfilePhoto.findById(senderPayload.profilePhotoId).lean().exec();
+          if (photo) {
+            senderPayload = senderPayload.toJSON ? senderPayload.toJSON() : { ...senderPayload };
+            senderPayload.profileImage = photo.cloudinarySecureUrl;
+          }
+        } catch (e) {}
+      }
 
       LoggerUtil.info(`Message created: ${message._id} in group ${groupId}`);
 
       io.to(groupId).emit('new-message', {
         _id: message._id,
         groupId: message.groupId,
-        sender: message.sender,
+        sender: senderPayload,
         content: message.content,
         messageType: message.messageType,
         fileUrl: message.fileUrl,

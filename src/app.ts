@@ -145,7 +145,7 @@ app.use('/api/v1/notifications', notificationRoutes);
 // app.use('/api/v1/job-service', jobServiceRoutes);
 
 // ==================== ERROR HANDLER ====================
-app.use(((err: CustomError, req: Request, res: Response, next: NextFunction) => {
+app.use(((err: CustomError & { statusCode?: number }, req: Request, res: Response, next: NextFunction) => {
     if (err.code === 'EBADCSRFTOKEN') {
         return res.status(403).json({
             status: 'error',
@@ -161,7 +161,9 @@ app.use(((err: CustomError, req: Request, res: Response, next: NextFunction) => 
         method: req.method,
     });
 
-    return res.status(err.status || 500).json({
+    const statusCode = err.statusCode || err.status || 500;
+
+    return res.status(statusCode).json({
         status: 'error',
         message: process.env['NODE_ENV'] === 'production'
             ? 'Internal server error'

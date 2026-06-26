@@ -43,8 +43,8 @@ async function isMember(userId: string, groupId: string): Promise<boolean> {
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void => {
-  const userId   = socket.data.userId;
-  const userName = socket.data.userName ?? 'Unknown';
+  const userId   = socket.data.userId || (socket as any).userId;
+  const userName = socket.data.userName || (socket as any).userName || 'Unknown';
 
   // ── Join live room ─────────────────────────────────────────────────────────
   socket.on('join-live-room', async (data: JoinLiveRoomPayload) => {
