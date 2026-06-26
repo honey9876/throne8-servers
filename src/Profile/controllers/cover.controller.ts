@@ -184,7 +184,7 @@ class CoverPhotoController {
                 return;
             }
 
-            const userId = req.user.userId;
+            const userId = (req.query.userId as string) || req.user.userId;
             const includeArchived = req.query.includeArchived === 'true';
 
             const result = await CoverPhotoService.getAllCovers(userId, includeArchived);

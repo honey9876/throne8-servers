@@ -209,15 +209,17 @@ class HeadlineService {
     static async getAllHeadlines(filters: {
         type?: string;
         status?: string;
+        userId?: string;
         page?: number;
         limit?: number;
     }): Promise<{ headlines: IHeadline[]; total: number }> {
-        const { type, status, page = 1, limit = 20 } = filters;
+        const { type, status, userId, page = 1, limit = 20 } = filters;
 
         const query: any = { 'flags.isDeleted': false };
 
         if (type) query.type = type;
         if (status) query.status = status;
+        if (userId) query['metadata.createdBy'] = userId;
 
         const skip = (page - 1) * limit;
 

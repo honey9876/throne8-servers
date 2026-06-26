@@ -89,7 +89,7 @@ router.post(
 );
 
 /**
- * @route   GET /api/v1/activity/posts
+ * @route   GET /api/v1/activity/get-all/posts
  * @desc    Get all posts of authenticated user
  * @access  Private
  */
@@ -98,6 +98,18 @@ router.get(
     AuthMiddleware.authenticate as any,
     rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
     PostController.getAllPosts as any
+);
+
+/**
+ * @route   GET /api/v1/activity/get-all/posts/user/:targetUserId
+ * @desc    Get public posts of any user by their userId (for profile viewing)
+ * @access  Private
+ */
+router.get(
+    '/get-all/posts/user/:targetUserId',
+    AuthMiddleware.authenticate as any,
+    rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
+    PostController.getPostsByUserId as any
 );
 
 /**

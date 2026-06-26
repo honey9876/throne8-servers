@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
 import sharp from 'sharp';
 import Constants from '@/shared/constants.util';
-import { Post, User, ProfilePhoto, Headline } from '@/shared/models/index.models';
+import { Post, User, ProfilePhoto, Headline, Connection } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
 import { IPostEntry } from '@/Profile/models/Post.model';
 import NotificationService from '@/notifications/services/notification.service';
@@ -543,7 +543,9 @@ class PostService {
             
             // Fetch Profile Photos and Headlines for the users
             const profilePhotos = await ProfilePhoto.find({ userId: { $in: userIds }, isActive: true }).lean();
-            const headlines = await Headline.find({ userId: { $in: userIds }, isDeleted: false }).lean();
+            // 4. Create a fast lookup map for the users
+            const headlineIds = users.map((u: any) => u.headlineId).filter(Boolean);
+            const headlines = await Headline.find({ headlineId: { $in: headlineIds }, 'flags.isDeleted': false }).lean();
             
             const photoMap = profilePhotos.reduce((acc: any, photo: any) => {
                 acc[photo.userId] = photo.cloudinarySecureUrl;
@@ -551,16 +553,34 @@ class PostService {
             }, {});
 
             const headlineMap = headlines.reduce((acc: any, hl: any) => {
-                acc[hl.userId] = hl.title || hl.headline;
+                acc[hl.headlineId] = hl.title || hl.message || hl.headline;
                 return acc;
             }, {});
 
-            // 4. Create a fast lookup map for the users
+            // 5. Fetch Connections for the current user and the post authors
+            let connectionMap: Record<string, string> = {};
+            if (Connection) {
+                const connections = await Connection.find({
+                    $or: [
+                        { fromUserId: currentUserId, toUserId: { $in: userIds } },
+                        { fromUserId: { $in: userIds }, toUserId: currentUserId }
+                    ]
+                }).lean();
+                
+                connectionMap = connections.reduce((acc: any, conn: any) => {
+                    const otherUserId = conn.fromUserId === currentUserId ? conn.toUserId : conn.fromUserId;
+                    acc[otherUserId] = conn.status;
+                    return acc;
+                }, {});
+            }
+
+            // 6. Create a fast lookup map for the users
             const userMap = users.reduce((acc: any, user: any) => {
                 acc[user.userId] = {
                     ...user,
                     profileImage: photoMap[user.userId],
-                    headline: headlineMap[user.userId]
+                    headline: headlineMap[user.headlineId],
+                    connectionStatus: connectionMap[user.userId] || 'none'
                 };
                 return acc;
             }, {});
@@ -596,9 +616,10 @@ class PostService {
                         documentPostId: doc.postId,
                         isLikedByCurrentUser: (p.likedBy || []).includes(currentUserId),
                         //added this to get the users name avatar and headline
-                        authorName: author.firstName ? `${author.firstName} ${author.lastName || ''}`.trim() : (author.username || 'Unknown User'),
-                        authorAvatar: author.profileImage || 'https://i.pravatar.cc/150?img=12',
-                        authorHeadline: author.headline || '' 
+                        authorName: author.firstName ? `${author.firstName} ${author.lastName || ''}`.trim() : (author.username || 'Throne8 User'),
+                        authorAvatar: author.profileImage || '',
+                        authorHeadline: author.headline || '',
+                        authorConnectionStatus: author.connectionStatus || 'none'
                     }));
                 allPosts.push(...entries);
             });

@@ -316,7 +316,8 @@ class AboutController {
                 return;
             }
 
-            const result = await AboutService.getAllAbout(req.user.userId);
+            const userId = (req.query.userId as string) || req.user.userId;
+            const result = await AboutService.getAllAbout(userId);
 
             ResponseUtil.success(res, result, 'About fetched successfully');
             return;

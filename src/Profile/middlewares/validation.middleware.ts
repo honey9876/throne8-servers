@@ -1014,10 +1014,8 @@ export const validateUpdatePost = (req: Request, res: Response, next: NextFuncti
 export const validateCreateComment = (req: Request, res: Response, next: NextFunction) => {
     const schema = Joi.object({
         postId: Joi.string()
-            .pattern(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
             .required()
             .messages({
-                'string.pattern.base': 'Invalid post ID format',
                 'any.required': 'Post ID is required',
             }),
         content: Joi.string()

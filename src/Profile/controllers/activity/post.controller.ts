@@ -215,6 +215,54 @@ class PostController {
     }
 
     /**
+     * ✅ GET POSTS BY USER ID (for visiting another user's profile)
+     * GET /api/v1/activity/get-all/posts/user/:targetUserId
+     */
+    static async getPostsByUserId(
+        req: Request<{ targetUserId: string }> & { user?: UserPayload },
+        res: Response
+    ): Promise<void> {
+        const correlationId = (req as any).correlationId || uuidv4();
+
+        try {
+            if (!req.user?.userId) {
+                ResponseUtil.unauthorized(res, 'Authentication required');
+                return;
+            }
+
+            const { targetUserId } = req.params;
+            const currentUserId = req.user.userId;
+
+            if (!targetUserId) {
+                ResponseUtil.badRequest(res, 'Target user ID is required');
+                return;
+            }
+
+            // Reuse the same service — pass targetUserId as the owner, currentUserId for like status
+            const result = await PostService.getAllPosts(targetUserId, false, currentUserId);
+
+            LoggerUtil.info('Posts fetched by userId', {
+                targetUserId,
+                requestedBy: currentUserId,
+                count: result.total,
+                correlationId,
+            });
+
+            ResponseUtil.success(res, result, 'Posts fetched successfully');
+            return;
+
+        } catch (error: any) {
+            LoggerUtil.error('Get posts by userId failed', {
+                error: error.message,
+                targetUserId: req.params.targetUserId,
+                correlationId,
+            });
+            ResponseUtil.internalError(res, error.message, error);
+            return;
+        }
+    }
+
+    /**
      * ✅ GET ALL POSTS FOR HOME FEED (sabhi users ke posts)
      * GET /api/v1/activity/posts/feed/all
      */

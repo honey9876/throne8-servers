@@ -216,11 +216,12 @@ class HeadlineController {
      */
     static async getAllHeadlines(req: Request, res: Response): Promise<void> {
         try {
-            const { type, status, page = '1', limit = '20' } = req.query;
+            const { type, status, userId, page = '1', limit = '20' } = req.query;
 
             const filters = {
                 type: type as string,
                 status: status as string,
+                userId: userId as string,
                 page: parseInt(page as string),
                 limit: parseInt(limit as string)
             };
