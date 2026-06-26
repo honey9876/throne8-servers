@@ -204,6 +204,13 @@ groupSchema.virtual('bannedUsersCount').get(function (this: any) {
   return (this.bannedUsers ?? []).length;
 });
 
+groupSchema.virtual('leader', {
+  ref: 'User',
+  localField: 'leaderId',
+  foreignField: 'userId',
+  justOne: true
+});
+
 const Group = mongoose.model<GroupDocument>('StudyGroup_Group', groupSchema);
 
 export default Group;

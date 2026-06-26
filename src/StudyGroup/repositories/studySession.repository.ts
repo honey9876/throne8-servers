@@ -21,6 +21,17 @@ export class StudySessionRepository extends BaseRepository<IStudySession> {
     }
   }
 
+  async cancelAllActive(userId: string): Promise<any> {
+    try {
+      return await this.model.updateMany(
+        { user: userId, status: { $in: [SessionStatus.ACTIVE, SessionStatus.PAUSED] } },
+        { $set: { status: SessionStatus.CANCELLED } }
+      ).exec();
+    } catch (error: any) {
+      throw new Error(`Error cancelling active sessions: ${error}`);
+    }
+  }
+
   // Specific status se active session
   async findByStatus(userId: string, status: SessionStatus): Promise<IStudySession | null> {
     try {
@@ -228,6 +239,66 @@ export class StudySessionRepository extends BaseRepository<IStudySession> {
     ]);
   }
 
+  async getStatsSummary(userId: string, dates: any): Promise<any> {
+    const { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd } = dates;
+    
+    const result = await this.model.aggregate([
+      { $match: { user: userId, status: SessionStatus.COMPLETED } },
+      {
+        $group: {
+          _id: null,
+          totalSessions: { $sum: 1 },
+          totalDuration: { $sum: '$duration' },
+          todayDuration: {
+            $sum: {
+              $cond: [
+                { $and: [{ $gte: ['$startTime', todayStart] }, { $lte: ['$startTime', todayEnd] }] },
+                '$duration',
+                0
+              ]
+            }
+          },
+          weekDuration: {
+            $sum: {
+              $cond: [
+                { $and: [{ $gte: ['$startTime', weekStart] }, { $lte: ['$startTime', weekEnd] }] },
+                '$duration',
+                0
+              ]
+            }
+          },
+          monthDuration: {
+            $sum: {
+              $cond: [
+                { $and: [{ $gte: ['$startTime', monthStart] }, { $lte: ['$startTime', monthEnd] }] },
+                '$duration',
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+    
+    if (!result || result.length === 0) {
+      return {
+        totalSessions: 0,
+        totalHours: 0,
+        todayHours: 0,
+        weekHours: 0,
+        monthHours: 0
+      };
+    }
+    
+    const stats = result[0];
+    return {
+      totalSessions: stats.totalSessions,
+      totalHours: parseFloat((stats.totalDuration / 3600).toFixed(2)),
+      todayHours: parseFloat((stats.todayDuration / 3600).toFixed(2)),
+      weekHours: parseFloat((stats.weekDuration / 3600).toFixed(2)),
+      monthHours: parseFloat((stats.monthDuration / 3600).toFixed(2))
+    };
+  }
 }
 
 export default new StudySessionRepository();
