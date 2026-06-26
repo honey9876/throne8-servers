@@ -799,9 +799,9 @@ class AuthService {
         try {
             LoggerUtil.info('Fetching user by ID', { userId, correlationId });
 
-            const uuidRegex =
-                /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-            if (!uuidRegex.test(userId)) {
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            const objectIdRegex = /^[0-9a-fA-F]{24}$/;
+            if (!uuidRegex.test(userId) && !objectIdRegex.test(userId)) {
                 throw new Error('Invalid user ID format');
             }
 
@@ -828,6 +828,18 @@ class AuthService {
             }
 
             const userResponse = this.buildProfileResponse(user);
+
+            try {
+                const activePhoto = await ProfilePhoto.findOne({ userId, isActive: true, isDeleted: false }).lean().exec();
+                if (activePhoto) {
+                    userResponse.profileImage = activePhoto.cloudinarySecureUrl;
+                }
+            } catch (err: any) {
+                LoggerUtil.warn('Failed to resolve profile photo URL in getUserById', {
+                    error: err.message,
+                    userId
+                });
+            }
 
             if (options.includeStats) {
                 const [activeSessions, activeDevices] = await Promise.all([

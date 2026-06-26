@@ -48,7 +48,13 @@ export class UserRepository {
      * Find user by userId (excludes sensitive fields)
      */
     static async findByUserId(userId: string): Promise<any | null> {
-        return User.findOne({ userId, 'flags.isDeleted': false })
+        const query: any = { 'flags.isDeleted': false };
+        if (/^[0-9a-fA-F]{24}$/.test(userId)) {
+            query.$or = [{ userId }, { _id: userId }];
+        } else {
+            query.userId = userId;
+        }
+        return User.findOne(query)
             .select('-passwordHash -passwordSalt -backupCodes -twoFactorSecret -__v')
             .lean()
             .exec();
@@ -58,7 +64,13 @@ export class UserRepository {
      * Find user by userId for profile (includes more fields)
      */
     static async findByUserIdForProfile(userId: string): Promise<any | null> {
-        return User.findOne({ userId })
+        const query: any = {};
+        if (/^[0-9a-fA-F]{24}$/.test(userId)) {
+            query.$or = [{ userId }, { _id: userId }];
+        } else {
+            query.userId = userId;
+        }
+        return User.findOne(query)
             .select('-passwordHash -passwordSalt -backupCodes -__v')
             .lean()
             .exec();
