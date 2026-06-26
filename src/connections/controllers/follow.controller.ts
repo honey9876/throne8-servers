@@ -404,17 +404,45 @@ class FollowController {
 
       const totalPages = Math.ceil(total / limit);
 
+      const followerIds = followers.map((f: any) => f.followerId);
+      
+      let usersMap: Record<string, any> = {};
+      try {
+        const User = require('@/auth/models/User.model').default;
+        const users = await User.find({ userId: { $in: followerIds }, 'flags.isDeleted': false })
+          .select('userId firstName lastName username profilePhotoId headline followersCount')
+          .lean();
+        
+        usersMap = users.reduce((acc: any, u: any) => {
+          acc[u.userId] = u;
+          return acc;
+        }, {});
+      } catch(err) {
+        logger.warn('Failed to populate user details in getFollowers', { error: err });
+      }
+
       const response = {
-        data: followers.map((f: any) => ({
-          _id: f._id.toString(),
-          followerId: f.followerId,
-          followingId: userId,
-          status: validatedQuery.status || 'active',
-          createdAt: f.createdAt,
-          updatedAt: f.createdAt,
-          notificationEnabled: true,
-          isBlocked: false
-        })),
+        data: followers.map((f: any) => {
+          const userObj = usersMap[f.followerId] || {};
+          return {
+            _id: f._id.toString(),
+            followerId: {
+               userId: f.followerId,
+               firstName: userObj.firstName,
+               lastName: userObj.lastName,
+               username: userObj.username,
+               headline: userObj.headline,
+               profileImage: userObj.profilePhotoId,
+               followersCount: userObj.followersCount || 0
+            },
+            followingId: userId,
+            status: validatedQuery.status || 'active',
+            createdAt: f.createdAt,
+            updatedAt: f.createdAt,
+            notificationEnabled: true,
+            isBlocked: false
+          };
+        }),
         pagination: {
           page,
           limit,
@@ -483,17 +511,46 @@ class FollowController {
 
       const totalPages = Math.ceil(total / limit);
 
+      // Fetch all corresponding users to populate the response
+      const followingIds = following.map((f: any) => f.followingId);
+      
+      let usersMap: Record<string, any> = {};
+      try {
+        const User = require('@/auth/models/User.model').default;
+        const users = await User.find({ userId: { $in: followingIds }, 'flags.isDeleted': false })
+          .select('userId firstName lastName username profilePhotoId headline followersCount')
+          .lean();
+        
+        usersMap = users.reduce((acc: any, u: any) => {
+          acc[u.userId] = u;
+          return acc;
+        }, {});
+      } catch(err) {
+        logger.warn('Failed to populate user details in getFollowing', { error: err });
+      }
+
       const response = {
-        data: following.map((f: any) => ({
-          _id: f._id.toString(),
-          followerId: userId,
-          followingId: f.followingId,
-          status: validatedQuery.status || 'active',
-          createdAt: f.createdAt,
-          updatedAt: f.createdAt,
-          notificationEnabled: true,
-          isBlocked: false
-        })),
+        data: following.map((f: any) => {
+          const userObj = usersMap[f.followingId] || {};
+          return {
+            _id: f._id.toString(),
+            followerId: userId,
+            followingId: {
+               userId: f.followingId,
+               firstName: userObj.firstName,
+               lastName: userObj.lastName,
+               username: userObj.username,
+               headline: userObj.headline,
+               profileImage: userObj.profilePhotoId, // frontend can also look at profilePhotoId
+               followersCount: userObj.followersCount || 0
+            },
+            status: validatedQuery.status || 'active',
+            createdAt: f.createdAt,
+            updatedAt: f.createdAt,
+            notificationEnabled: true,
+            isBlocked: false
+          };
+        }),
         pagination: {
           page,
           limit,
@@ -873,7 +930,7 @@ class FollowController {
    * Get list of companies a user is following
    * GET /api/v1/follow/user/:userId/companies
    */
-  async getUserFollowingCompanies(req: Request, res: Response, next: NextFunction): Promise<void> {
+   async getUserFollowingCompanies(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const authUserId = (req as any).user?.userId || (req as any).user?.id;
       const { userId } = req.params;
@@ -882,31 +939,54 @@ class FollowController {
         return next(new ErrorResponse('User not authenticated', HttpStatus.UNAUTHORIZED, ERROR_CODES.AUTH_FAILED));
       }
 
-      // Sirf apni list dekh sakta hai (ya admin)
-      if (userId !== authUserId && (req as any).user?.role !== 'admin') {
-        return next(new ErrorResponse('You can only view your own following list', HttpStatus.FORBIDDEN, ERROR_CODES.FORBIDDEN));
-      }
-
       const page = parseInt(req.query.page as string) || 1;
       const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
       const skip = (page - 1) * limit;
 
       const [following, total] = await Promise.all([
         Follower.find({ follower: userId, isActive: true })
-          .select('following followedAt notificationPreferences')
           .sort({ followedAt: -1 })
           .skip(skip)
           .limit(limit)
-          // .populate('following', 'companyId companyName companySlug media.logo industry stats.followersCount')
           .lean(),
         Follower.countDocuments({ follower: userId, isActive: true })
       ]);
+
+      const companyIds = following.map((f: any) => f.following);
+      let companiesMap: Record<string, any> = {};
+      try {
+        const Company = require('@/company/models').Company;
+        if (Company) {
+            const companies = await Company.find({ companyId: { $in: companyIds } })
+              .select('companyId companyName media industry stats')
+              .lean();
+            
+            companiesMap = companies.reduce((acc: any, c: any) => {
+              acc[c.companyId] = c;
+              return acc;
+            }, {});
+        }
+      } catch(err) {
+         logger.warn('Failed to populate companies in getUserFollowingCompanies', { error: err });
+      }
+
+      const responseData = following.map((f: any) => {
+         const c = companiesMap[f.following] || {};
+         return {
+            ...f,
+            companyId: f.following,
+            companyName: c.companyName,
+            logo: c.media?.logo,
+            industry: c.industry,
+            followersCount: c.stats?.followersCount || 0
+         };
+      });
 
       const totalPages = Math.ceil(total / limit);
 
       res.status(HttpStatus.OK).json(
         SuccessResponse({
-          data: following,
+          data: responseData,
           pagination: { page, limit, total, totalPages, hasNext: page < totalPages, hasPrev: page > 1 }
         }, 'User following companies retrieved successfully')
       );
