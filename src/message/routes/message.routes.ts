@@ -7,7 +7,7 @@
  *   app.use('/api/v1/messaging', messageRoutes);
  */
 
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import messageController from '../controllers/message.controller';
 import {
     sendMessageValidator,
@@ -19,6 +19,9 @@ import {
     markSeenValidator,
 } from '../validations/message.validator';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
+import { uploadSingle } from '@/shared/upload/upload';
+import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
+import { AuthRequest } from '@/Mentorship/interface/express';
 
 console.log('🔍 message.routes.ts LOADING START');
 
@@ -53,6 +56,46 @@ router.patch(
     '/conversations/:conversationId/seen',
     markSeenValidator,
     messageController.markSeen.bind(messageController) as any
+);
+
+/**
+ * POST /upload
+ * Upload a media file for use in a message
+ * Form-data: file (image, video, pdf, doc)
+ */
+router.post(
+    '/upload',
+    uploadSingle('file'),
+    async (req: AuthRequest, res: Response) => {
+        try {
+            if (!req.file) {
+                return res.status(400).json({ success: false, message: 'No file uploaded' });
+            }
+            const result = await new Promise<any>((resolve, reject) => {
+                const stream = cloudinary.uploader.upload_stream(
+                    { folder: 'message-media', resource_type: 'auto' },
+                    (error, result) => {
+                        if (error) reject(error);
+                        else resolve(result);
+                    }
+                );
+                stream.end(req.file!.buffer);
+            });
+            return res.status(200).json({
+                success: true,
+                data: {
+                    mediaUrl: result.secure_url,
+                    publicId: result.public_id,
+                    resourceType: result.resource_type,
+                    format: result.format,
+                    width: result.width,
+                    height: result.height,
+                },
+            });
+        } catch (err: any) {
+            return res.status(500).json({ success: false, message: err.message });
+        }
+    }
 );
 
 // ── MESSAGES ─────────────────────────────────────────────────────────────────

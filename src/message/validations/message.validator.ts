@@ -32,6 +32,8 @@ export const sendMessageValidator = [
     body('text')
         .if(body('type').not().equals(MessageType.VOICE))
         .if(body('type').not().equals(MessageType.IMAGE))
+        .if(body('type').not().equals(MessageType.VIDEO))
+        .if(body('type').not().equals(MessageType.DOCUMENT))
         .notEmpty()
         .withMessage('text is required for text messages')
         .isLength({ max: 4000 })

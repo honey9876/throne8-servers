@@ -15,6 +15,8 @@ export enum MessageType {
     TEXT = 'text',
     VOICE = 'voice',
     IMAGE = 'image',
+    VIDEO = 'video',
+    DOCUMENT = 'document',
     REMINDER = 'system_reminder',
     SYSTEM = 'system',
 }

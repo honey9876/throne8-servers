@@ -25,6 +25,8 @@ import {
 // import { getIO } from '../../socket';   // your existing Socket.IO singleton
 import { LoggerUtil as logger } from '../../shared/logger.util';
 import { conversationRepo, messageRepo } from '../repository/messaging.repository';
+import User from '../../auth/models/User.model';
+import ProfilePhoto from '../../Profile/models/ProfilePhoto.model';
 
 // ==================== HELPERS ====================
 
@@ -303,16 +305,55 @@ class MessageService {
 
     // ── 6. GET CONVERSATION LIST ────────────────────────────────────────────────
 
-    async getConversations(userId: string): Promise<ConversationResponse[]> {
+    async getConversations(userId: string): Promise<any[]> {
         const conversations = await conversationRepo.findByUserId(userId);
+
+        // Collect all unique member UUIDs
+        const userIdsToFetch = new Set<string>();
+        conversations.forEach(conv => conv.members.forEach(m => userIdsToFetch.add(m)));
+
+        // Fetch user profiles
+        const users = await User.find({ userId: { $in: Array.from(userIdsToFetch) } })
+            .select('userId firstName lastName username profilePhotoId headline')
+            .lean();
+
+        // Map users by their UUID for quick lookup
+        const userMap = new Map();
+        users.forEach((u: any) => userMap.set(u.userId, u));
+
+        const photoIds = users.map((u: any) => u.profilePhotoId).filter(Boolean);
+        let photoMap = new Map();
+        if (photoIds.length > 0) {
+            const photos = await ProfilePhoto.find({ photoId: { $in: photoIds } }).lean();
+            photos.forEach((p: any) => photoMap.set(p.photoId, p.cloudinarySecureUrl));
+        }
 
         return conversations.map((conv) => {
             const unreadCount = (conv.unreadCounts as Map<string, number>)?.get?.(userId) ?? 0;
 
+            // Map raw UUIDs to rich user objects
+            const populatedMembers = conv.members.map(memberId => {
+                const u = userMap.get(memberId);
+                if (!u) return { userId: memberId };
+                return {
+                    userId: u.userId,
+                    id: u.userId,
+                    _id: u._id,
+                    firstName: u.firstName,
+                    lastName: u.lastName,
+                    name: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.username,
+                    username: u.username,
+                    profileImage: u.profilePhotoId ? photoMap.get(u.profilePhotoId) : null,
+                    avatar: u.profilePhotoId ? photoMap.get(u.profilePhotoId) : null,
+                    headline: u.headline,
+                };
+            });
+
             return {
                 conversationId: conv.conversationId,
                 type: conv.type,
-                members: conv.members,
+                members: populatedMembers,
+                participants: populatedMembers.map(user => ({ user })), // Wrapper to support varying frontend expects
                 lastMessage: conv.lastMessage
                     ? {
                         messageId: conv.lastMessage.messageId,
@@ -336,7 +377,7 @@ class MessageService {
     async getOrCreateDirectConversation(
         userIdA: string,
         userIdB: string
-    ): Promise<ConversationResponse> {
+    ): Promise<any> {
         if (userIdA === userIdB) {
             throw Object.assign(new Error('Cannot create conversation with yourself'), { status: 400 });
         }
@@ -344,10 +385,43 @@ class MessageService {
         const conv = await conversationRepo.getOrCreateDirect(userIdA, userIdB);
         const unreadCount = (conv.unreadCounts as Map<string, number>)?.get?.(userIdA) ?? 0;
 
+        // Fetch user profiles for the members
+        const users = await User.find({ userId: { $in: conv.members } })
+            .select('userId firstName lastName username profilePhotoId headline')
+            .lean();
+
+        const userMap = new Map();
+        users.forEach((u: any) => userMap.set(u.userId, u));
+
+        const photoIds = users.map((u: any) => u.profilePhotoId).filter(Boolean);
+        let photoMap = new Map();
+        if (photoIds.length > 0) {
+            const photos = await ProfilePhoto.find({ photoId: { $in: photoIds } }).lean();
+            photos.forEach((p: any) => photoMap.set(p.photoId, p.cloudinarySecureUrl));
+        }
+
+        const populatedMembers = conv.members.map(memberId => {
+            const u = userMap.get(memberId);
+            if (!u) return { userId: memberId };
+            return {
+                userId: u.userId,
+                id: u.userId,
+                _id: u._id,
+                firstName: u.firstName,
+                lastName: u.lastName,
+                name: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.username,
+                username: u.username,
+                profileImage: u.profilePhotoId ? photoMap.get(u.profilePhotoId) : null,
+                avatar: u.profilePhotoId ? photoMap.get(u.profilePhotoId) : null,
+                headline: u.headline,
+            };
+        });
+
         return {
             conversationId: conv.conversationId,
             type: conv.type,
-            members: conv.members,
+            members: populatedMembers,
+            participants: populatedMembers.map(user => ({ user })),
             unreadCount,
             isActive: conv.isActive,
             createdAt: new Date(conv.createdAt).toISOString(),
