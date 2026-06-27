@@ -71,12 +71,33 @@ router.post(
             if (!req.file) {
                 return res.status(400).json({ success: false, message: 'No file uploaded' });
             }
-            const isDocument = req.file.mimetype.startsWith('application/') || req.file.mimetype.startsWith('text/');
-            const rType = isDocument ? 'raw' : 'auto';
+            // Try to extract extension safely
+            const origName = req.file.originalname || '';
+            const extension = origName.includes('.') ? origName.split('.').pop()?.toLowerCase() : null;
             
+            // Hardcode common document types to ALWAYS be raw
+            const isDocExt = extension && ['pdf', 'doc', 'docx', 'txt', 'rtf', 'csv', 'xls', 'xlsx', 'ppt', 'pptx', 'zip'].includes(extension);
+            const isDocMime = req.file.mimetype.startsWith('application/') || req.file.mimetype.startsWith('text/');
+            
+            const rType = (isDocExt || isDocMime) ? 'raw' : 'auto';
+            
+            const options: any = { 
+                folder: 'message-media', 
+                resource_type: rType 
+            };
+            
+            // For raw documents (like PDFs, DOCX), Cloudinary needs the extension 
+            // to serve the file correctly on downloads. The 'format' option does not 
+            // work for raw buffers, the extension must be part of the public_id.
+            if (rType === 'raw') {
+                const extToUse = extension || 'pdf'; // Fallback to pdf if completely missing
+                const uniqueId = Date.now().toString() + '-' + Math.round(Math.random() * 1e5).toString();
+                options.public_id = `${uniqueId}.${extToUse}`;
+            }
+
             const result = await new Promise<any>((resolve, reject) => {
                 const stream = cloudinary.uploader.upload_stream(
-                    { folder: 'message-media', resource_type: rType },
+                    options,
                     (error, result) => {
                         if (error) reject(error);
                         else resolve(result);
