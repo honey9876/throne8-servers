@@ -148,8 +148,8 @@ class AuditProducer {
     await CacheUtil.lpush(AUDIT_FALLBACK_KEY, serialized);
 
     // Keep fallback list bounded (max 1000 entries)
-    const client = CacheUtil.getClient();
     if (CacheUtil.isConnected()) {
+      const client = CacheUtil.getClient();
       await client.lTrim(
         `${process.env['REDIS_KEY_PREFIX'] || 'auth:'}${AUDIT_FALLBACK_KEY}`,
         0,
