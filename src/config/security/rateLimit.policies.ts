@@ -12,63 +12,66 @@ interface RateLimitPolicy {
 }
 
 const ONE_MINUTE = 60 * 1000;
+const FIVE_MINUTES = 5 * 60 * 1000;
 
 const rateLimitPolicies: Record<string, RateLimitPolicy> = {
 
-    // ── Auth endpoints (req.path values) ──────────────────────────
+    // ── Auth endpoints ─────────────────────────────────────────────
 
     '/register': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 10,
         redisPrefix: 'rl:register',
         message: 'Too many registration attempts. Try again in 1 minute.',
     },
 
     '/login': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 10,
         redisPrefix: 'rl:login',
         message: 'Too many login attempts. Try again in 1 minute.',
     },
 
     '/refresh-token': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 30,
         redisPrefix: 'rl:refresh',
         message: 'Too many token refresh requests. Try again in 1 minute.',
     },
 
     '/logout': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 20,
         redisPrefix: 'rl:logout',
         message: 'Too many logout requests. Try again in 1 minute.',
     },
 
     '/logout-all': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 10,
         redisPrefix: 'rl:logout-all',
         message: 'Too many logout-all requests. Try again in 1 minute.',
     },
 
+    // ── Profile / read-heavy endpoints ─────────────────────────────
+
     '/profile': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 120,
         redisPrefix: 'rl:profile',
         message: 'Too many profile requests. Try again in 1 minute.',
     },
 
     '/update-profile': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 20,
         redisPrefix: 'rl:update-profile',
         message: 'Too many update requests. Try again in 1 minute.',
     },
 
     '/users': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 120,
         redisPrefix: 'rl:users',
         message: 'Too many requests. Try again in 1 minute.',
     },
@@ -81,10 +84,11 @@ const rateLimitPolicies: Record<string, RateLimitPolicy> = {
     },
 
     // ── Global fallback ────────────────────────────────────────────
+    // Raised to 120/min — enough for normal app navigation + feed refreshes
 
     '*': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 120,
         redisPrefix: 'rl:global',
         message: 'Too many requests. Try again in 1 minute.',
     },
