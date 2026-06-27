@@ -656,7 +656,7 @@ class PostService {
         try {
             LoggerUtil.info('Fetching post by entryId', { entryId, userId, correlationId });
 
-            const doc = await Post.findOne({ userId });
+            const doc = await Post.findOne({ 'posts.entryId': entryId });
             if (!doc) throw new Error('Post not found');
 
             const entry = doc.posts.find(
@@ -672,12 +672,47 @@ class PostService {
                 }
             }
 
+            // Fetch author user details
+            const authorUser = await User.findOne({ userId: doc.userId })
+                .select('userId username firstName lastName profilePhotoId headlineId')
+                .lean();
+            let authorName = 'Throne8 User';
+            let authorAvatar = '';
+            let authorHeadline = '';
+
+            if (authorUser) {
+                authorName = authorUser.firstName
+                    ? `${authorUser.firstName} ${authorUser.lastName || ''}`.trim()
+                    : (authorUser.username || 'Throne8 User');
+                
+                const photo = await ProfilePhoto.findOne({ userId: doc.userId, isActive: true }).lean();
+                if (photo) {
+                    authorAvatar = photo.cloudinarySecureUrl;
+                }
+
+                if (authorUser.headlineId) {
+                    const headline = await Headline.findOne({
+                        headlineId: authorUser.headlineId,
+                        'flags.isDeleted': false,
+                    }).lean();
+                    if (headline) {
+                        authorHeadline = headline.title || headline.message || headline.headline || '';
+                    }
+                }
+            }
+
             LoggerUtil.info('Post fetched successfully', { entryId, userId, correlationId });
 
+            const entryObj = (entry as any).toObject ? (entry as any).toObject() : entry;
+
             return {
-                ...(entry as any).toObject ? (entry as any).toObject() : entry,
-                userId,
+                ...entryObj,
+                userId: doc.userId,
                 documentPostId: doc.postId,
+                isLikedByCurrentUser: (entryObj.likedBy || []).includes(userId),
+                authorName,
+                authorAvatar,
+                authorHeadline,
             };
 
         } catch (error: any) {
