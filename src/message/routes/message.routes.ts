@@ -71,9 +71,12 @@ router.post(
             if (!req.file) {
                 return res.status(400).json({ success: false, message: 'No file uploaded' });
             }
+            const isDocument = req.file.mimetype.startsWith('application/') || req.file.mimetype.startsWith('text/');
+            const rType = isDocument ? 'raw' : 'auto';
+            
             const result = await new Promise<any>((resolve, reject) => {
                 const stream = cloudinary.uploader.upload_stream(
-                    { folder: 'message-media', resource_type: 'auto' },
+                    { folder: 'message-media', resource_type: rType },
                     (error, result) => {
                         if (error) reject(error);
                         else resolve(result);
