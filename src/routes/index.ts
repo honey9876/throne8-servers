@@ -18,7 +18,7 @@ import profileRoutes from '@/Profile/routers/index';
 import connectionRouter from '@/connections/routes/index';
 
 // Uncomment and add routers here as modules are completed:
-// import jobRoutes        from '@/Job-Service/routers';
+import jobRoutes        from '@/Job-Service/routers';
 // import mentorRoutes     from '@/Mentorship/routers';
 // import studyGroupRoutes from '@/StudyGroup/routers';
 
@@ -111,7 +111,7 @@ router.use('/profile', profileRoutes);
 router.use('/connections', connectionRouter);
 
 // Uncomment as each module is ready:
-// router.use('/jobs',       jobRoutes);
+router.use('/',       jobRoutes);
 // router.use('/mentorship', mentorRoutes);
 // router.use('/study',      studyGroupRoutes);
 
