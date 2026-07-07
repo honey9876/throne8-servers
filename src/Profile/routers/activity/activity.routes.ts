@@ -398,6 +398,18 @@ router.delete(
     CommentController.unlikeComment as any
 );
 
+/**
+ * @route   POST /api/v1/activity/comments/:commentId/react
+ * @desc    React to a comment with an emoji
+ * @access  Private
+ */
+router.post(
+    '/comments/:commentId/react',
+    AuthMiddleware.authenticate as any,
+    rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
+    CommentController.reactComment as any
+);
+
 // ==================== MEDIA ROUTES ====================
 
 /**

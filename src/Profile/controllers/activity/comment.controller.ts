@@ -720,6 +720,52 @@ class CommentController {
             return;
         }
     }
+
+    /**
+     * ✅ ADD REACTION TO COMMENT
+     * POST /api/v1/activity/comments/:commentId/react
+     */
+    static async reactComment(
+        req: Request<{ commentId: string }, any, { reactionType: 'like' | 'celebrate' | 'support' | 'love' | 'insightful' | 'funny' }> & { user?: UserPayload },
+        res: Response
+    ): Promise<void> {
+        const correlationId = (req as any).correlationId || uuidv4();
+
+        try {
+            if (!req.user?.userId) {
+                ResponseUtil.unauthorized(res, 'Authentication required');
+                return;
+            }
+
+            const userId = req.user.userId;
+            const { commentId } = req.params;
+            const { reactionType } = req.body;
+
+            if (!reactionType) {
+                ResponseUtil.badRequest(res, 'reactionType is required');
+                return;
+            }
+
+            const result = await CommentService.addReaction(commentId, userId, reactionType);
+
+            ResponseUtil.success(res, result, `Comment reacted with ${reactionType} successfully`);
+            return;
+
+        } catch (error: any) {
+            LoggerUtil.error('React comment failed', {
+                error: error.message,
+                correlationId,
+            });
+
+            if (error.message === 'Comment not found') {
+                ResponseUtil.notFound(res, 'Comment not found');
+                return;
+            }
+
+            ResponseUtil.internalError(res, error.message, error);
+            return;
+        }
+    }
 }
 
 export default CommentController;
