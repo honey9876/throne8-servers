@@ -84,7 +84,6 @@ router.get('/health', (_req, res) => {
 });
 
 
-router.use('/jobs', jobRouter);
 router.use('/jobs/applications', applicationRouter);
 router.use('/jobs/analysis', analysisRouter);
 router.use('/jobs/search', searchRouter);
@@ -99,6 +98,10 @@ router.use('/jobs/premium',  premiumRouter);
 router.use('/jobs/premiumExtended',  premiumExtendedRouter);
 router.use('/jobs/premiumSearch',  premiumJobSearchRouter);
 router.use('/jobs/premium/professionalDevelopment',  premiumProfessionalDevelopmentRouter);
+
+// Mount the generic /jobs router last since it contains wildcards like /:jobId
+// that could intercept requests meant for the specific routers above.
+router.use('/jobs', jobRouter);
 
 
 export default router;
