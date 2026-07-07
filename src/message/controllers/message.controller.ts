@@ -146,6 +146,49 @@ class MessageController {
     }
 
     /**
+     * DELETE /conversations/:conversationId
+     * Delete a conversation for the user
+     */
+    async deleteConversation(req: AuthRequest, res: Response) {
+        try {
+            await messageService.deleteConversation(userId(req), req.params.conversationId);
+            return ResponseUtil.success(res, null, 'Conversation deleted');
+        } catch (err: any) {
+            return ResponseUtil.error(res, err.message, err.status || 500);
+        }
+    }
+
+    /**
+     * PATCH /conversations/:conversationId/unread
+     * Mark a conversation as unread for the current user
+     */
+    async markUnread(req: AuthRequest, res: Response) {
+        try {
+            await messageService.markConversationUnread(
+                req.params.conversationId,
+                userId(req)
+            );
+            return ResponseUtil.success(res, null, 'Marked as unread');
+        } catch (err: any) {
+            return ResponseUtil.error(res, err.message, err.status || 500);
+        }
+    }
+
+    /**
+     * PATCH /conversations/:conversationId/archive
+     * Archive or unarchive a conversation
+     */
+    async archiveConversation(req: AuthRequest, res: Response) {
+        try {
+            const archive = req.body.archive ?? true; // Default to true if not specified
+            await messageService.toggleArchive(userId(req), req.params.conversationId, archive);
+            return ResponseUtil.success(res, null, `Conversation ${archive ? 'archived' : 'unarchived'}`);
+        } catch (err: any) {
+            return ResponseUtil.error(res, err.message, err.status || 500);
+        }
+    }
+
+    /**
      * GET /conversations/:conversationId/messages/pinned
      * Get all pinned messages
      */

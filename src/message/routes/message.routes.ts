@@ -59,6 +59,33 @@ router.patch(
 );
 
 /**
+ * DELETE /conversations/:conversationId
+ * Delete a conversation (soft delete for the current user)
+ */
+router.delete(
+    '/conversations/:conversationId',
+    messageController.deleteConversation.bind(messageController) as any
+);
+
+/**
+ * PATCH /conversations/:conversationId/unread
+ * Mark a conversation as unread manually
+ */
+router.patch(
+    '/conversations/:conversationId/unread',
+    messageController.markUnread.bind(messageController) as any
+);
+
+/**
+ * PATCH /conversations/:conversationId/archive
+ * Archive or unarchive a conversation
+ */
+router.patch(
+    '/conversations/:conversationId/archive',
+    messageController.archiveConversation.bind(messageController) as any
+);
+
+/**
  * POST /upload
  * Upload a media file for use in a message
  * Form-data: file (image, video, pdf, doc)

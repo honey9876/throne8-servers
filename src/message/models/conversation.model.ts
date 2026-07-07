@@ -88,6 +88,11 @@ const ConversationSchema = new Schema<IConversation>(
             default: [],
         },
 
+        archivedBy: {
+            type: [String],   // UUIDs
+            default: [],
+        },
+
         isActive: {
             type: Boolean,
             default: true,

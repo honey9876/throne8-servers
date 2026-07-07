@@ -65,6 +65,7 @@ export class ConversationRepository {
                 unreadCounts: 1,
                 groupName: 1,
                 groupAvatar: 1,
+                archivedBy: 1,
                 isActive: 1,
                 createdAt: 1,
                 updatedAt: 1,
@@ -118,6 +119,19 @@ export class ConversationRepository {
     }
 
     /**
+     * Set unread count to 1 for a specific user (mark as unread)
+     */
+    async markUnread(
+        conversationObjectId: Types.ObjectId,
+        userId: string
+    ): Promise<void> {
+        await Conversation.updateOne(
+            { _id: conversationObjectId },
+            { $set: { [`unreadCounts.${userId}`]: 1 } }
+        );
+    }
+
+    /**
      * Update lastMessage snapshot after a new message is saved
      */
     async updateLastMessage(
@@ -150,6 +164,32 @@ export class ConversationRepository {
             { _id: 1 }
         ).lean();
         return !!conv;
+    }
+
+    /**
+     * Soft delete a conversation (set isActive to false)
+     */
+    async softDelete(conversationId: string, userId: string): Promise<boolean> {
+        const result = await Conversation.updateOne(
+            { conversationId, members: userId },
+            { $set: { isActive: false, updatedAt: new Date() } }
+        );
+        return result.modifiedCount > 0;
+    }
+
+    /**
+     * Toggle archive status for a specific user
+     */
+    async toggleArchive(conversationId: string, userId: string, archive: boolean): Promise<boolean> {
+        const update = archive 
+            ? { $addToSet: { archivedBy: userId } }
+            : { $pull: { archivedBy: userId } };
+        
+        const result = await Conversation.updateOne(
+            { conversationId, members: userId },
+            update as any
+        );
+        return result.modifiedCount > 0;
     }
 }
 

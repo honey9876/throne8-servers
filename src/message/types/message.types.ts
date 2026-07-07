@@ -119,6 +119,7 @@ export interface IConversation extends Document {
     groupAvatar?: string;
     groupDescription?: string;
     adminIds?: string[];      // UUIDs
+    archivedBy?: string[];    // UUIDs of users who archived this
 
     isActive: boolean;
     createdAt: Date;

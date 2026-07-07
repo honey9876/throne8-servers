@@ -263,6 +263,22 @@ class MessageService {
         }
     }
 
+    /**
+     * Set a conversation to unread manually
+     */
+    async markConversationUnread(
+        conversationId: string,
+        readerUserId: string
+    ): Promise<void> {
+        const conversationObjectId = await conversationRepo.resolveObjectId(conversationId);
+        if (!conversationObjectId) return;
+
+        const isMember = await conversationRepo.isMember(conversationObjectId, readerUserId);
+        if (!isMember) return;
+
+        await conversationRepo.markUnread(conversationObjectId, readerUserId);
+    }
+
     // ── 5. SEARCH MESSAGES ──────────────────────────────────────────────────────
 
     async searchMessages(
@@ -367,6 +383,7 @@ class MessageService {
                 groupName: conv.groupName,
                 groupAvatar: conv.groupAvatar,
                 isActive: conv.isActive,
+                isArchived: conv.archivedBy?.includes(userId) || false,
                 createdAt: new Date(conv.createdAt).toISOString(),
             };
         });
@@ -428,7 +445,25 @@ class MessageService {
         };
     }
 
-    // ── 8. REACTIONS ────────────────────────────────────────────────────────────
+    // ── 8. DELETE CONVERSATION ──────────────────────────────────────────────────
+
+    async deleteConversation(userId: string, conversationId: string): Promise<void> {
+        const success = await conversationRepo.softDelete(conversationId, userId);
+        if (!success) {
+            throw Object.assign(new Error('Conversation not found or access denied'), { status: 404 });
+        }
+    }
+
+    // ── 9. ARCHIVE CONVERSATION ─────────────────────────────────────────────────
+
+    async toggleArchive(userId: string, conversationId: string, archive: boolean): Promise<void> {
+        const success = await conversationRepo.toggleArchive(conversationId, userId, archive);
+        if (!success) {
+            throw Object.assign(new Error('Conversation not found or access denied'), { status: 404 });
+        }
+    }
+
+    // ── 10. REACTIONS ────────────────────────────────────────────────────────────
 
     async toggleReaction(
         userId: string,
