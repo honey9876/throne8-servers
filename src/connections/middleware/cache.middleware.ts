@@ -9,12 +9,22 @@ interface CacheOptions {
   skipCache?: (req: Request) => boolean;
 }
 
+/* OLD:
 const redis = new Redis({
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
   // retryDelayOnFailover: 100,
   // maxRetriesPerRequest: 3,
 });
+*/
+const redis = process.env.REDIS_URL 
+  ? new Redis(process.env.REDIS_URL) 
+  : new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      // retryDelayOnFailover: 100,
+      // maxRetriesPerRequest: 3,
+    });
 
 export const cacheMiddleware = (options: CacheOptions) => {
   return async (req: Request, res: Response, next: NextFunction) => {

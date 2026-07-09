@@ -172,7 +172,13 @@ class RedisService {
                 this.cluster = new Redis.Cluster(nodes, options);
             } else {
                 const redisUrl = process.env.REDIS_URL || `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}/${process.env.REDIS_DB || 0}`;
-                this.cluster = new Redis(redisUrl, options.redisOptions);
+                // OLD: this.cluster = new Redis(redisUrl, options.redisOptions);
+                const singleNodeOptions = { ...options.redisOptions };
+                if (process.env.REDIS_URL) {
+                    delete singleNodeOptions.password;
+                    delete singleNodeOptions.username;
+                }
+                this.cluster = new Redis(redisUrl, singleNodeOptions);
             }
 
             // ==================== EVENT HANDLERS ====================

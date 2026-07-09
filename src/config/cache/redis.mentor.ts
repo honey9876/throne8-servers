@@ -26,6 +26,7 @@ export const initRedis = (): Redis => {
 
     // Create connection pool for high concurrency
     for (let i = 0; i < POOL_SIZE; i++) {
+      /* OLD:
       const client = new Redis({
         host: config.REDIS_HOST,
         port: config.REDIS_PORT || 6379,
@@ -48,6 +49,46 @@ export const initRedis = (): Redis => {
           return false;
         },
       });
+      */
+      const options: any = {
+        db: config.REDIS_DB || 0,
+        connectTimeout: 10000,
+        maxRetriesPerRequest: 3,
+        enableReadyCheck: true,
+        lazyConnect: false,
+        retryStrategy: (times: number) => {
+          const delay = Math.min(times * 50, 2000);
+          logger.warn(`Redis retry attempt ${times}, waiting ${delay}ms`);
+          return delay;
+        },
+        reconnectOnError: (err: any) => {
+          const targetError = 'READONLY';
+          if (err.message.includes(targetError)) {
+            return true;
+          }
+          return false;
+        },
+      };
+
+      let client;
+      if (process.env.REDIS_URL) {
+        client = new Redis(process.env.REDIS_URL, {
+          db: options.db,
+          connectTimeout: options.connectTimeout,
+          maxRetriesPerRequest: options.maxRetriesPerRequest,
+          enableReadyCheck: options.enableReadyCheck,
+          lazyConnect: options.lazyConnect,
+          retryStrategy: options.retryStrategy,
+          reconnectOnError: options.reconnectOnError,
+        });
+      } else {
+        client = new Redis({
+          ...options,
+          host: config.REDIS_HOST,
+          port: config.REDIS_PORT || 6379,
+          password: config.REDIS_PASSWORD,
+        });
+      }
 
       // Setup event handlers
       if (i === 0) {

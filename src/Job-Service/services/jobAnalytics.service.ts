@@ -25,6 +25,7 @@ export class JobAnalyticsService {
   };
 
   constructor() {
+    /* OLD:
     this.redis = new Redis({
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379'),
@@ -36,6 +37,34 @@ export class JobAnalyticsService {
       enableReadyCheck: true,
       lazyConnect: true,
     });
+    */
+    const options: any = {
+      db: 1, // analytics DB
+      retryStrategy: (times: number) => Math.min(times * 100, 2000),
+      maxRetriesPerRequest: 5,
+      commandTimeout: 5000,
+      enableReadyCheck: true,
+      lazyConnect: true,
+    };
+
+    if (process.env.REDIS_URL) {
+      // Create with URL and without the password field in options to prevent override
+      this.redis = new Redis(process.env.REDIS_URL, {
+        db: options.db,
+        retryStrategy: options.retryStrategy,
+        maxRetriesPerRequest: options.maxRetriesPerRequest,
+        commandTimeout: options.commandTimeout,
+        enableReadyCheck: options.enableReadyCheck,
+        lazyConnect: options.lazyConnect,
+      });
+    } else {
+      this.redis = new Redis({
+        ...options,
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379'),
+        password: process.env.REDIS_PASSWORD,
+      });
+    }
 
     this.redis.on('error', (err) => logger.error('Redis client error', { error: err }));
     this.redis.on('connect', () => logger.info('Redis analytics client connected'));
