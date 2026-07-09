@@ -43,7 +43,8 @@ interface ExtendedRedisHealth {
 // ==================== REDIS SERVICE (PRODUCTION-GRADE) ====================
 class RedisService {
     [x: string]: any;
-    private cluster: Cluster | null = null;
+    private cluster: any = null;
+    private isClusterMode: boolean = process.env.REDIS_CLUSTER_MODE === 'true';
     private isConnecting = false;
     public connected = false;
     private reconnectAttempts = 0;
@@ -159,15 +160,20 @@ class RedisService {
         try {
             const { nodes, options } = redisConfig.getConfig();
 
-            logger.info('🔴 [REDIS] Initializing cluster connection', {
-                nodes: nodes.map(n => typeof n === 'string' ? n : typeof n === 'object' ? `${n.host}:${n.port}` : n),
+            logger.info(`🔴 [REDIS] Initializing ${this.isClusterMode ? 'cluster' : 'single node'} connection`, {
+                nodes: this.isClusterMode ? nodes.map(n => typeof n === 'string' ? n : typeof n === 'object' ? `${n.host}:${n.port}` : n) : [process.env.REDIS_URL || process.env.REDIS_HOST],
                 environment: process.env.NODE_ENV,
                 pid: process.pid,
                 targetCapacity: '500K+ users',
                 timestamp: new Date().toISOString()
             });
 
-            this.cluster = new Redis.Cluster(nodes, options);
+            if (this.isClusterMode) {
+                this.cluster = new Redis.Cluster(nodes, options);
+            } else {
+                const redisUrl = process.env.REDIS_URL || `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}/${process.env.REDIS_DB || 0}`;
+                this.cluster = new Redis(redisUrl, options.redisOptions);
+            }
 
             // ==================== EVENT HANDLERS ====================
 
@@ -175,10 +181,10 @@ class RedisService {
                 this.connected = true;
                 this.reconnectAttempts = 0;
 
-                const masterNodes = this.cluster!.nodes('master');
-                const slaveNodes = this.cluster!.nodes('slave');
+                const masterNodes = this.isClusterMode ? this.cluster!.nodes('master') : [this.cluster];
+                const slaveNodes = this.isClusterMode ? this.cluster!.nodes('slave') : [];
 
-                logger.info('✅ [REDIS] Cluster ready and operational', {
+                logger.info(`✅ [REDIS] ${this.isClusterMode ? 'Cluster' : 'Single Node'} ready and operational`, {
                     status: 'CONNECTED',
                     masterNodes: masterNodes.length,
                     slaveNodes: slaveNodes.length,
@@ -189,9 +195,11 @@ class RedisService {
                 });
 
                 // Log node details
-                masterNodes.forEach((node, index) => {
-                    logger.info(`   📍 Master Node ${index + 1}: ${node.options.host}:${node.options.port}`);
-                });
+                if (this.isClusterMode) {
+                    masterNodes.forEach((node: any, index: number) => {
+                        logger.info(`   📍 Master Node ${index + 1}: ${node.options.host}:${node.options.port}`);
+                    });
+                }
             });
 
             this.cluster.on('connect', () => {
@@ -318,9 +326,10 @@ class RedisService {
      */
     private async logClusterInfo(): Promise<void> {
         try {
+            if (!this.isClusterMode) return;
             const info = await this.cluster!.cluster('INFO');
             logger.info('📊 [REDIS] Cluster information', {
-                info: info.split('\r\n').filter(line => line.includes('cluster_')),
+                info: info.split('\r\n').filter((line: string) => line.includes('cluster_')),
                 timestamp: new Date().toISOString()
             });
         } catch (error: any) {
@@ -525,7 +534,7 @@ class RedisService {
             });
 
             let deletedCount = 0;
-            const nodes = this.cluster.nodes('master');
+            const nodes = this.isClusterMode ? this.cluster.nodes('master') : [this.cluster];
 
             // Scan each master node
             for (const node of nodes) {
@@ -718,7 +727,7 @@ class RedisService {
             return;
         }
 
-        const nodes = this.cluster.nodes('master');
+        const nodes = this.isClusterMode ? this.cluster.nodes('master') : [this.cluster];
 
         for (const node of nodes) {
             let cursor = 0;
@@ -801,7 +810,7 @@ class RedisService {
                     connected: false,
                     totalNodes: 0,
                     healthyNodes: 0,
-                    clusterMode: true,
+                    clusterMode: this.isClusterMode,
                     performance: {
                         avgResponseTime: 0,
                         successRate: 0,
@@ -809,7 +818,7 @@ class RedisService {
                 };
             }
 
-            const nodes = this.cluster.nodes('all');
+            const nodes = this.isClusterMode ? this.cluster.nodes('all') : [this.cluster];
             const totalNodes = nodes.length;
             let healthyNodes = 0;
             let totalResponseTime = 0;
@@ -877,8 +886,8 @@ class RedisService {
      * Get comprehensive statistics
      */
     getStats(): RedisStats {
-        const masterNodes = this.cluster?.nodes('master') || [];
-        const slaveNodes = this.cluster?.nodes('slave') || [];
+        const masterNodes = this.isClusterMode ? (this.cluster?.nodes('master') || []) : (this.cluster ? [this.cluster] : []);
+        const slaveNodes = this.isClusterMode ? (this.cluster?.nodes('slave') || []) : [];
         const hitRate = this.metrics.totalOperations > 0
             ? ((this.metrics.cacheHits / this.metrics.totalOperations) * 100).toFixed(2)
             : '0.00';
