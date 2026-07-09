@@ -43,8 +43,25 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
 // ==================== CORS ====================
+// OLD CODE - Commented out for hosting / APK testing
+// app.use(cors({
+//     origin: ["http://localhost:3000", "http://localhost:3001"],
+//     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+//     allowedHeaders: [
+//         'Content-Type',
+//         'Authorization',
+//         'X-Requested-With',
+//         'Accept',
+//         'x-client-version',
+//         'x-csrf-token'
+//     ],
+//     exposedHeaders: ['Authorization', 'Content-Length', 'X-CSRF-Token'],
+//     credentials: true
+// }));
+
+// NEW CODE - Allows all origins for APK/mobile testing
 app.use(cors({
-    origin: ["http://localhost:3000", "http://localhost:3001"],
+    origin: '*', // Allow all origins for the mobile APK
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
         'Content-Type',
@@ -54,8 +71,8 @@ app.use(cors({
         'x-client-version',
         'x-csrf-token'
     ],
-    exposedHeaders: ['Authorization', 'Content-Length', 'X-CSRF-Token'],
-    credentials: true
+    exposedHeaders: ['Authorization', 'Content-Length', 'X-CSRF-Token']
+    // Note: credentials: true is not allowed when origin is '*'
 }));
 
 
