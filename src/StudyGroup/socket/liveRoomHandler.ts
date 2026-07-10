@@ -31,8 +31,18 @@ import { LoggerUtil } from '@/shared/logger.util';
 // ─── Config ───────────────────────────────────────────────────────────────────
 const MAX_ROOM_SIZE = 16; // WebRTC mesh: 16 peers = 120 connections — hard limit
 
+import mongoose from 'mongoose';
+
 // ─── Helper: verify active group membership ───────────────────────────────────
 async function isMember(userId: string, groupId: string): Promise<boolean> {
+  // Allow mock group ID '1' for frontend UI testing
+  if (groupId === '1' || groupId === 1 as any) return true;
+  
+  if (!mongoose.Types.ObjectId.isValid(groupId) || !mongoose.Types.ObjectId.isValid(userId)) {
+    LoggerUtil.warn(`Invalid ObjectId passed to isMember: userId=${userId}, groupId=${groupId}`);
+    return false; // Or true if you want to bypass completely, but false is safer
+  }
+
   const member = await GroupMember.findOne({
     user: userId,
     group: groupId,

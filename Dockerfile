@@ -105,6 +105,7 @@ RUN npm install --ignore-scripts --no-audit --no-fund && \
 
 # 🔥 IMPORTANT: Copy source code AFTER npm install
 COPY src ./src
+COPY server.ts ./
 
 # Production stage
 FROM node:18-slim
@@ -134,6 +135,7 @@ COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 
 # Copy TypeScript source code
 COPY --from=builder --chown=nodejs:nodejs /app/src ./src
+COPY --from=builder --chown=nodejs:nodejs /app/server.ts ./
 
 # Create necessary directories
 RUN mkdir -p logs temp uploads certs && \
@@ -143,11 +145,11 @@ RUN mkdir -p logs temp uploads certs && \
 USER nodejs
 
 # Expose ports
-EXPOSE 3000 9100
+EXPOSE 4000 9100
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:3000/api/health || exit 1
+    CMD curl -f http://localhost:${PORT:-4000}/api/health || exit 1
 
 # Entry point
 ENTRYPOINT ["dumb-init", "--"]
