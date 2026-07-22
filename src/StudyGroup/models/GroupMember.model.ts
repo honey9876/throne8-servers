@@ -96,7 +96,7 @@ const groupMemberSchema = new Schema<IGroupMember>(
  */
 groupMemberSchema.index({ groupId: 1, userId: 1 }, { unique: true }); // was: group, user
 groupMemberSchema.index({ groupId: 1 });  // was: group
-groupMemberSchema.index({ userId: 1 });   // was: user
+// Removed duplicate index: groupMemberSchema.index({ userId: 1 });   // was: user
 groupMemberSchema.index({ role: 1 });
 groupMemberSchema.index({ status: 1 });
 groupMemberSchema.index({ warningCount: 1 });

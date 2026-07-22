@@ -209,7 +209,7 @@ const ContactSchema = new Schema<IContact, IContactModel>(
             type: String,
             required: [true, 'User ID is required'],
             unique: true,  // One contact per user
-            index: true,
+            // // index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
@@ -229,7 +229,7 @@ const ContactSchema = new Schema<IContact, IContactModel>(
                 validator: (v: string) => !v || /^[a-z0-9_-]+$/.test(v),
                 message: 'Profile URL can only contain lowercase letters, numbers, underscore, and hyphen',
             },
-            index: true,
+            // index: true,
         },
 
         // ==================== PHONES ====================
@@ -332,7 +332,7 @@ const ContactSchema = new Schema<IContact, IContactModel>(
 // ==================== INDEXES ====================
 
 ContactSchema.index({ userId: 1, isDeleted: 1 });
-ContactSchema.index({ profileUrl: 1 }, { unique: true, sparse: true });
+// Removed duplicate index: ContactSchema.index({ profileUrl: 1 }, { unique: true, sparse: true });
 ContactSchema.index({ createdAt: -1 });
 
 // ==================== VIRTUALS ====================

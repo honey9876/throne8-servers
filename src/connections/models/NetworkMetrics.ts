@@ -111,7 +111,7 @@ const networkMetricsSchema: Schema = new Schema<INetworkMetrics>(
       ref: 'User',
       required: [true, 'User ID is required'],
       unique: true,
-      index: true,
+      // index: true,
     },
 
     connectionCount: {

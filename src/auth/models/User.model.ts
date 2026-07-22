@@ -245,7 +245,7 @@ const UserSchema = new Schema<IUser, IUserModel>(
             required: [true, 'User ID is required'],
             unique: true,
             default: () => uuidv4(),
-            index: true,
+            // index: true,
             immutable: true,
         },
         email: {

@@ -651,9 +651,9 @@ const companySchema = new Schema<ICompany, ICompanyModel>(
 );
 
 // ==================== OPTIMIZED INDEXES ====================
-companySchema.index({ companyId: 1 });
-companySchema.index({ companySlug: 1 });
-companySchema.index({ companyName: 1 });
+// companySchema.index({ companyId: 1 });
+// companySchema.index({ companySlug: 1 });
+// companySchema.index({ companyName: 1 });
 companySchema.index({ 'account.status': 1, 'account.isVerified': 1, industry: 1, 'audit.isDeleted': 1 });
 companySchema.index({ 'headquarters.coordinates': '2dsphere' });
 companySchema.index({ 'headquarters.city': 1, industry: 1, 'audit.isDeleted': 1 });

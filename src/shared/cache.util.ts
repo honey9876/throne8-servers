@@ -106,6 +106,7 @@ class CacheUtil {
      * Initialize Redis Cluster connection with timeout
      */
     static async init(): Promise<boolean> {
+        useRedis = process.env['USE_REDIS'] === 'true'; // Default to false if undefined or not 'true'
         if (!useRedis) {
             LoggerUtil.info('⚠️ Redis disabled - running in fallback mode (in-memory cache)');
             return false;

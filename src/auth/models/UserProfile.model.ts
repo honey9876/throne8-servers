@@ -117,7 +117,7 @@ const userProfileSchema = new Schema<IUserProfile, IUserProfileModel>(
             type: String,
             required: true,
             unique: true,
-            index: true,
+            // index: true,
         },
         username: {
             type: String,

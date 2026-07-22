@@ -431,7 +431,7 @@ const professionalDevSchema = new Schema<IProfessionalDev>(
       type: String,
       required: true,
       unique: true,
-      index: true,
+      // index: true,
       validate: {
         validator: (v: string) => validUUIDRegex.test(v),
         message: 'Invalid userId UUID',

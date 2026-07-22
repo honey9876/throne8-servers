@@ -350,7 +350,7 @@ const HeadlineSchema = new Schema<IHeadline, IHeadlineModel>(
 
 // ==================== INDEXES ====================
 
-HeadlineSchema.index({ headlineId: 1 });
+// Removed duplicate index: HeadlineSchema.index({ headlineId: 1 });
 HeadlineSchema.index({ 'audience.type': 1 });
 HeadlineSchema.index({ createdAt: -1 });
 HeadlineSchema.index({ 'metadata.createdBy': 1, createdAt: -1 });

@@ -18,9 +18,9 @@ import passport from '@/config/oauth/passport.config';
 import AuthRoutes from './routes/index';
 import profileRoutes from './routes/index';
 import verifyRoutes from './auth/routes/index';
-import mentorRoutes from './Mentorship/routers';
-import companyRoutes from './company/routers';
-import studyGroupRoutes from './StudyGroup/routers';
+console.log("Importing mentorRoutes"); import mentorRoutes from './Mentorship/routers';
+console.log("Importing companyRoutes"); import companyRoutes from './company/routers';
+console.log("Importing studyGroupRoutes"); import studyGroupRoutes from './StudyGroup/routers';
 // import jobServiceRoutes from './Job-Service/routers';
 
 // Config

@@ -127,6 +127,12 @@ class RedisService {
      * Initialize Redis Cluster connection
      */
     async connect(): Promise<void> {
+        if (process.env.USE_REDIS === 'false') {
+            logger.info('⚠️ [REDIS] Redis disabled by USE_REDIS flag');
+            this.connected = false;
+            return;
+        }
+
         if (this.isConnecting) {
             logger.warn('⚠️ [REDIS] Connection already in progress');
             // ✅ NEW: Wait for existing connection attempt

@@ -229,7 +229,7 @@ const searchSchema = new Schema<ISearchDocument>(
       type: String,
       required: true,
       unique: true,
-      index: true,
+      // index: true,
       validate: {
         validator: (v: string) => validUUIDRegex.test(v),
         message: "Invalid userId UUID",

@@ -40,7 +40,10 @@ export class JobSearchService {
    * Initialize connections (ping cache, init Kafka if needed)
    */
   async initialize(): Promise<void> {
-    await CacheUtil.getClient().ping();
+    // OLD CODE: await CacheUtil.getClient().ping();
+    // NEW CODE: Avoid checking getClient() immediately to prevent startup race condition
+    // await CacheUtil.getClient().ping();
+    
     // await initKafka(); // Uncomment if you have this function
     console.log('[JobSearchService] Initialized successfully');
   }

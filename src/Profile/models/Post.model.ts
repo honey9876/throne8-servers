@@ -374,7 +374,7 @@ const PostSchema = new Schema<IPost, IPostModel>(
             type: String,
             required: true,
             unique: true,   // ← KEY CHANGE: ek user ka sirf ek document
-            index: true,
+            // index: true,
         },
         creatorModeEnabled: { type: Boolean, default: false },
         totalPosts: { type: Number, default: 0 },
@@ -388,7 +388,7 @@ const PostSchema = new Schema<IPost, IPostModel>(
 
 // ==================== INDEXES ====================
 
-PostSchema.index({ userId: 1 });                              // user dhundne ke liye
+// Removed duplicate index: PostSchema.index({ userId: 1 });                              // user dhundne ke liye
 PostSchema.index({ 'posts.entryId': 1 });                    // specific entry ke liye
 PostSchema.index({ 'posts.isDeleted': 1 });
 PostSchema.index({ 'posts.isPinned': 1 });
