@@ -207,7 +207,25 @@ class MentorService {
         this.validateAvailability({ ...mentor.availability, ...updates.availability });
       }
 
-      const updatedMentor = await mentorRepository.updateByMentorId(mentorId, updates);
+      const updateData: any = { ...updates };
+      delete updateData.profilePicFile;
+      delete updateData.coverImageFile;
+
+      if (updates.profilePicFile) {
+        updateData.profilePic = await this.uploadImageToCloudinary(
+          updates.profilePicFile.buffer,
+          mentor.userId
+        );
+      }
+
+      if (updates.coverImageFile) {
+        updateData.coverImage = await this.uploadImageToCloudinary(
+          updates.coverImageFile.buffer,
+          mentor.userId + '_cover'
+        );
+      }
+
+      const updatedMentor = await mentorRepository.updateByMentorId(mentorId, updateData);
       if (!updatedMentor) {
         throw new NotFoundError('MENTOR_NOT_FOUND');
       }

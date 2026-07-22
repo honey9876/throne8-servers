@@ -1,132 +1,35 @@
-import { NextFunction, Request, Response, Router } from 'express';
-import { mentorController } from '@/shared/controllers/index.controllers';
+import { Router } from 'express';
+import MentorController from '../controllers/mentor.controller';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
-import { validate } from '@/shared/middlewares/validation.middleware';
-import MentorValidator from '../validations/mentor.validator';
-import upload, { uploadSingle } from '@/shared/upload/upload';
+import { uploadSingle, uploadFields } from '@/shared/upload/upload';
 
 const router = Router();
 
-// ye middleware multer ke baad lagao
-const parseFormDataFields = (req: Request, res: Response, next: NextFunction): void => {
-  const fieldsToParse = ['domains', 'skills', 'languages', 'experience', 'pricing', 'availability', 'socialProof', 'preferences'];
+// Create new mentor profile
+router.post('/create', AuthMiddleware.authenticate, uploadSingle('profilePic'), MentorController.createProfile);
 
-  for (const field of fieldsToParse) {
-    const body = req.body as Record<string, any>; // ✅ yeh line add karo
-    if (body[field] && typeof body[field] === 'string') {
-      try {
-        body[field] = JSON.parse(body[field]);
-      } catch (e) {
-        // ignore
-      }
-    }
-  }
-  next();
-};
+// Get current user's mentor profile
+router.get('/me', AuthMiddleware.authenticate, MentorController.getMyProfile);
 
+// Get all mentors (with pagination & filters)
+router.get('/all', AuthMiddleware.authenticateOptional, MentorController.getAllMentors);
 
-/**
- * @route   POST /api/mentors
- * @desc    Create a new mentor profile
- * @access  Private
- */
-router.post(
-  '/create',
-  AuthMiddleware.authenticate as any,
-  uploadSingle('profilePic'),
-  parseFormDataFields as any,
-  validate(MentorValidator.createMentor()),
-  mentorController.createProfile as any
-);
+// Get specific mentor by ID
+router.get('/:id', AuthMiddleware.authenticateOptional, MentorController.getProfile);
 
-// /**
-//  * @route   GET /api/mentors/me
-//  * @desc    Get current user's mentor profile
-//  * @access  Private
-//  */
-router.get(
-  '/me',
-  AuthMiddleware.authenticate as any,
-  mentorController.getMyProfile as any
-);
+// Get mentor by user ID
+router.get('/user/:userId', AuthMiddleware.authenticateOptional, MentorController.getProfileByUserId);
 
-// /**
-//  * @route   GET /api/mentors
-//  * @desc    Get all mentors with filters and pagination
-//  * @access  Public
-//  */
-router.get(
-  '/all',
-  validate(MentorValidator.getPagination()),
-  mentorController.getAllMentors
-);
+// Update mentor profile
+router.put('/:id', AuthMiddleware.authenticate, uploadFields([{ name: 'profilePic', maxCount: 1 }, { name: 'bannerImage', maxCount: 1 }]), MentorController.updateProfile);
 
-/**
- * @route   GET /api/mentors/:id
- * @desc    Get mentor profile by ID
- * @access  Public
- */
-router.get(
-  '/:id',
-  validate(MentorValidator.getMentorById()),
-  mentorController.getProfile
-);
+// Delete mentor profile
+router.delete('/:id', AuthMiddleware.authenticate, MentorController.deleteProfile);
 
-// /**
-//  * @route   GET /api/mentors/user/:userId
-//  * @desc    Get mentor profile by user ID
-//  * @access  Public
-//  */
-router.get(
-  '/user/:userId',
-  mentorController.getProfileByUserId
-);
+// Approve mentor (Admin)
+router.patch('/:mentorId/approve', AuthMiddleware.authenticate, MentorController.approveMentor);
 
-/**
- * @route   GET /api/mentors/:id/stats
- * @desc    Get mentor statistics
- * @access  Public
- */
-router.get(
-  '/:id/stats',
-  validate(MentorValidator.getMentorStats()),
-  mentorController.getMentorStats
-);
-
-/**
- * @route   PUT /api/mentors/:id
- * @desc    Update mentor profile
- * @access  Private (mentor owner only)
- */
-router.put(
-  '/:id',
-  AuthMiddleware.authenticate as any,
-  validate(MentorValidator.updateMentor()),
-  mentorController.updateProfile as any
-);
-
-/**
- * @route   DELETE /api/mentors/:id
- * @desc    Delete mentor profile (soft delete)
- * @access  Private (mentor owner only)
- */
-router.delete(
-  '/:id',
-  AuthMiddleware.authenticate as any,
-  validate(MentorValidator.deleteMentor()),
-  mentorController.deleteProfile as any
-);
-
-/**
- * @route   PATCH /api/mentors/:mentorId/approve
- * @desc    Admin: Approve mentor account (pending → active)
- * @access  Private (Admin only)
- */
-router.patch(
-  '/:mentorId/approve',
-  AuthMiddleware.authenticate as any,
-  AuthMiddleware.authorize('admin') as any,
-  mentorController.approveMentor as any
-);
+// Get mentor stats
+router.get('/:id/stats', MentorController.getMentorStats);
 
 export default router;

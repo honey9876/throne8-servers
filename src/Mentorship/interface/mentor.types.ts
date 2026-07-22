@@ -27,6 +27,7 @@ export interface IMentor extends TimeStamps, SoftDelete {
   status: MentorStatus;
   // ⭐ ADD THESE TWO LINES
   profilePic?: string; // Cloudinary URL
+  coverImage?: string; // Cloudinary URL
   cloudinaryPublicId?: string; // For deletion/updates
 
   title: string;
@@ -180,6 +181,8 @@ export interface CreateMentorInput {
 export interface UpdateMentorInput {
   title?: string;
   bio?: string;
+  coverImageFile?: Express.Multer.File;
+  profilePicFile?: Express.Multer.File;
   tagline?: string;
   domains?: Domain[];
   skills?: string[];

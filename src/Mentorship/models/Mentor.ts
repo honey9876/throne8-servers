@@ -23,9 +23,10 @@ const MentorSchema = new Schema<MentorDocument>(
       type: String,
       required: [true, 'User ID is required'],
       unique: true,
-      index: true,
+      // index: true,
     },
     profilePic: { type: String, trim: true },
+    coverImage: { type: String, trim: true },
     cloudinaryPublicId: { type: String, trim: true },
     companyId: { type: String, index: true },
     status: {

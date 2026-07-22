@@ -23,20 +23,27 @@ class MentorController {
         return;
       }
 
+      const parseJsonField = (field: any) => {
+        if (typeof field === 'string') {
+          try { return JSON.parse(field); } catch { return field; }
+        }
+        return field;
+      };
+
       const input: CreateMentorInput = {
         userId: req.user!.id,
         companyId: req.body.companyId,
         title: req.body.title,
         bio: req.body.bio,
         tagline: req.body.tagline,
-        domains: req.body.domains,
-        skills: req.body.skills,
-        languages: req.body.languages,
-        experience: req.body.experience,
-        pricing: req.body.pricing,
-        availability: req.body.availability,
-        socialProof: req.body.socialProof,
-        preferences: req.body.preferences,
+        domains: parseJsonField(req.body.domains),
+        skills: parseJsonField(req.body.skills),
+        languages: parseJsonField(req.body.languages),
+        experience: parseJsonField(req.body.experience),
+        pricing: parseJsonField(req.body.pricing),
+        availability: parseJsonField(req.body.availability),
+        socialProof: parseJsonField(req.body.socialProof),
+        preferences: parseJsonField(req.body.preferences),
         profilePicFile: req.file,
       };
 
@@ -63,20 +70,36 @@ class MentorController {
     try {
       const { id } = req.params;
 
+      const parseJsonField = (field: any) => {
+        if (typeof field === 'string') {
+          try { return JSON.parse(field); } catch { return field; }
+        }
+        return field;
+      };
+
       const updates: UpdateMentorInput = {
         title: req.body.title,
         bio: req.body.bio,
         tagline: req.body.tagline,
-        domains: req.body.domains,
-        skills: req.body.skills,
-        languages: req.body.languages,
-        experience: req.body.experience,
-        pricing: req.body.pricing,
-        availability: req.body.availability,
-        socialProof: req.body.socialProof,
-        preferences: req.body.preferences,
+        domains: parseJsonField(req.body.domains),
+        skills: parseJsonField(req.body.skills),
+        languages: parseJsonField(req.body.languages),
+        experience: parseJsonField(req.body.experience),
+        pricing: parseJsonField(req.body.pricing),
+        availability: parseJsonField(req.body.availability),
+        socialProof: parseJsonField(req.body.socialProof),
+        preferences: parseJsonField(req.body.preferences),
         status: req.body.status,
       };
+
+      // Handle file uploads for updates
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+      if (files?.profilePic?.[0]) {
+        updates.profilePicFile = files.profilePic[0];
+      }
+      if (files?.bannerImage?.[0]) {
+        updates.coverImageFile = files.bannerImage[0];
+      }
 
       // Remove undefined fields before passing to service
       (Object.keys(updates) as (keyof UpdateMentorInput)[]).forEach((key) => {
@@ -139,6 +162,10 @@ class MentorController {
 
       ResponseHandler.success(res, 'Your mentor profile fetched successfully', mentor);
     } catch (error: any) {
+      if (error.message === 'MENTOR_NOT_FOUND' || error.name === 'NotFoundError' || (error.message && error.message.includes('MENTOR_NOT_FOUND'))) {
+        ResponseHandler.success(res, 'User is not a mentor', null);
+        return;
+      }
       logger.error('Error fetching own mentor profile:', error);
       next(error);
     }
