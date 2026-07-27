@@ -1,0 +1,30 @@
+﻿name: Build & Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & Push Docker Image
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          docker build --no-cache -f ./server/thronet-server/Dockerfile -t honeysharma123/thronet-server:latest ./server/thronet-server
+
+      - name: Deploy to Hetzner
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_IP }}
+          username: thronet
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            mkdir -p /home/thronet/app/logs
+            chown -R 1001:1001 /home/thronet/app/logs
+            cd /home/thronet/app
+            docker compose -f docker-compose.prod-minimal.yml down
+            docker pull honeysharma123/thronet-server:latest
+            docker compose -f docker-compose.prod-minimal.yml up -d
+            sleep 15
+            docker logs thronet-server 2>&1 | tail -20

@@ -1,0 +1,13 @@
+{
+  "type": "record",
+  "name": "UserEvent",
+  "namespace": "com.xai.user",
+  "fields": [
+    { "name": "eventId", "type": "string" },
+    { "name": "userId", "type": "string" },
+    { "name": "action", "type": { "type": "enum", "name": "ActionType", "symbols": ["PROFILE_UPDATED", "ACCOUNT_DELETED", "REGISTRATION_SUCCESS"] } },
+    { "name": "ipAddress", "type": "string" },
+    { "name": "timestamp", "type": "string" },
+    { "name": "metadata", "type": { "type": "map", "values": "string" } }
+  ]
+}

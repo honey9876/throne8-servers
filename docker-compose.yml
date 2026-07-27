@@ -1,0 +1,235 @@
+services:
+  redis-node-1:
+    image: redis:7.2-alpine
+    container_name: redis-node-1
+    hostname: redis-node-1
+    ports:
+      - "7001:7001"
+      - "17001:17001"
+    command: >
+      redis-server --port 7001 --cluster-enabled yes --cluster-config-file /data/nodes-7001.conf --cluster-node-timeout 5000 --cluster-announce-port 7001 --cluster-announce-bus-port 17001 --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru --protected-mode no --bind 0.0.0.0 --loglevel notice --save "" --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis-1-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-p", "7001", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.5"
+    networks:
+      app-network:
+        aliases:
+          - redis-node-1
+    restart: unless-stopped
+
+  redis-node-2:
+    image: redis:7.2-alpine
+    container_name: redis-node-2
+    hostname: redis-node-2
+    ports:
+      - "7002:7002"
+      - "17002:17002"
+    command: >
+     redis-server --port 7002 --cluster-enabled yes --cluster-config-file /data/nodes-7002.conf --cluster-node-timeout 5000 --cluster-announce-port 7002 --cluster-announce-bus-port 17002 --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru --protected-mode no --bind 0.0.0.0 --loglevel notice --save "" --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis-2-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-p", "7002", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.5"
+    networks:
+      app-network:
+        aliases:
+          - redis-node-2
+    restart: unless-stopped
+
+  redis-node-3:
+    image: redis:7.2-alpine
+    container_name: redis-node-3
+    hostname: redis-node-3
+    ports:
+      - "7003:7003"
+      - "17003:17003"
+    command: >
+      redis-server --port 7003 --cluster-enabled yes --cluster-config-file /data/nodes-7003.conf --cluster-node-timeout 5000 --cluster-announce-port 7003 --cluster-announce-bus-port 17003 --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru --protected-mode no --bind 0.0.0.0 --loglevel notice --save "" --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis-3-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-p", "7003", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.5"
+    networks:
+      app-network:
+        aliases:
+          - redis-node-3
+    restart: unless-stopped
+
+  redis-cluster-init:
+    image: redis:7.2-alpine
+    container_name: redis-cluster-init
+    entrypoint: [ "/bin/sh" ]
+    environment:
+      - REDISCLI_AUTH=${REDIS_PASSWORD}
+    command:
+      - -c
+      - |
+        echo "⏳ Waiting for Redis nodes to be ready..."
+        sleep 10
+
+        # Wait for all 3 nodes to respond
+        for i in 1 2 3 4 5; do
+          if redis-cli -h redis-node-1 -p 7001 --no-auth-warning ping && \
+             redis-cli -h redis-node-2 -p 7002 --no-auth-warning ping && \
+             redis-cli -h redis-node-3 -p 7003 --no-auth-warning ping; then
+            echo "✅ All 3 Redis nodes are responding"
+            break
+          fi
+          echo "⏳ Attempt $i: Waiting for nodes..."
+          sleep 5
+        done
+
+        # Check if cluster already exists
+        if redis-cli -h redis-node-1 -p 7001 --no-auth-warning cluster info 2>/dev/null | grep -q "cluster_state:ok"; then
+          echo "✅ Redis cluster already exists and is healthy"
+          redis-cli -h redis-node-1 -p 7001 --no-auth-warning cluster nodes
+          exit 0
+        fi
+
+        echo "🔧 Creating Redis 3-node cluster..."
+        redis-cli --no-auth-warning --cluster create \
+          redis-node-1:7001 \
+          redis-node-2:7002 \
+          redis-node-3:7003 \
+          --cluster-replicas 0 \
+          --cluster-yes
+
+        if [ $? -eq 0 ]; then
+          echo "✅ Redis cluster created successfully"
+          sleep 3
+          echo "📊 Cluster Info:"
+          redis-cli -h redis-node-1 -p 7001 --no-auth-warning cluster info
+          echo ""
+          echo "📋 Cluster Nodes:"
+          redis-cli -h redis-node-1 -p 7001 --no-auth-warning cluster nodes
+        else
+          echo "❌ Cluster creation failed!"
+          exit 1
+        fi
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+      redis-node-2:
+        condition: service_healthy
+      redis-node-3:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: "no"
+
+  # ==================== THRONET SERVER ====================  
+
+  thronet-server:
+    build:
+      context: ./server/thronet-server
+      dockerfile: Dockerfile
+    container_name: thronet-server
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+
+    depends_on:
+      redis-cluster-init:
+        condition: service_completed_successfully
+
+    volumes:
+      - ./server/thronet-server/src:/app/src:ro
+      - ./server/thronet-server/server.ts:/app/server.ts:ro  # ← ADD
+      - ./logs:/app/logs
+      - /app/node_modules
+
+    # 🔥 ADD: Override command for dev mode
+    command: npm run dev
+    healthcheck:
+      test: [ "CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:4000/api/v1/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+    networks:
+      - app-network
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/ssl:ro # ⬅️ Mount certificates
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      thronet-server:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+          gateway: 172.30.0.1
+
+volumes:
+  redis-1-data:
+    driver: local
+  redis-2-data:
+    driver: local
+  redis-3-data:
+    driver: local

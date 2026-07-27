@@ -1,0 +1,10 @@
+groups:
+  - name: example
+    rules:
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes > 1e9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected"

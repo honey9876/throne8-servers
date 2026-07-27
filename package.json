@@ -1,0 +1,28 @@
+{
+  "name": "throne8-server",
+  "version": "1.0.0",
+  "description": "Entry Point Server for Throne8",
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
+    "@types/socket.io": "^3.0.1",
+    "bcryptjs": "^3.0.3",
+    "connect-mongo": "^6.0.0",
+    "express-mongo-sanitize": "^2.2.0",
+    "lucide-react": "^1.24.0",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.3",
+    "undici": "^7.24.4"
+  },
+  "devDependencies": {
+    "@types/connect-mongo": "^3.1.2",
+    "@types/qrcode": "^1.5.6",
+    "nodemon": "^3.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

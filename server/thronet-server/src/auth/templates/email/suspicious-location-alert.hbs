@@ -1,0 +1,123 @@
+{{!-- // src/templates/email/suspicious-location-alert.hbs --}}
+<html>
+  <head>
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <title>New Location Login Detected</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f4f4f4;
+        margin: 0;
+        padding: 20px;
+      }
+      .container {
+        max-width: 600px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+      }
+      .header {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        padding: 30px;
+        text-align: center;
+        color: white;
+      }
+      .content {
+        padding: 40px;
+      }
+      .btn {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+        padding: 15px 30px;
+        text-decoration: none;
+        border-radius: 8px;
+        font-weight: bold;
+        display: inline-block;
+        font-size: 16px;
+      }
+      .info-box {
+        background: #d1ecf1;
+        border-left: 4px solid #17a2b8;
+        padding: 15px;
+        color: #0c5460;
+        border-radius: 4px;
+        margin: 20px 0;
+      }
+      .warning {
+        background: #f8d7da;
+        border-left: 4px solid #dc3545;
+        padding: 15px;
+        color: #721c24;
+        border-radius: 4px;
+        margin: 20px 0;
+      }
+      .footer {
+        padding: 20px;
+        text-align: center;
+        color: #999;
+        font-size: 12px;
+        border-top: 1px solid #eee;
+        margin-top: 40px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class='container'>
+      <div class='header'>
+        <h1>New Location Login Detected</h1>
+      </div>
+      <div class='content'>
+        <p style='font-size: 16px; color: #333;'>Hello {{userName}},</p>
+        <p style='font-size: 16px; color: #333;'>
+          We detected a login from a new location that hasn't been used before.
+        </p>
+
+        <div class='info-box'>
+          <p style='margin: 0; font-size: 15px;'>
+            <strong>Location Details:</strong><br />
+            Country:
+            {{locationDetails.country}}<br />
+            City:
+            {{locationDetails.city}}<br />
+            Region:
+            {{locationDetails.region}}
+          </p>
+        </div>
+
+        <p style='font-size: 16px; color: #333;'>Was this you?</p>
+
+        <div style='text-align: center; margin: 40px 0;'>
+          <a href='{{verificationLink}}' class='btn'>Yes, This Was Me</a>
+        </div>
+
+        <p style='color: #666; font-size: 14px; text-align: center;'>
+          Or copy this link:<br />
+          <a
+            href='{{verificationLink}}'
+            style='color: #4facfe; word-break: break-all;'
+          >{{verificationLink}}</a>
+        </p>
+
+        <div class='warning'>
+          <p style='margin: 0; font-size: 15px; font-weight: bold;'>
+            If this wasn't you, secure your account immediately!
+          </p>
+        </div>
+
+        <p style='color: #666; font-size: 13px;'>
+          <strong>IP Address:</strong>
+          {{ipAddress}}<br />
+          <strong>Time:</strong>
+          {{timestamp}}
+        </p>
+      </div>
+      <div class='footer'>
+        <p>This is an automated security message.</p>
+        <p>© 2025 Auth Service. All rights reserved.</p>
+      </div>
+    </div>
+  </body>
+</html>

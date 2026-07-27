@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "AuditEvent",
+  "namespace": "com.xai.audit",
+  "fields": [
+    { "name": "eventId", "type": "string" },
+    { "name": "userId", "type": ["string", "null"] },
+    { "name": "action", "type": "string" },
+    { "name": "ipAddress", "type": "string" },
+    { "name": "status", "type": { "type": "enum", "name": "StatusType", "symbols": ["SUCCESS", "FAILED"] } },
+    { "name": "severity", "type": { "type": "enum", "name": "SeverityType", "symbols": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] } },
+    { "name": "timestamp", "type": "string" },
+    { "name": "metadata", "type": { "type": "map", "values": "string" } }
+  ]
+}

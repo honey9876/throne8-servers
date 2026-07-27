@@ -1,0 +1,200 @@
+# ============================================================
+# docker-compose.prod-minimal.yml
+# PHASE 1: MongoDB + Server only (Redis/Nginx baad mein)
+# ============================================================
+
+services:
+
+  mongo-1:
+    image: mongo:7.0
+    container_name: mongo-1
+    hostname: mongo-1
+    ports:
+      - "127.0.0.1:27017:27017"
+    command: mongod --replSet rs0 --bind_ip_all --keyFile /etc/mongo/keyfile
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME}
+    volumes:
+      - mongo-1-data:/data/db
+      - mongo-1-config:/data/configdb
+      - ./mongo/keyfile:/etc/mongo/keyfile:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.75"
+
+  mongo-2:
+    image: mongo:7.0
+    container_name: mongo-2
+    hostname: mongo-2
+    ports:
+      - "127.0.0.1:27018:27017"
+    command: mongod --replSet rs0 --bind_ip_all --keyFile /etc/mongo/keyfile
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    volumes:
+      - mongo-2-data:/data/db
+      - mongo-2-config:/data/configdb
+      - ./mongo/keyfile:/etc/mongo/keyfile:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.75"
+
+  mongo-3:
+    image: mongo:7.0
+    container_name: mongo-3
+    hostname: mongo-3
+    ports:
+      - "127.0.0.1:27019:27017"
+    command: mongod --replSet rs0 --bind_ip_all --keyFile /etc/mongo/keyfile
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    volumes:
+      - mongo-3-data:/data/db
+      - mongo-3-config:/data/configdb
+      - ./mongo/keyfile:/etc/mongo/keyfile:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.75"
+
+  mongo-init:
+    image: mongo:7.0
+    container_name: mongo-init
+    depends_on:
+      mongo-1:
+        condition: service_healthy
+      mongo-2:
+        condition: service_healthy
+      mongo-3:
+        condition: service_healthy
+    environment:
+      MONGO_ROOT_USER: ${MONGO_ROOT_USER}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_DB_NAME: ${MONGO_DB_NAME}
+      MONGO_APP_USER: ${MONGO_APP_USER}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD}
+    entrypoint: ["/bin/bash", "/scripts/mongo-init.sh"]
+    volumes:
+      - ./scripts/mongo-init.sh:/scripts/mongo-init.sh:ro
+    networks:
+      - app-network
+    restart: "no"
+
+  thronet-server:
+    image: ${DOCKER_IMAGE}:${IMAGE_TAG:-latest}
+    container_name: thronet-server
+    # ✅ Direct access — Nginx nahi hai abhi
+    ports:
+      - "0.0.0.0:4000:4000"
+    env_file:
+      - .env.production
+    environment:
+      - NODE_ENV=production
+      - LOG_DIR=/app/logs
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:4000/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    networks:
+      - app-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: "1.5"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    hostname: redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --protected-mode yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - app-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 600M
+          cpus: "0.3"
+
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  mongo-1-data:
+  mongo-2-data:
+  mongo-3-data:
+  mongo-1-config:
+  mongo-2-config:
+  mongo-3-config:
+  redis-data:

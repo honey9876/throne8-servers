@@ -1,0 +1,13 @@
+{
+  "type": "record",
+  "name": "AuthEvent",
+  "namespace": "com.xai.auth",
+  "fields": [
+    { "name": "eventId", "type": "string" },
+    { "name": "userId", "type": "string" },
+    { "name": "action", "type": { "type": "enum", "name": "ActionType", "symbols": ["LOGIN_SUCCESS", "LOGIN_FAILED", "LOGOUT_SUCCESS", "TOKEN_REFRESH_SUCCESS"] } },
+    { "name": "ipAddress", "type": "string" },
+    { "name": "timestamp", "type": "string" },
+    { "name": "metadata", "type": { "type": "map", "values": "string" } }
+  ]
+}
