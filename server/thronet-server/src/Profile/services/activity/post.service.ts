@@ -15,6 +15,7 @@ import { Post, User } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
 import { IPostEntry } from '@/Profile/models/Post.model';
 import NotificationService from '@/notifications/services/notification.service';
+import { AnalyticsService } from '@/shared/services/index.service';
 
 // ==================== INTERFACES ====================
 
@@ -1221,6 +1222,22 @@ class PostService {
                     console.warn('⚠️ [NOTIF] Like notification failed (non-blocking):', err.message);
                 }
             });
+
+
+            // ✅ NEW: Record engagement for analytics
+            setImmediate(async () => {
+                try {
+                    await AnalyticsService.recordEngagement(postOwnerId, {
+                        postId: entryId,
+                        viewerId: userId,
+                        engagementType: 'like',
+                    });
+                    console.log('✅ [ANALYTICS] Like engagement recorded:', entryId);
+                } catch (err: any) {
+                    console.warn('⚠️ [ANALYTICS] Engagement recording failed (non-blocking):', err.message);
+                }
+            });
+        
         }
 
         LoggerUtil.info('Post liked successfully', {

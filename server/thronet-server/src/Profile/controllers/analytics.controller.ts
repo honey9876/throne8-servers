@@ -1825,6 +1825,83 @@ class AnalyticsController {
             return;
         }
     }
+    /**
+     * ✅ RECORD ENGAGEMENT (like/comment/share/save)
+     * POST /api/v1/analytics/record-engagement
+     */
+    static async recordEngagement(
+        req: Request & { user?: UserPayload },
+        res: Response
+    ): Promise<void> {
+        const correlationId = (req as any).correlationId || uuidv4();
+
+        try {
+            if (!req.user?.userId) {
+                ResponseUtil.unauthorized(res, 'Authentication required');
+                return;
+            }
+
+            const viewerId = req.user.userId;
+            const { postId, postOwnerId, engagementType } = req.body;
+
+            if (!postId || !postOwnerId || !engagementType) {
+                ResponseUtil.validationError(
+                    res,
+                    ['postId, postOwnerId, and engagementType are required'],
+                    'Validation failed'
+                );
+                return;
+            }
+
+            const validTypes = ['like', 'comment', 'share', 'save'];
+            if (!validTypes.includes(engagementType)) {
+                ResponseUtil.validationError(
+                    res,
+                    ['Invalid engagementType. Must be one of: ' + validTypes.join(', ')],
+                    'Validation failed'
+                );
+                return;
+            }
+
+            // Don't count self-engagement
+            if (viewerId === postOwnerId) {
+                ResponseUtil.success(res, null, 'Self-engagement not recorded');
+                return;
+            }
+
+            LoggerUtil.info('Recording engagement', {
+                viewerId,
+                postOwnerId,
+                postId,
+                engagementType,
+                correlationId,
+            });
+
+            await AnalyticsService.recordEngagement(postOwnerId, {
+                postId,
+                viewerId,
+                engagementType,
+            });
+
+            ResponseUtil.success(
+                res,
+                { recorded: true },
+                'Engagement recorded successfully'
+            );
+            return;
+
+        } catch (error: any) {
+            LoggerUtil.error('Record engagement failed', {
+                error: error.message,
+                correlationId,
+            });
+
+            ResponseUtil.internalError(res, error.message, error);
+            return;
+        }
+    }
+
+    
 
     /**
      * ✅ GET CLICKS COUNT
