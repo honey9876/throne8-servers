@@ -20,6 +20,7 @@ import PositionController from "./position.controller";
 import PublicationController from "./publication.controller";
 import PatentController from "./patent.controller";
 import HonorController from "./honor.controller";
+export { default as ReportController } from '@/Profile/controllers/report.controller';
 
 
 export {

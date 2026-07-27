@@ -25,3 +25,4 @@ export { default as RepostService } from './activity/repost.service';
 export { default as SkillService } from './skill.service';
 export { default as TestScoreService } from './testScore.service';
 export { default as VolunteerService } from './volunteer.service';
+export { default as ReportService } from '@/Profile/services/report.service';

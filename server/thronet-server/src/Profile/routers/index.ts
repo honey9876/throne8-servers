@@ -20,6 +20,7 @@ import aboutRoutes from './about.routes';
 import contactRoutes from './contact.routes';
 import analyticsRoutes from './analytics.routes';
 import homePostRouter from './activity/homePost.routes';
+import reportRoutes from './report.routes';
 
 // ==================== MAIN ROUTER ====================
 
@@ -101,6 +102,7 @@ router.use('/home-post', homePostRouter);
 router.use('/about', aboutRoutes);
 router.use('/skills', skillRoutes);
 router.use('/analytics', analyticsRoutes);
+router.use('/reports', reportRoutes);
 
 // ==================== EXPORT ====================
 

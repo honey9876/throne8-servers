@@ -65,7 +65,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "express-mongo-sanitize": "^2.2.0",
-    "express-rate-limit": "^8.2.1",
+    "express-rate-limit": "^8.6.1",
     "express-session": "^1.19.0",
     "express-validator": "^7.3.2",
     "franc-min": "^6.2.0",

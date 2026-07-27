@@ -31,7 +31,7 @@ import {
     searchController
 } from '@/Mentorship/controllers/index';
 
-
+export { default as ReportController } from '@/Profile/controllers/report.controller';
 export {
     AuthController,
 

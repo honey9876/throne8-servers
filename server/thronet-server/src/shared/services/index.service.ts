@@ -11,6 +11,7 @@ import AuthService from '@/auth/services/auth.service';
 import { connectionService } from '@/connections/services/index';
 
 import mentorService from '@/Mentorship/services/mentor.service';
+export { default as ReportService } from '@/Profile/services/report.service';
 
 // Dashboard Services
 import { AboutService, ActivityMediaService, AnalyticsService, CareerBreakService, CommentService, ContactService, CourseService, CoverPhotoService, EducationService, ExperienceService, HeadlineService, HonorService, PatentService, PositionService, PostService, ProfilePhotoService, ProjectService, PublicationService, SkillService, TestScoreService, VolunteerService } from '@/Profile/services/index';
