@@ -134,4 +134,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
 
 ENTRYPOINT ["dumb-init", "--"]
 # ✅ No command: override — ye directly chalega, nodemon nahi
-CMD ["node", "--import", "tsx/esm", "server.ts"]
+CMD ["npx", "tsx", "server.ts"]
