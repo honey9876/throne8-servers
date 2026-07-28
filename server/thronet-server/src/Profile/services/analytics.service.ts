@@ -1234,19 +1234,30 @@ class AnalyticsService {
                 v => v.viewedAt >= cutoffDate
             );
 
+           // ✅ FIX: UTC ki jagah IST (India timezone, UTC+5:30) mein date group karo,
+            // taaki graph aur "Who Viewed" list ke dates match karein (dono IST mein consistent ho)
+            const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+            const toISTDateKey = (utcDate: Date): string => {
+                const istDate = new Date(utcDate.getTime() + IST_OFFSET_MS);
+                return istDate.toISOString().split('T')[0]; // YYYY-MM-DD in IST
+            };
+
             // ✅ GROUP BY TIME PERIOD
             const trendData = filteredViews.reduce((acc: any, view) => {
                 let key: string;
                 const date = new Date(view.viewedAt);
 
                 if (groupBy === 'day') {
-                    key = date.toISOString().split('T')[0]; // YYYY-MM-DD
+                    key = toISTDateKey(date); // ✅ FIX: IST date, UTC nahi
                 } else if (groupBy === 'week') {
-                    const weekStart = new Date(date);
-                    weekStart.setDate(date.getDate() - date.getDay());
+                    const istDate = new Date(date.getTime() + IST_OFFSET_MS);
+                    const weekStart = new Date(istDate);
+                    weekStart.setUTCDate(istDate.getUTCDate() - istDate.getUTCDay());
                     key = weekStart.toISOString().split('T')[0];
                 } else { // month
-                    key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                    const istDate = new Date(date.getTime() + IST_OFFSET_MS);
+                    key = `${istDate.getUTCFullYear()}-${String(istDate.getUTCMonth() + 1).padStart(2, '0')}`;
                 }
 
                 if (!acc[key]) {
@@ -2271,6 +2282,82 @@ static async getSearchAppearancesChange(
             });
         }
     }
+    /**
+     * ✅ Record Engagement (like/comment/share/save)
+     * Updates existing impression's engagementType, or creates a new impression
+     * entry if none exists — so getPostAnalytics can count it correctly
+     */
+    static async recordEngagement(
+        postOwnerId: string,
+        engagementData: {
+            postId: string;
+            viewerId: string;
+            engagementType: 'like' | 'comment' | 'share' | 'save';
+        }
+    ): Promise<void> {
+        const correlationId = uuidv4();
+
+        try {
+            LoggerUtil.info('Recording engagement', {
+                postOwnerId,
+                postId: engagementData.postId,
+                engagementType: engagementData.engagementType,
+                correlationId,
+            });
+
+            let analytics = await Analytics.findOne({ userId: postOwnerId });
+
+            if (!analytics) {
+                analytics = new Analytics({
+                    analyticsId: uuidv4(),
+                    userId: postOwnerId,
+                });
+            }
+
+            // Same viewer + post ka existing impression dhoondo
+            const existingImpression = analytics.postImpressions.impressions.find(
+                imp => imp.postId === engagementData.postId && imp.viewerId === engagementData.viewerId
+            );
+
+            if (existingImpression) {
+                // Existing impression ko engagement type se update karo
+                (existingImpression as any).engagementType = engagementData.engagementType;
+            } else {
+                // Agar impression exist nahi karta, naya entry banao
+                analytics.postImpressions.impressions.push({
+                    postId: engagementData.postId,
+                    source: 'feed',
+                    viewerId: engagementData.viewerId,
+                    viewedAt: new Date(),
+                    engagementType: engagementData.engagementType,
+                } as any);
+            }
+
+            await analytics.save();
+
+            emitToUser(postOwnerId, 'analytics:engagement', {
+                type: 'engagement',
+                postId: engagementData.postId,
+                engagementType: engagementData.engagementType,
+                timestamp: new Date(),
+            });
+
+            LoggerUtil.info('Engagement recorded successfully', {
+                postOwnerId,
+                postId: engagementData.postId,
+                correlationId,
+            });
+
+        } catch (error: any) {
+            LoggerUtil.error('Record engagement failed', {
+                error: error.message,
+                postOwnerId,
+                correlationId,
+            });
+            // Don't throw - non-critical
+        }
+    }
+
 
     // Add these NEW methods:
 

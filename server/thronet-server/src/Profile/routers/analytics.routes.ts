@@ -872,6 +872,22 @@ router.post(
     AnalyticsController.recordUniqueVisitor as any
 );
 
+
+/**
+ * @route   POST /api/v1/analytics/record-engagement
+ * @desc    Record engagement (like/comment/share/save) on a post
+ * @access  Private
+ * @body    { postId, postOwnerId, engagementType }
+ * Kam: Like/comment/share hone par analytics update karta hai
+ */
+router.post(
+    '/record-engagement',
+    AuthMiddleware.authenticate as any,
+    rateLimitMiddleware({ maxRequests: 200, windowMs: 60000 }),
+    AnalyticsController.recordEngagement as any
+);
+
+
 /**
  * @route   GET /api/v1/analytics/clicks/count
  * @desc    Get clicks count with breakdown
