@@ -23,27 +23,20 @@ class MentorController {
         return;
       }
 
-      const parseJsonField = (field: any) => {
-        if (typeof field === 'string') {
-          try { return JSON.parse(field); } catch { return field; }
-        }
-        return field;
-      };
-
       const input: CreateMentorInput = {
         userId: req.user!.id,
         companyId: req.body.companyId,
         title: req.body.title,
         bio: req.body.bio,
         tagline: req.body.tagline,
-        domains: parseJsonField(req.body.domains),
-        skills: parseJsonField(req.body.skills),
-        languages: parseJsonField(req.body.languages),
-        experience: parseJsonField(req.body.experience),
-        pricing: parseJsonField(req.body.pricing),
-        availability: parseJsonField(req.body.availability),
-        socialProof: parseJsonField(req.body.socialProof),
-        preferences: parseJsonField(req.body.preferences),
+        domains: req.body.domains,
+        skills: req.body.skills,
+        languages: req.body.languages,
+        experience: req.body.experience,
+        pricing: req.body.pricing,
+        availability: req.body.availability,
+        socialProof: req.body.socialProof,
+        preferences: req.body.preferences,
         profilePicFile: req.file,
       };
 
@@ -70,25 +63,18 @@ class MentorController {
     try {
       const { id } = req.params;
 
-      const parseJsonField = (field: any) => {
-        if (typeof field === 'string') {
-          try { return JSON.parse(field); } catch { return field; }
-        }
-        return field;
-      };
-
       const updates: UpdateMentorInput = {
         title: req.body.title,
         bio: req.body.bio,
         tagline: req.body.tagline,
-        domains: parseJsonField(req.body.domains),
-        skills: parseJsonField(req.body.skills),
-        languages: parseJsonField(req.body.languages),
-        experience: parseJsonField(req.body.experience),
-        pricing: parseJsonField(req.body.pricing),
-        availability: parseJsonField(req.body.availability),
-        socialProof: parseJsonField(req.body.socialProof),
-        preferences: parseJsonField(req.body.preferences),
+        domains: req.body.domains,
+        skills: req.body.skills,
+        languages: req.body.languages,
+        experience: req.body.experience,
+        pricing: req.body.pricing,
+        availability: req.body.availability,
+        socialProof: req.body.socialProof,
+        preferences: req.body.preferences,
         status: req.body.status,
       };
 
