@@ -23,6 +23,7 @@ import ResponseUtil from '@/shared/response.util';
 import { User } from '../models';
 import passport from '@/config/oauth/passport.config';
 import { csrfProtection } from '@/config/security/csrf.config';
+import { updateDateOfBirth } from '../controllers/dob.controller';
 
 
 const router = express.Router();
@@ -757,9 +758,10 @@ router.post(
             next(error);
         }
     }
+
 );
 
-
+router.patch('/date-of-birth', authenticateJWT, updateDateOfBirth);
 // ==================== GOOGLE OAUTH ROUTES ====================
 
 router.get('/csrf-token', csrfProtection, (req: Request, res: Response) => {

@@ -23,7 +23,8 @@ import mutualRouter from './mutual.routes';
 import searchRoutes from './search.routes';
 
 // Mount other connection-related routes here as needed
-
+import catchupRoutes from './catchup.routes';
+router.use('/catchup', catchupRoutes);
 // Use the routers
 router.use('/connection', connectionRouter);  
 router.use('/requests', requestRouter);
