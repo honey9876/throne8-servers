@@ -62,7 +62,7 @@ class RefundService {
       logger.info(`Processing refund for session: ${input.sessionId}`);
 
       // Step 1: Get session details
-      const session = await SessionMentor.findById(input.sessionId);
+      const session = await SessionMentor.findOne({ sessionId: input.sessionId });
       if (!session) {
         throw new Error('Session not found');
       }
@@ -446,7 +446,7 @@ class RefundService {
       cancellationLog.refundStatus = 'failed';
       await cancellationLog.save();
 
-      const session = await SessionMentor.findById(cancellationLog.sessionId);
+      const session = await SessionMentor.findOne({ sessionId: cancellationLog.sessionId });
       if (session) {
         const mentee = await User.findByUserId(session.menteeId);
         if (!mentee) {
@@ -522,7 +522,7 @@ class RefundService {
         throw new Error('Can only retry failed refunds');
       }
 
-      const session = await SessionMentor.findById(cancellationLog.sessionId);
+      const session = await SessionMentor.findOne({ sessionId: cancellationLog.sessionId });
       if (!session) {
         throw new Error('Session not found');
       }

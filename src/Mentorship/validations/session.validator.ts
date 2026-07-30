@@ -38,7 +38,7 @@ class SessionValidator {
     duration: Joi.number().min(5).max(480).required(), // minutes
 
     // Schedule — mentor kis time available hai
-    scheduledAt: Joi.date().iso().greater('now').required(),
+    scheduledAt: Joi.date().iso().required(),
     timezone: Joi.string().required(),
 
     // Follow-up settings
@@ -51,9 +51,9 @@ class SessionValidator {
   });
 
   bookSession = Joi.object({
-    sessionId: Joi.string().required(),          // ✅ NEW — kis session ko book karna hai
+    sessionId: Joi.string().required(),
     mentorId: Joi.string().required(),
-    availabilityId: Joi.string().required(),
+    availabilityId: Joi.string().allow('').optional(),  // empty for fixed-schedule services
     slotTime: Joi.string().required(),
     scheduledAt: Joi.date().iso().required(),
     timezone: Joi.string().required(),
@@ -146,11 +146,9 @@ class SessionValidator {
   rescheduleSession = Joi.object({
     newScheduledAt: Joi.date()
       .iso()
-      .greater('now')
       .required()
       .messages({
         'date.base': 'Invalid scheduled date',
-        'date.greater': 'New scheduled time must be in the future',
         'any.required': 'New scheduled time is required',
       }),
 

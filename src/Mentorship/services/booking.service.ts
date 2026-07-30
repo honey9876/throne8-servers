@@ -238,9 +238,21 @@ class BookingService {
     try {
       logger.info(`❌ Cancelling booking: ${sessionId}`);
 
-      const session = await SessionMentor.findById(sessionId);
+      const session = await SessionMentor.findOne({ sessionId });
       if (!session) {
         throw new Error('Session not found');
+      }
+
+      // If there's no mentee, it's just a mentor's service offering (template).
+      // We don't need to process refunds or delete calendar events.
+      if (!session.menteeId) {
+        logger.info(`Session is a template. Cancelling directly: ${sessionId}`);
+        const updatedSession = await sessionService.cancelSession(sessionId, userId, reason, authToken);
+        return {
+          session: updatedSession,
+          refundAmount: 0,
+          refundEligible: false,
+        };
       }
 
       // ✅ FIX: Delegate to refund.service — single source of truth for refund logic
@@ -313,7 +325,7 @@ class BookingService {
     try {
       logger.info(`🔄 Rescheduling booking: ${sessionId}`);
 
-      const session = await SessionMentor.findById(sessionId);
+      const session = await SessionMentor.findOne({ sessionId });
       if (!session) {
         throw new Error('Session not found');
       }
@@ -398,7 +410,7 @@ class BookingService {
    */
   async sendSessionReminder(sessionId: string, hoursUntil: number): Promise<void> {
     try {
-      const session = await SessionMentor.findById(sessionId);
+      const session = await SessionMentor.findOne({ sessionId });
       if (!session) return;
 
       const [mentee, mentor] = await Promise.all([

@@ -72,6 +72,7 @@ const SessionMentorSchema = new Schema<SessionMentorshipDocument>(
     },
     notes:       { type: String, trim: true },
     attachments: [String],
+    thumbnailImage: { type: String },
     pricing: {
       basePrice:    { type: Number, required: true, min: 0 },
       platformFee:  { type: Number, required: true, min: 0 },

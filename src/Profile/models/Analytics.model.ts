@@ -520,7 +520,7 @@ const AnalyticsSchema = new Schema<IAnalytics, IAnalyticsModel>(
 
 // ==================== INDEXES ====================
 
-AnalyticsSchema.index({ userId: 1 }, { unique: true });
+// AnalyticsSchema.index({ userId: 1 }, { unique: true });
 AnalyticsSchema.index({ 'profileViews.views.viewedAt': -1 });
 AnalyticsSchema.index({ 'postImpressions.impressions.viewedAt': -1 });
 AnalyticsSchema.index({ 'searchAppearances.appearances.appearedAt': -1 });

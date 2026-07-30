@@ -31,12 +31,12 @@ router.get('/health', (_req, res) => {
 router.post('/test/trigger-reminders', async (_req, res) => {
   try {
     await ReminderCron.triggerManually();
-    res.json({ 
+    res.json({
       success: true,
-      message: 'Reminders triggered successfully!' 
+      message: 'Reminders triggered successfully!'
     });
-  } catch(error : any) {
-    res.status(500).json({ 
+  } catch (error: any) {
+    res.status(500).json({
       success: false,
       message: 'Failed to trigger reminders',
       error: error instanceof Error ? error.message : 'Unknown error'

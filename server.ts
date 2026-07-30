@@ -13,10 +13,10 @@ import http from 'http';
 
 // Override default globalAgent timeouts to prevent Node.js v24 5-second connection timeout on slow network/handshake connections
 if ((https.globalAgent as any).options) {
-  (https.globalAgent as any).options.timeout = 120000;
+    (https.globalAgent as any).options.timeout = 120000;
 }
 if ((http.globalAgent as any).options) {
-  (http.globalAgent as any).options.timeout = 120000;
+    (http.globalAgent as any).options.timeout = 120000;
 }
 
 import { Server } from 'http';
