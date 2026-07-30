@@ -62,7 +62,11 @@ router.get(
     // rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
     PostController.getUserPostsPerformance as any
 );
-
+router.get(
+    '/posts/:postId/reactors',
+     AuthMiddleware.authenticate as any, 
+     PostController.getPostReactors as any
+    );
 /**
  * @route   GET /api/v1/activity/posts/:postId/analytics
  * @desc    Get detailed post analytics
