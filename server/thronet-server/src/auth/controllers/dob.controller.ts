@@ -12,12 +12,15 @@ interface UpdateDobBody {
  * PATCH /auth/date-of-birth
  * Lets an authenticated user set/update their date of birth.
  * Needed so the Catch Up feed can show birthdays for their connections.
+ *
+ * ✅ FIXED: uses req.user.id (matches the global Express.Request.user type
+ * declared as `Partial<IUser> & { id: string }`), not req.user.userId.
  */
 export const updateDateOfBirth = async (
-    req: Request<{}, any, UpdateDobBody> & { user?: { userId: string } },
+    req: Request<{}, any, UpdateDobBody>,
     res: Response
 ): Promise<void> => {
-    const userId = req.user?.userId;
+    const userId = req.user?.id;
     const { dateOfBirth } = req.body;
 
     try {
@@ -57,7 +60,7 @@ export const updateDateOfBirth = async (
         LoggerUtil.info('Date of birth updated', { userId });
         ResponseUtil.success(
             res,
-            { dateOfBirth: updatedUser.dateOfBirth },
+            { dateOfBirth: (updatedUser as any).dateOfBirth },
             'Date of birth updated successfully'
         );
         return;
@@ -74,12 +77,16 @@ export const updateDateOfBirth = async (
 export default { updateDateOfBirth };
 
 /**
- * ✅ SETUP NOTE:
- * Apne `src/auth/routes/auth.routes.ts` mein ye route add karo
- * (authentication middleware ke saath, jo baaki protected routes use karte hain):
+ * ✅ SETUP NOTE — auth.routes.ts mein ye add karo:
  *
+ *   import AuthMiddleware from '@/shared/middlewares/auth.middleware';
  *   import { updateDateOfBirth } from '../controllers/dob.controller';
- *   router.patch('/date-of-birth', authenticateJWT, updateDateOfBirth);
+ *
+ *   router.patch('/date-of-birth', AuthMiddleware.authenticate, updateDateOfBirth);
+ *
+ * NOTE: `AuthMiddleware.authenticate` ek static class method hai (function nahi),
+ * isliye seedha reference pass karo jaisa upar dikhaya — call mat karo (yani
+ * AuthMiddleware.authenticate() nahi likhna, sirf AuthMiddleware.authenticate).
  *
  * Final URL: PATCH /api/v1/auth/date-of-birth
  */

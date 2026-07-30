@@ -761,7 +761,7 @@ router.post(
 
 );
 
-router.patch('/date-of-birth', authenticateJWT, updateDateOfBirth);
+router.patch('/date-of-birth', AuthMiddleware.authenticate as any, updateDateOfBirth);
 // ==================== GOOGLE OAUTH ROUTES ====================
 
 router.get('/csrf-token', csrfProtection, (req: Request, res: Response) => {
