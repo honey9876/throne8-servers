@@ -438,8 +438,51 @@ PostSchema.statics.incrementLikes = async function (
     const entry = doc.posts.find((p: IPostEntry) => p.entryId === entryId && !p.isDeleted);
     if (!entry) throw new Error('Post entry not found');
     if (entry.likedBy.includes(userId)) throw new Error('Already liked');
+
     entry.likedBy.push(userId);
     entry.likesCount++;
+
+    // ✅ FIX: keep reactions[] in sync so Reactors modal shows this user too
+    if (!entry.reactions) entry.reactions = [];
+    if (!entry.reactionCounts) {
+        entry.reactionCounts = { like: 0, celebrate: 0, support: 0, love: 0, insightful: 0, funny: 0 };
+    }
+    const existingReactionIndex = entry.reactions.findIndex((r: IReaction) => r.userId === userId);
+    if (existingReactionIndex === -1) {
+        entry.reactions.push({ userId, type: 'like', reactedAt: new Date() });
+        entry.reactionCounts.like = (entry.reactionCounts.like || 0) + 1;
+    }
+
+    await doc.save();
+    return entry;
+};
+
+PostSchema.statics.decrementLikes = async function (
+    entryId: string,
+    userId: string
+): Promise<IPostEntry> {
+    const doc = await this.findOne({ 'posts.entryId': entryId });
+    if (!doc) throw new Error('Post not found');
+    const entry = doc.posts.find((p: IPostEntry) => p.entryId === entryId && !p.isDeleted);
+    if (!entry) throw new Error('Post entry not found');
+    const index = entry.likedBy.indexOf(userId);
+    if (index === -1) throw new Error('Not liked yet');
+
+    entry.likedBy.splice(index, 1);
+    entry.likesCount = Math.max(0, entry.likesCount - 1);
+
+    // ✅ FIX: remove from reactions[] too
+    if (entry.reactions) {
+        const reactionIndex = entry.reactions.findIndex((r: IReaction) => r.userId === userId);
+        if (reactionIndex !== -1) {
+            const removedType = entry.reactions[reactionIndex].type;
+            entry.reactions.splice(reactionIndex, 1);
+            if (entry.reactionCounts) {
+                entry.reactionCounts[removedType] = Math.max(0, entry.reactionCounts[removedType] - 1);
+            }
+        }
+    }
+
     await doc.save();
     return entry;
 };
