@@ -40,6 +40,11 @@ if (this.isClusterMode) {
 }
 ```
 
+
+
+
+
+
 **Other fixes in `redis.service.ts`:**
 - `getMasterNodes()` helper — standalone me single client return karta hai, cluster me `.nodes('master')`
 - `getSlaveNodes()` — sirf cluster mode me meaningful
