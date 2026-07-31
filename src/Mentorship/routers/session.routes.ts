@@ -1,8 +1,26 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { sessionController } from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 import { validateJoi } from '@/shared/middlewares/validation.middleware';
 import sessionValidator from '../validations/session.validator';
+import { uploadSingle } from '@/shared/upload/upload';
+
+const parseMultipartJsonFields = (req: Request, res: Response, next: NextFunction) => {
+  if (req.is('multipart/form-data') && req.body) {
+    const fieldsToParse = ['pricing', 'followUp'];
+    for (const field of fieldsToParse) {
+      if (typeof req.body[field] === 'string') {
+        try {
+          req.body[field] = JSON.parse(req.body[field]);
+        } catch (e) {
+          // Let Joi handle validation errors
+        }
+      }
+    }
+  }
+  next();
+};
+
 
 const router = Router();
 
@@ -22,6 +40,8 @@ router.use(AuthMiddleware.authenticate as any);
  */
 router.post(
   '/create',
+  uploadSingle('thumbnailImage'),
+  parseMultipartJsonFields as any,
   validateJoi(sessionValidator.createSession),
   sessionController.createSession
 );
@@ -139,6 +159,8 @@ router.get('/:id/refund-estimate', sessionController.getRefundEstimate);
  */
 router.put(
   '/:id',
+  uploadSingle('thumbnailImage'),
+  parseMultipartJsonFields as any,
   validateJoi(sessionValidator.updateSession),
   sessionController.updateSession
 );
