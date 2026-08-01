@@ -58,6 +58,7 @@ interface RegisterBody {
     lastName?: string;
     location: string;               // ✅ NEW: Required city name
     phoneNumber?: string;
+    
 
     // Onboarding fields
     userType: 'working' | 'student' | 'fresher';  // ✅ NEW: Required
@@ -103,6 +104,10 @@ interface UpdateProfileBody {
     firstName?: string;
     lastName?: string;
     location?: string;
+    currentPosition?: string;
+    company?: string;
+    education?: string;
+    pronouns?: string;
     onboarding?: {
         userType?: 'working' | 'student' | 'fresher';
         workingProfile?: {
@@ -150,6 +155,10 @@ interface ValidationResult {
         firstName: string;
         lastName?: string;
         location: string;
+        currentPosition?: string;
+        company?: string;
+        education?: string;
+        pronouns?: string;
         phoneNumber?: string;
         userType: 'working' | 'student' | 'fresher';
 
@@ -207,6 +216,10 @@ class AuthController {
                 location,                  // ✅ NEW
                 phoneNumber,
                 userType,                  // ✅ NEW
+                currentPosition,           // ✅ NEW
+                company,                   // ✅ NEW
+                education,                 // ✅ NEW
+                pronouns,                  // ✅ NEW
 
                 // Working fields
                 jobTitle,
@@ -1488,16 +1501,20 @@ class AuthController {
                 firstName,
                 lastName,
                 location,
+                currentPosition,
+                company,
+                education,
+                pronouns,
                 onboarding,
                 preferences
             } = req.body;
 
             // ✅ Validate at least one field is provided
             if (!email && !password && !phoneNumber && !firstName && !lastName &&
-                !location && !onboarding && !preferences) {
+                !location && !currentPosition && !company && !education && !pronouns && !onboarding && !preferences) {
                 ResponseUtil.validationError(
                     res,
-                    ['At least one field (email, password, phoneNumber, firstName, lastName, location, onboarding, preferences) is required'],
+                    ['At least one field (email, password, phoneNumber, firstName, lastName, location, currentPosition, company, education, pronouns, onboarding, preferences) is required'],
                     'No fields provided'
                 );
                 return;
@@ -1518,6 +1535,10 @@ class AuthController {
             if (firstName !== undefined) updates.firstName = firstName;
             if (lastName !== undefined) updates.lastName = lastName;
             if (location !== undefined) updates.location = location;
+            if (currentPosition !== undefined) updates.currentPosition = currentPosition;
+            if (company !== undefined) updates.company = company;
+            if (education !== undefined) updates.education = education;
+            if (pronouns !== undefined) updates.pronouns = pronouns;
             if (onboarding !== undefined) updates.onboarding = onboarding;
             if (preferences !== undefined) updates.preferences = preferences;
 
