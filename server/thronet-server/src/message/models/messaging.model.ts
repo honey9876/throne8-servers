@@ -19,6 +19,17 @@ const ReactionSchema = new Schema(
     { _id: false }
 );
 
+// Lightweight snapshot of the original message, embedded on the reply message
+const ReplySnapshotSchema = new Schema(
+    {
+        messageId: { type: String, required: true },
+        text: { type: String },
+        senderId: { type: String, required: true },
+        type: { type: String },
+    },
+    { _id: false }
+);
+
 console.log('🔍 message.model.ts TOP =>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>');
 
 const MessageSchema = new Schema<IMessage>(
@@ -91,6 +102,19 @@ const MessageSchema = new Schema<IMessage>(
         pinnedAt: { type: Date },
         pinnedBy: { type: String },
 
+        // Reply — snapshot of the message being replied to
+        replyTo: {
+            type: ReplySnapshotSchema,
+            default: undefined,
+        },
+
+        // Edit tracking
+        isEdited: {
+            type: Boolean,
+            default: false,
+        },
+        editedAt: { type: Date },
+
         // Soft delete
         isDeleted: {
             type: Boolean,
@@ -100,7 +124,8 @@ const MessageSchema = new Schema<IMessage>(
         deletedAt: { type: Date },
         deletedBy: { type: String },
 
-        // Flexible metadata for system/reminder messages
+        // Flexible metadata for system/reminder messages and rich previews
+        // (e.g. metadata.postPreview = { postId, title, image, authorName, authorAvatar })
         metadata: {
             type: Schema.Types.Mixed,
             default: undefined,
@@ -152,6 +177,9 @@ MessageSchema.methods.toResponse = function (currentUserId: string) {
             reactedByMe: r.userIds.includes(currentUserId),
         })),
         isPinned: this.isPinned,
+        replyTo: this.replyTo || null,
+        isEdited: this.isEdited || false,
+        editedAt: this.editedAt?.toISOString(),
         metadata: this.metadata,
         createdAt: this.createdAt.toISOString(),
         deliveredAt: this.deliveredAt?.toISOString(),
