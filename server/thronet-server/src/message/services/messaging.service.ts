@@ -9,6 +9,7 @@ import { Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import {
     SendMessageDTO,
+    EditMessageDTO,
     GetHistoryDTO,
     SearchMessagesDTO,
     UpdateStatusDTO,
@@ -20,11 +21,18 @@ import {
     PaginatedMessages,
     SocketNewMessage,
     SocketStatusUpdate,
+    SocketEditedMessage,
     ConversationType,
+    IReplySnapshot,
 } from '../types/message.types';
 // import { getIO } from '../../socket';   // your existing Socket.IO singleton
 import { LoggerUtil as logger } from '../../shared/logger.util';
 import { conversationRepo, messageRepo } from '../repository/messaging.repository';
+// Direct model import — used only for the two new operations (reply-snapshot backfill
+// and edit) that the existing repository layer doesn't expose yet. If you later add
+// `messageRepo.attachReply()` / `messageRepo.editText()`, swap these calls out to keep
+// everything going through the repository layer.
+import Message from '../models/messaging.model';
 
 // ==================== HELPERS ====================
 
@@ -54,6 +62,9 @@ function buildMessageResponse(msg: any, currentUserId: string): MessageResponse 
             reactedByMe: (r.userIds || []).includes(currentUserId),
         })),
         isPinned: msg.isPinned,
+        replyTo: msg.replyTo ?? null,
+        isEdited: msg.isEdited ?? false,
+        editedAt: msg.editedAt ? new Date(msg.editedAt).toISOString() : undefined,
         metadata: msg.metadata,
         createdAt: new Date(msg.createdAt).toISOString(),
         deliveredAt: msg.deliveredAt ? new Date(msg.deliveredAt).toISOString() : undefined,
@@ -72,10 +83,13 @@ class MessageService {
      * Steps:
      *   1. Resolve conversationId (UUID → ObjectId)
      *   2. Verify sender is a member
-     *   3. Persist message to DB
-     *   4. Update conversation's lastMessage snapshot
-     *   5. Increment unread counts for recipients
-     *   6. Emit Socket.IO event to conversation room
+     *   3. Resolve replyTo snapshot (if replying)
+     *   4. Persist message to DB
+     *   5. Attach reply snapshot (if any) — separate step so we don't need to
+     *      touch the repository's CreateMessageInput shape
+     *   6. Update conversation's lastMessage snapshot
+     *   7. Increment unread counts for recipients
+     *   8. Emit Socket.IO event to conversation room
      */
     async sendMessage(
         senderUserId: string,
@@ -93,8 +107,28 @@ class MessageService {
             throw Object.assign(new Error('You are not a member of this conversation'), { status: 403 });
         }
 
-        // Step 3: persist
-        const message = await messageRepo.create({
+        // Step 3: resolve reply snapshot (only if the original message still exists
+        // and belongs to the same conversation)
+        let replyTo: IReplySnapshot | null = null;
+        if (dto.replyToMessageId) {
+            const original = await Message.findOne({
+                messageId: dto.replyToMessageId,
+                conversationId: conversationObjectId,
+                isDeleted: false,
+            }).lean();
+
+            if (original) {
+                replyTo = {
+                    messageId: original.messageId,
+                    text: original.text,
+                    senderId: original.senderId,
+                    type: original.type,
+                };
+            }
+        }
+
+        // Step 4: persist
+        let message = await messageRepo.create({
             conversationId: conversationObjectId,
             conversationUUID: dto.conversationId,
             senderId: senderUserId,
@@ -105,13 +139,24 @@ class MessageService {
             metadata: dto.metadata,
         });
 
-        // Step 4 + 5: update conversation concurrently
+        // Step 5: attach reply snapshot if present (kept outside repo.create so we
+        // don't need to modify CreateMessageInput / the repository implementation)
+        if (replyTo) {
+            const updated = await Message.findOneAndUpdate(
+                { messageId: message.messageId },
+                { $set: { replyTo } },
+                { new: true }
+            );
+            if (updated) message = updated;
+        }
+
+        // Step 6 + 7: update conversation concurrently
         await Promise.all([
             conversationRepo.updateLastMessage(conversationObjectId, message),
             conversationRepo.incrementUnreadForRecipients(conversationObjectId, senderUserId),
         ]);
 
-        // Step 6: real-time emit to everyone in the conversation room
+        // Step 8: real-time emit to everyone in the conversation room
         const socketPayload: SocketNewMessage = {
             messageId: message.messageId,
             conversationId: dto.conversationId,
@@ -120,6 +165,8 @@ class MessageService {
             text: message.text,
             mediaUrl: message.mediaUrl,
             status: MessageStatus.SENT,
+            replyTo: replyTo ?? null,
+            metadata: message.metadata,
             createdAt: message.createdAt.toISOString(),
         };
 
@@ -136,12 +183,76 @@ class MessageService {
             messageId: message.messageId,
             conversationId: dto.conversationId,
             senderId: senderUserId,
+            isReply: !!replyTo,
         });
 
         return buildMessageResponse(message, senderUserId);
     }
 
-    // ── 2. GET MESSAGE HISTORY (cursor-based pagination) ────────────────────────
+    // ── 2. EDIT MESSAGE ──────────────────────────────────────────────────────────
+
+    /**
+     * Edit the text of your own message. Only text messages are editable.
+     * Emits `message:edited` to the conversation room.
+     */
+    async editMessage(
+        userId: string,
+        messageId: string,
+        newText: string
+    ): Promise<MessageResponse> {
+        const trimmed = (newText || '').trim();
+        if (!trimmed) {
+            throw Object.assign(new Error('Message text cannot be empty'), { status: 400 });
+        }
+        if (trimmed.length > 4000) {
+            throw Object.assign(new Error('Message cannot exceed 4000 characters'), { status: 400 });
+        }
+
+        const message = await Message.findOne({ messageId, isDeleted: false });
+        if (!message) {
+            throw Object.assign(new Error('Message not found'), { status: 404 });
+        }
+        if (message.senderId !== userId) {
+            throw Object.assign(new Error('You can only edit your own messages'), { status: 403 });
+        }
+        if (message.type !== MessageType.TEXT) {
+            throw Object.assign(new Error('Only text messages can be edited'), { status: 400 });
+        }
+
+        message.text = trimmed;
+        message.isEdited = true;
+        message.editedAt = new Date();
+        await message.save();
+
+        const conv = await conversationRepo.findByUUID(message.conversationId.toString());
+
+        // If this was the conversation's lastMessage, keep the sidebar preview in sync
+        if (conv?.lastMessage?.messageId === message.messageId) {
+            await conversationRepo.updateLastMessage(
+                message.conversationId as Types.ObjectId,
+                message
+            );
+        }
+
+        const socketPayload: SocketEditedMessage = {
+            messageId: message.messageId,
+            conversationId: conv?.conversationId ?? message.conversationId.toString(),
+            text: message.text,
+            editedAt: message.editedAt.toISOString(),
+        };
+
+        try {
+            const { getIO } = await import('../../socket');
+            const io = getIO();
+            io.to(`conversation:${socketPayload.conversationId}`).emit('message:edited', socketPayload);
+        } catch (err) {
+            logger.warn('Socket emit failed for message:edited', { error: (err as Error).message });
+        }
+
+        return buildMessageResponse(message, userId);
+    }
+
+    // ── 3. GET MESSAGE HISTORY (cursor-based pagination) ────────────────────────
 
     /**
      * Returns messages for a conversation older than the given cursor.
@@ -185,7 +296,7 @@ class MessageService {
         };
     }
 
-    // ── 3. MARK DELIVERED ───────────────────────────────────────────────────────
+    // ── 4. MARK DELIVERED ───────────────────────────────────────────────────────
 
     /**
      * Called by the recipient's device when a message arrives (WebSocket connect).
@@ -220,7 +331,7 @@ class MessageService {
         }
     }
 
-    // ── 4. MARK SEEN (bulk, per conversation) ───────────────────────────────────
+    // ── 5. MARK SEEN (bulk, per conversation) ───────────────────────────────────
 
     /**
      * Called when a user opens a conversation.
@@ -261,7 +372,7 @@ class MessageService {
         }
     }
 
-    // ── 5. SEARCH MESSAGES ──────────────────────────────────────────────────────
+    // ── 6. SEARCH MESSAGES ──────────────────────────────────────────────────────
 
     async searchMessages(
         userId: string,
@@ -301,7 +412,7 @@ class MessageService {
         };
     }
 
-    // ── 6. GET CONVERSATION LIST ────────────────────────────────────────────────
+    // ── 7. GET CONVERSATION LIST ────────────────────────────────────────────────
 
     async getConversations(userId: string): Promise<ConversationResponse[]> {
         const conversations = await conversationRepo.findByUserId(userId);
@@ -331,7 +442,7 @@ class MessageService {
         });
     }
 
-    // ── 7. GET OR CREATE DIRECT CONVERSATION ────────────────────────────────────
+    // ── 8. GET OR CREATE DIRECT CONVERSATION ────────────────────────────────────
 
     async getOrCreateDirectConversation(
         userIdA: string,
@@ -354,7 +465,7 @@ class MessageService {
         };
     }
 
-    // ── 8. REACTIONS ────────────────────────────────────────────────────────────
+    // ── 9. REACTIONS ────────────────────────────────────────────────────────────
 
     async toggleReaction(
         userId: string,
@@ -389,7 +500,7 @@ class MessageService {
         return buildMessageResponse(message, userId);
     }
 
-    // ── 9. PIN / UNPIN ──────────────────────────────────────────────────────────
+    // ── 10. PIN / UNPIN ─────────────────────────────────────────────────────────
 
     async togglePin(
         userId: string,
@@ -412,7 +523,7 @@ class MessageService {
         return buildMessageResponse(updated!, userId);
     }
 
-    // ── 10. GET PINNED MESSAGES ─────────────────────────────────────────────────
+    // ── 11. GET PINNED MESSAGES ─────────────────────────────────────────────────
 
     async getPinnedMessages(
         userId: string,
@@ -432,7 +543,7 @@ class MessageService {
         return pinned.map((m) => buildMessageResponse(m, userId));
     }
 
-    // ── 11. SOFT DELETE MESSAGE ─────────────────────────────────────────────────
+    // ── 12. SOFT DELETE MESSAGE ─────────────────────────────────────────────────
 
     async deleteMessage(userId: string, messageId: string): Promise<void> {
         const message = await messageRepo.findByUUID(messageId);

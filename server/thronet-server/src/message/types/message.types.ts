@@ -44,6 +44,17 @@ export interface IReaction {
 }
 
 /**
+ * Lightweight snapshot of the message being replied to.
+ * Stored directly on the reply message so we never need a join to render it.
+ */
+export interface IReplySnapshot {
+    messageId: string;   // UUID of the original message
+    text?: string;
+    senderId: string;    // UUID
+    type: MessageType;
+}
+
+/**
  * Message Mongoose Document Interface
  * _id        = ObjectId (internal only)
  * messageId  = UUID     (external, used in API responses/routes)
@@ -73,6 +84,13 @@ export interface IMessage extends Document {
     isPinned: boolean;
     pinnedAt?: Date;
     pinnedBy?: string;        // UUID of pinner
+
+    // ── Reply ──
+    replyTo?: IReplySnapshot | null;
+
+    // ── Edit ──
+    isEdited: boolean;
+    editedAt?: Date;
 
     // ── Soft Delete ──
     isDeleted: boolean;
@@ -132,6 +150,12 @@ export interface SendMessageDTO {
     mediaUrl?: string;
     mediaDuration?: number;
     metadata?: Record<string, unknown>;
+    replyToMessageId?: string; // UUID of the message being replied to
+}
+
+export interface EditMessageDTO {
+    messageId: string;  // UUID
+    text: string;
 }
 
 export interface GetHistoryDTO {
@@ -171,6 +195,9 @@ export interface MessageResponse {
     status: MessageStatus;
     reactions: { emoji: string; count: number; reactedByMe: boolean }[];
     isPinned: boolean;
+    replyTo?: IReplySnapshot | null;
+    isEdited?: boolean;
+    editedAt?: string;
     metadata?: Record<string, unknown>;
     createdAt: string;        // ISO string
     deliveredAt?: string;
@@ -212,6 +239,8 @@ export interface SocketNewMessage {
     text?: string;
     mediaUrl?: string;
     status: MessageStatus;
+    replyTo?: IReplySnapshot | null;
+    metadata?: Record<string, unknown>;
     createdAt: string;
 }
 
@@ -220,6 +249,13 @@ export interface SocketStatusUpdate {
     conversationId: string;
     status: MessageStatus;
     updatedAt: string;
+}
+
+export interface SocketEditedMessage {
+    messageId: string;
+    conversationId: string;
+    text: string;
+    editedAt: string;
 }
 
 export interface SocketTypingEvent {
