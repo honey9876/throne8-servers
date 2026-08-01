@@ -62,7 +62,11 @@ router.get(
     // rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
     PostController.getUserPostsPerformance as any
 );
-
+router.get(
+    '/posts/:postId/reactors',
+     AuthMiddleware.authenticate as any, 
+     PostController.getPostReactors as any
+    );
 /**
  * @route   GET /api/v1/activity/posts/:postId/analytics
  * @desc    Get detailed post analytics
@@ -592,4 +596,4 @@ router.get(
 );
 
 
-export default router;
+export default router;// Force Railway rebuild 07/30/2026 17:41:23

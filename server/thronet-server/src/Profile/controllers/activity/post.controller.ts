@@ -1101,6 +1101,49 @@ class PostController {
             return;
         }
     }
+
+    /**
+     * ✅ NEW: Get all users who reacted to a specific post (Reactions modal)
+     * GET /api/v1/activity/posts/:postId/reactors
+     */
+    static async getPostReactors(
+        req: Request<{ postId: string }> & { user?: UserPayload },
+        res: Response
+    ): Promise<void> {
+        const correlationId = (req as any).correlationId || uuidv4();
+
+        try {
+            if (!req.user?.userId) {
+                ResponseUtil.unauthorized(res, 'Authentication required');
+                return;
+            }
+
+            const entryId = req.params.postId;
+            if (!entryId) {
+                ResponseUtil.badRequest(res, 'Post ID is required');
+                return;
+            }
+
+            const result = await PostService.getPostReactors(entryId);
+
+            ResponseUtil.success(res, result, 'Reactors fetched successfully');
+            return;
+
+        } catch (error: any) {
+            LoggerUtil.error('Get post reactors failed', {
+                error: error.message,
+                entryId: req.params.postId,
+                correlationId,
+            });
+
+            if (error.message === 'Post not found') {
+                ResponseUtil.notFound(res, 'Post not found');
+                return;
+            }
+            ResponseUtil.internalError(res, error.message, error);
+            return;
+        }
+    }
 }
 
 export default PostController;

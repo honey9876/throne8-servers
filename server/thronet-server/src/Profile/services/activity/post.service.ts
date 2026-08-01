@@ -1413,6 +1413,53 @@ class PostService {
         }
     }
 
+    /**
+     * ✅ NEW: Get everyone who reacted to a specific post (for Reactions modal)
+     * Merges the full `reactions[]` array (multi-type) with legacy `likedBy[]`
+     * (users who liked via the old simple like endpoint before reactions
+     * existed, or liked without ever hitting the /react endpoint) so no
+     * likers are missed.
+     */
+    static async getPostReactors(entryId: string): Promise<any> {
+        const correlationId = uuidv4();
+
+        try {
+            const doc = await Post.findOne({ 'posts.entryId': entryId }).lean();
+            if (!doc) throw new Error('Post not found');
+
+            const entry = (doc as any).posts.find(
+                (p: any) => p.entryId === entryId && !p.isDeleted
+            );
+            if (!entry) throw new Error('Post not found');
+
+            const reactions = entry.reactions || [];
+            const reactedUserIds = new Set(reactions.map((r: any) => r.userId));
+
+            // ✅ Merge: reactions[] (has real type) + likedBy fallback (type='like')
+            const merged = [...reactions];
+            (entry.likedBy || []).forEach((uid: string) => {
+                if (!reactedUserIds.has(uid)) {
+                    merged.push({ userId: uid, type: 'like', reactedAt: entry.createdAt });
+                }
+            });
+
+            merged.sort(
+                (a: any, b: any) => new Date(b.reactedAt).getTime() - new Date(a.reactedAt).getTime()
+            );
+
+            LoggerUtil.info('Post reactors fetched', { entryId, count: merged.length, correlationId });
+
+            return {
+                total: merged.length,
+                countsByType: entry.reactionCounts || {},
+                reactions: merged, // [{ userId, type, reactedAt }]
+            };
+
+        } catch (error: any) {
+            LoggerUtil.error('Get post reactors failed', { error: error.message, entryId, correlationId });
+            throw error;
+        }
+    }
     // ==================== PRIVATE HELPERS ====================
 
     private static async analyzePost(
