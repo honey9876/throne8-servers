@@ -4,10 +4,11 @@ import { PaymentMethod, PaymentStatus } from '@/Mentorship/interface/session.typ
 import { Availability, Mentor, SessionMentor } from '../models';
 import { logger } from '@/shared/logger.util';
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/shared/errors/app.error';
-import { User } from '@/shared/models/index.models';
+import { User, ProfilePhoto } from '@/shared/models/index.models';
 import { BookingStatus } from '@/shared/constants/bookingStatus';
 import sessionRepository from '../repositories/session.repository';
 import mentorRepository from '../repositories/mentor.repository';
+import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
 
 interface CreateSessionInput {
   mentorId: string;
@@ -101,6 +102,11 @@ class MentorshipSessionService {
       const mentor = await Mentor.findOne({ userId: mentorUserId, isDeleted: false });
       if (!mentor) throw new NotFoundError('Mentor profile not found');
 
+      let thumbnailImage = undefined;
+      if (input.thumbnailImageFile && input.thumbnailImageFile.buffer) {
+        thumbnailImage = await this.uploadImageToCloudinary(input.thumbnailImageFile.buffer);
+      }
+
       const sessionData = {
         mentorId: mentor.mentorId,
         menteeId: null,
@@ -122,6 +128,7 @@ class MentorshipSessionService {
           method: input.paymentMethod,
         },
         reschedule: { count: 0, previousDates: [] },
+        ...(thumbnailImage && { thumbnailImage }),
       };
 
       const session = await sessionRepository.create(sessionData);
@@ -134,20 +141,74 @@ class MentorshipSessionService {
   }
 
   /**
-   * Get all sessions for a mentor (no filter)
+   * Get all sessions for a mentor, with mentee profile data enriched on each booking.
    */
   async getMentorAssignedSessions(mentorId: string): Promise<any[]> {
     try {
       logger.info(`Fetching assigned sessions for mentor: ${mentorId}`);
 
-      return await SessionMentor.find({ mentorId })
+      const sessions = await SessionMentor.find({ mentorId })
         .sort({ scheduledAt: 1 })
         .lean();
+
+      // Collect all unique menteeIds across all bookings
+      const menteeIds = new Set<string>();
+      sessions.forEach((s: any) => {
+        (s.bookings || []).forEach((b: any) => {
+          if (b.menteeId) menteeIds.add(b.menteeId);
+        });
+        if (s.menteeId) menteeIds.add(s.menteeId);
+      });
+
+      // Fetch all mentee users in one query
+      const menteeUsers = menteeIds.size > 0
+        ? await User.find({ userId: { $in: Array.from(menteeIds) } })
+            .select('userId firstName lastName username profilePhotoId')
+            .lean()
+        : [];
+
+      // Fetch profile photos for those mentees
+      let photoMap: Record<string, string> = {};
+      if (menteeUsers.length > 0) {
+        try {
+          const photos = await ProfilePhoto.find({
+            userId: { $in: menteeUsers.map((u: any) => u.userId) },
+            isActive: true,
+          }).lean();
+          photos.forEach((p: any) => { photoMap[p.userId] = p.cloudinarySecureUrl; });
+        } catch (_) { /* ProfilePhoto model may not exist, skip gracefully */ }
+      }
+
+      // Build a fast lookup map
+      const userMap: Record<string, any> = {};
+      menteeUsers.forEach((u: any) => {
+        userMap[u.userId] = {
+          name: u.firstName
+            ? `${u.firstName} ${u.lastName || ''}`.trim()
+            : (u.username || 'Unknown'),
+          photo: photoMap[u.userId] || '',
+        };
+      });
+
+      // Enrich sessions
+      return sessions.map((s: any) => ({
+        ...s,
+        bookings: (s.bookings || []).map((b: any) => ({
+          ...b,
+          menteeName: userMap[b.menteeId]?.name || b.menteeName || b.menteeId?.slice(0, 8) || 'Unknown',
+          menteeProfilePhoto: userMap[b.menteeId]?.photo || b.menteeProfilePhoto || '',
+        })),
+        // Also enrich top-level menteeId field (for direct/template sessions)
+        menteeName: s.menteeId ? (userMap[s.menteeId]?.name || s.menteeName || 'Unknown') : s.menteeName,
+        menteeProfilePhoto: s.menteeId ? (userMap[s.menteeId]?.photo || s.menteeProfilePhoto || '') : s.menteeProfilePhoto,
+      }));
+
     } catch (error: any) {
       logger.error(`Failed to fetch mentor assigned sessions: ${error.message}`);
       throw error;
     }
   }
+
 
   /**
    * Book an existing mentor-posted session slot.
@@ -177,18 +238,24 @@ class MentorshipSessionService {
         throw new BadRequestError('Session does not belong to this mentor');
       }
 
-      const availability = await Availability.findOne({
-        availabilityId: input.availabilityId,
-        isDeleted: false,
-      });
-      if (!availability) throw new NotFoundError('AVAILABILITY_NOT_FOUND');
+      // If the service was created with a fixed scheduledAt (no separate availability record),
+      // skip the availability slot lookup — just record the booking directly.
+      let availability: any = null;
+      let slot: any = null;
+      if (input.availabilityId) {
+        availability = await Availability.findOne({
+          availabilityId: input.availabilityId,
+          isDeleted: false,
+        });
+        if (!availability) throw new NotFoundError('AVAILABILITY_NOT_FOUND');
 
-      const slot = availability.slots.find(
-        (s: any) => `${s.startTime} - ${s.endTime}` === input.slotTime
-      );
-      if (!slot)          throw new BadRequestError('Slot not found');
-      if (slot.isBooked)  throw new BadRequestError('Slot already booked');
-      if (slot.isBlocked) throw new BadRequestError('Slot is blocked');
+        slot = availability.slots.find(
+          (s: any) => `${s.startTime} - ${s.endTime}` === input.slotTime
+        );
+        if (!slot)          throw new BadRequestError('Slot not found');
+        if (slot.isBooked)  throw new BadRequestError('Slot already booked');
+        if (slot.isBlocked) throw new BadRequestError('Slot is blocked');
+      }
 
       session.bookings = session.bookings || [];
       session.bookings.push({
@@ -198,7 +265,7 @@ class MentorshipSessionService {
         status:         'pending',
         slotTime:       input.slotTime,
         scheduledAt:    new Date(input.scheduledAt),
-        availabilityId: input.availabilityId,
+        availabilityId: input.availabilityId || '',
         payment: {
           status: PaymentStatus.PENDING,
           method: input.paymentMethod,
@@ -213,8 +280,11 @@ class MentorshipSessionService {
 
       await session.save();
 
-      slot.isBooked = true;
-      await availability.save();
+      // Only mark the availability slot as booked if one exists
+      if (slot && availability) {
+        slot.isBooked = true;
+        await availability.save();
+      }
 
       logger.info(`✅ Booking added: ${session.sessionId} for mentee: ${input.menteeId}`);
 
@@ -436,12 +506,17 @@ class MentorshipSessionService {
     try {
       const session = await this.getSessionById(sessionId, userId, authToken);
 
-      const allowedUpdates = ['notes', 'description', 'title'];
+      const allowedUpdates = ['notes', 'description', 'title', 'thumbnailImageFile'];
       const isValidUpdate  = Object.keys(updates).every((key) => allowedUpdates.includes(key));
 
       if (!isValidUpdate) {
-        throw new BadRequestError('Invalid update fields. Only notes, description, title are allowed.');
+        throw new BadRequestError('Invalid update fields. Only notes, description, title, thumbnailImageFile are allowed.');
       }
+
+      if (updates.thumbnailImageFile && updates.thumbnailImageFile.buffer) {
+        updates.thumbnailImage = await this.uploadImageToCloudinary(updates.thumbnailImageFile.buffer);
+      }
+      delete updates.thumbnailImageFile;
 
       Object.assign(session, updates);
       await session.save();
@@ -487,6 +562,7 @@ class MentorshipSessionService {
         );
       }
 
+      session.status = BookingStatus.CONFIRMED;
       await session.save();
       logger.info(`Session confirmed: ${sessionId}, bookedBy: ${bookingId}`);
       return session;
@@ -728,6 +804,28 @@ class MentorshipSessionService {
       [SessionType.GROUP_SESSION]:   'groupSession',
     };
     return mapping[sessionType] as any;
+  }
+
+  private async uploadImageToCloudinary(buffer: Buffer): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'session-thumbnails',
+          public_id: `session_${Date.now()}`,
+          resource_type: 'image',
+          transformation: [
+            { width: 800, height: 600, crop: 'limit' },
+            { quality: 'auto:good' },
+          ],
+          overwrite: true,
+        },
+        (error: any, result: any) => {
+          if (error) return reject(error);
+          resolve(result.secure_url);
+        }
+      );
+      uploadStream.end(buffer);
+    });
   }
 }
 
