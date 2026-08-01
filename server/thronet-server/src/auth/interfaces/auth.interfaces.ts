@@ -149,6 +149,10 @@ export interface ProfileUpdates {
     firstName?: string | null;
     lastName?: string | null;
     location?: string | null;
+    currentPosition?: string | null;
+    company?: string | null;
+    education?: string | null;
+    pronouns?: string | null;
     onboarding?: OnboardingUpdates;
     preferences?: Record<string, any>;
 }

@@ -21,6 +21,10 @@ export interface IUser extends Document {
     firstName: string;
     lastName?: string;
     location?: string;
+    currentPosition?: string;
+    company?: string;
+    education?: string;
+    pronouns?: string;
     analyticsId?: string;
     profilePhotoId?: string;
     coverPhotoId?: string;
@@ -287,6 +291,39 @@ const UserSchema = new Schema<IUser, IUserModel>(
                 message: 'Location must start with a capital letter',
             },
         },
+
+
+
+        currentPosition: {
+            type: String,
+            trim: true,
+            default: null,
+            maxlength: [100, 'Current position cannot exceed 100 characters'],
+        },
+        company: {
+            type: String,
+            trim: true,
+            default: null,
+            maxlength: [100, 'Company name cannot exceed 100 characters'],
+        },
+        education: {
+            type: String,
+            trim: true,
+            default: null,
+            maxlength: [150, 'Education cannot exceed 150 characters'],
+        },
+        pronouns: {
+            type: String,
+            trim: true,
+            default: null,
+            enum: {
+                values: ['He/Him', 'She/Her', 'They/Them', 'Other', null],
+                message: 'Pronouns must be one of: He/Him, She/Her, They/Them, Other',
+            },
+        },
+
+
+        
         profilePhotoId: {
             type: String,
             default: null,

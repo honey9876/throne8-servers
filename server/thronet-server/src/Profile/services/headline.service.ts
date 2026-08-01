@@ -121,6 +121,10 @@ class HeadlineService {
                 { new: true }
             );
 
+            // ✅ Invalidate cached user profile so the new headlineId
+            // reflects immediately on next getUserProfile() call
+            await CacheUtil.del(`user:profile:${userId}`);
+
             // Clear cache
             await this.invalidateHeadlineCache('all');
 

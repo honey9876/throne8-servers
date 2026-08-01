@@ -1032,6 +1032,8 @@ class AuthService {
             const allowedFields = [
                 'email', 'password', 'phoneNumber', 'firstName',
                 'lastName', 'location', 'onboarding', 'preferences',
+                'currentPosition', 'company', 'education', 'pronouns',
+
             ];
 
             const updateFields = Object.keys(updates).filter((k) =>
@@ -1139,6 +1141,46 @@ class AuthService {
                 }
                 validatedUpdates.location = location || null;
             }
+
+
+            // Current Position
+            if (updates.currentPosition !== undefined) {
+                const currentPosition = updates.currentPosition?.trim();
+                if (currentPosition && currentPosition.length > 100) {
+                    throw new Error('Current position cannot exceed 100 characters');
+                }
+                validatedUpdates.currentPosition = currentPosition || null;
+            }
+
+            // Company
+            if (updates.company !== undefined) {
+                const company = updates.company?.trim();
+                if (company && company.length > 100) {
+                    throw new Error('Company name cannot exceed 100 characters');
+                }
+                validatedUpdates.company = company || null;
+            }
+
+            // Education
+            if (updates.education !== undefined) {
+                const education = updates.education?.trim();
+                if (education && education.length > 150) {
+                    throw new Error('Education cannot exceed 150 characters');
+                }
+                validatedUpdates.education = education || null;
+            }
+
+            // Pronouns
+            if (updates.pronouns !== undefined) {
+                const pronouns = updates.pronouns?.trim();
+                const validPronouns = ['He/Him', 'She/Her', 'They/Them', 'Other'];
+                if (pronouns && !validPronouns.includes(pronouns)) {
+                    throw new Error('Pronouns must be one of: He/Him, She/Her, They/Them, Other');
+                }
+                validatedUpdates.pronouns = pronouns || null;
+            }
+
+
 
             // Onboarding
             if (updates.onboarding !== undefined) {
@@ -1269,6 +1311,10 @@ class AuthService {
                 lastName: updatedUser.lastName,
                 location: updatedUser.location,
                 onboarding: updatedUser.onboarding,
+                currentPosition: updatedUser.currentPosition,
+                company: updatedUser.company,
+                education: updatedUser.education,
+                pronouns: updatedUser.pronouns,
                 phoneVerified: updatedUser.phoneVerified,
                 emailVerified: updatedUser.emailVerified,
                 preferences: updatedUser.preferences,
