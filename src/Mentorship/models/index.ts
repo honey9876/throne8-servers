@@ -1,27 +1,42 @@
-
 // all models of mentorship file
-import AdminAction from '@/Mentorship/models/AdminAction';
-import Availability from '@/Mentorship/models/Availability';
-import CancellationLog from '@/Mentorship/models/CancellationLog';
-import Coupon from '@/Mentorship/models/Coupon';
-import GroupSession from '@/Mentorship/models/GroupSession';
-import MatchScore from '@/Mentorship/models/MatchScore';
-import Mentor from '@/Mentorship/models/Mentor';
-import MentorshipAnalytics from '@/Mentorship/models/mentorshipAnalytics';
-import MentorshipReview from '@/Mentorship/models/MentorshipReview';
-import Notification from '@/Mentorship/models/Notification';
-import Package from '@/Mentorship/models/Package';
-import PackageCredit from '@/Mentorship/models/PackageCredit';
-import Portfolio from '@/Mentorship/models/Portfolio';
-import Query from '@/Mentorship/models/Query';
-import RescheduleLog from '@/Mentorship/models/RescheduleLog';
-import Resume from '@/Mentorship/models/Resume';
-import SessionMentor from '@/Mentorship/models/SessionMentor';
-import TimeSlot from '@/Mentorship/models/TimeSlot';
-import Waitlist from '@/Mentorship/models/Waitlist';
+import AdminAction from './AdminAction';
+import Availability from './Availability';
+import CancellationLog from './CancellationLog';
+import Coupon from './Coupon';
+import GroupSession from './GroupSession';
+import MatchScore from './MatchScore';
+import Mentor from './Mentor';
+import MentorshipAnalytics from './mentorshipAnalytics';
+import MentorshipReview from './MentorshipReview';
+import Notification from './Notification';
+import Package from './Package';
+import PackageCredit from './PackageCredit';
+import Portfolio from './Portfolio';
+import Query from './Query';
+import RescheduleLog from './RescheduleLog';
+import Resume from './Resume';
+import SessionMentor from './SessionMentor';
+import TimeSlot from './TimeSlot';
+import Waitlist from './Waitlist';
 
 export {
-     // all models of mentorship file
-        AdminAction, Availability, CancellationLog, Coupon, GroupSession, MatchScore, Mentor, MentorshipAnalytics, MentorshipReview, Notification, Package, PackageCredit, Portfolio, Query, RescheduleLog, Resume, SessionMentor, TimeSlot, Waitlist,
-    
-}
+    AdminAction,
+    Availability,
+    CancellationLog,
+    Coupon,
+    GroupSession,
+    MatchScore,
+    Mentor,
+    MentorshipAnalytics,
+    MentorshipReview,
+    Notification,
+    Package,
+    PackageCredit,
+    Portfolio,
+    Query,
+    RescheduleLog,
+    Resume,
+    SessionMentor,
+    TimeSlot,
+    Waitlist,
+};
