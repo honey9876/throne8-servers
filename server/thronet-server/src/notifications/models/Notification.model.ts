@@ -8,7 +8,7 @@ export interface INotification extends Document {
     senderName: string;
     senderPhoto?: string;
     type: 'post_created' | 'post_liked' | 'post_commented' | 'connection_request' | 'connection_accepted' | 'mentioned';
-    entityId: string;          // postId, connectionId etc
+    entityId: string;         
     entityType: 'post' | 'connection' | 'comment';
     message: string;
     isRead: boolean;

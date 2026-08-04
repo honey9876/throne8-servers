@@ -95,8 +95,7 @@ class NotificationService {
         }
     }
 
-
-    /////////////////////////////Changed Modified
+////////Changed Modified
     /**
          * Called after a post is liked.
          * Notifies the post owner (unless they liked their own post).
