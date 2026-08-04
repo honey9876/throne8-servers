@@ -31,7 +31,7 @@ export interface IDevice extends Document {
     lastSeenAt: Date;
     registeredAt: Date;
     revokedAt?: Date;
-    revokedReason?: 'user_request' | 'security_breach' | 'session_timeout';
+    revokedReason?: 'user_request' | 'security_breach' | 'session_timeout' | 'device_limit_exceeded';
     usageStats: IUsageStats;
     metadata?: Map<string, any>;
     createdAt: Date;
@@ -111,7 +111,7 @@ const DeviceSchema = new Schema<IDevice, IDeviceModel>(
         revokedAt: Date,
         revokedReason: {
             type: String,
-            enum: ['user_request', 'security_breach', 'session_timeout'],
+            enum: ['user_request', 'security_breach', 'session_timeout' , 'device_limit_exceeded'],
         },
         usageStats: {
             totalSessions: { type: Number, default: 0 },
