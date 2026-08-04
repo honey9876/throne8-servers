@@ -3,12 +3,13 @@
  * Handles comment operations on posts
  * 
  * @module services/comment.service
- * @version 1.0.0
+ * @version 1.1.0 (feed cache invalidation added)
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import { Comment, Post, User } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
+import redisService from '@/services/redis.service';
 
 ////////////////////changed modified
 import NotificationService from '@/notifications/services/notification.service';
@@ -106,8 +107,15 @@ class CommentService {
                 { new: true }
             );
 
-            // ✅ Notify post owner (non-blocking, skip if commenting on own post)
+            // ✅ Post-owner ka feed cache invalidate karo — nayi comment count
+            // unki apni feed mein turant dikhe. Non-blocking rakha hai taaki
+            // cache clear fail ho to bhi comment-creation flow fail na ho.
             const postOwnerId = post.userId;
+            if (postOwnerId) {
+                redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
+            }
+
+            // ✅ Notify post owner (non-blocking, skip if commenting on own post)
             if (postOwnerId && postOwnerId !== userId) {
                 setImmediate(async () => {
                     try {
@@ -377,6 +385,12 @@ class CommentService {
                 // Decrement post comment count
                 await Post.decrementComments(comment.postId);
 
+                // ✅ Feed cache invalidate — comment count updated feed mein turant reflect ho
+                const ownerDoc = await Post.findOne({ 'posts.entryId': comment.postId });
+                if (ownerDoc?.userId) {
+                    redisService.deleteByPattern(`feed:v1:${ownerDoc.userId}:page:*`).catch(() => {});
+                }
+
                 LoggerUtil.info('Comment permanently deleted', {
                     commentId,
                     userId,
@@ -395,6 +409,12 @@ class CommentService {
 
                 // Decrement post comment count
                 await Post.decrementComments(comment.postId);
+
+                // ✅ Feed cache invalidate
+                const ownerDoc = await Post.findOne({ 'posts.entryId': comment.postId });
+                if (ownerDoc?.userId) {
+                    redisService.deleteByPattern(`feed:v1:${ownerDoc.userId}:page:*`).catch(() => {});
+                }
 
                 LoggerUtil.info('Comment soft deleted', {
                     commentId,
@@ -448,6 +468,12 @@ class CommentService {
 
             // Increment post comment count
             await Post.incrementComments(comment.postId);
+
+            // ✅ Feed cache invalidate
+            const ownerDoc = await Post.findOne({ 'posts.entryId': comment.postId });
+            if (ownerDoc?.userId) {
+                redisService.deleteByPattern(`feed:v1:${ownerDoc.userId}:page:*`).catch(() => {});
+            }
 
             LoggerUtil.info('Comment restored successfully', {
                 commentId,

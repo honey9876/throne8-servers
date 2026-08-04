@@ -1,10 +1,9 @@
-
 /**
  * Post Service - Business Logic for Posts
  * Architecture: One document per user, posts[] array inside
  *
  * @module services/post.service
- * @version 2.1.0 (reach-based feed + connection status)
+ * @version 2.2.0 (reach-based feed + connection status + feed cache invalidation)
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -16,6 +15,7 @@ import { LoggerUtil } from '@/shared/logger.util';
 import { IPostEntry } from '@/Profile/models/Post.model';
 import NotificationService from '@/notifications/services/notification.service';
 import { AnalyticsService } from '@/shared/services/index.service';
+import redisService from '@/services/redis.service';
 
 // ==================== INTERFACES ====================
 
@@ -308,6 +308,11 @@ class PostService {
                 { new: true }
             );
 
+            // ✅ Apna khud ka feed cache invalidate karo taaki naya post turant
+            // apni feed mein dikhe (non-blocking — cache clear fail ho to bhi
+            // post-creation flow fail nahi hona chahiye)
+            redisService.deleteByPattern(`feed:v1:${userId}:page:*`).catch(() => {});
+
             setImmediate(async () => {
                 try {
                     await NotificationService.notifyConnectionsOnPost(
@@ -432,6 +437,10 @@ class PostService {
         entry.pollData.totalVotes++;
 
         await doc.save();
+
+        // ✅ Post-owner ka feed cache invalidate karo — poll vote count feed
+        // score ko bhi affect karta hai
+        redisService.deleteByPattern(`feed:v1:${doc.userId}:page:*`).catch(() => {});
 
         return {
             entryId: entry.entryId,
@@ -866,6 +875,9 @@ class PostService {
 
             await doc.save();
 
+            // ✅ Feed cache invalidate — updated title/content feed mein turant reflect ho
+            redisService.deleteByPattern(`feed:v1:${userId}:page:*`).catch(() => {});
+
             LoggerUtil.info('Post updated successfully', { entryId, userId, correlationId });
 
             return {
@@ -918,12 +930,18 @@ class PostService {
                 doc.totalPosts = Math.max(0, doc.totalPosts - 1);
                 await doc.save();
 
+                // ✅ Feed cache invalidate — deleted post feed se turant hat jaye
+                redisService.deleteByPattern(`feed:v1:${userId}:page:*`).catch(() => {});
+
                 LoggerUtil.info('Post permanently deleted', { entryId, userId, correlationId });
                 return { entryId, message: 'Post permanently deleted' };
             } else {
                 entry.isDeleted = true;
                 entry.deletedAt = new Date();
                 await doc.save();
+
+                // ✅ Feed cache invalidate
+                redisService.deleteByPattern(`feed:v1:${userId}:page:*`).catch(() => {});
 
                 LoggerUtil.info('Post soft deleted', { entryId, userId, correlationId });
                 return { entryId, deletedAt: entry.deletedAt, message: 'Post deleted successfully' };
@@ -954,6 +972,9 @@ class PostService {
             entry.isArchived = true;
             entry.archivedAt = new Date();
             await doc.save();
+
+            // ✅ Feed cache invalidate — archived post feed se turant hat jaye
+            redisService.deleteByPattern(`feed:v1:${doc.userId}:page:*`).catch(() => {});
 
             LoggerUtil.info('Post archived', { entryId, userId, correlationId });
 
@@ -988,6 +1009,9 @@ class PostService {
             entry.isDeleted = false;
             entry.deletedAt = undefined;
             await doc.save();
+
+            // ✅ Feed cache invalidate — restored post feed mein turant wapas aa jaye
+            redisService.deleteByPattern(`feed:v1:${userId}:page:*`).catch(() => {});
 
             LoggerUtil.info('Post restored', { entryId, userId, correlationId });
 
@@ -1207,6 +1231,14 @@ class PostService {
 
         const entry = await Post.incrementLikes(entryId, userId);
 
+        // ✅ Post-owner ka feed cache invalidate karo taaki nayi like count
+        // unki apni feed refresh pe turant dikhe. Baaki users ka cache 3-min
+        // TTL se apne aap expire ho jayega — poore platform-wide invalidation
+        // avoid kiya kyunki wo bahut expensive hoga har single like pe.
+        if (postOwnerId) {
+            redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
+        }
+
         // ✅ Notify the post owner — but not if they liked their own post
         if (postOwnerId && postOwnerId !== userId) {
             setImmediate(async () => {
@@ -1266,7 +1298,16 @@ class PostService {
         try {
             LoggerUtil.info('Unliking post', { entryId, userId, correlationId });
 
+            // ✅ Post owner nikalne ke liye pehle doc dhoondo (cache invalidation ke liye)
+            const doc = await Post.findOne({ 'posts.entryId': entryId });
+            const postOwnerId = doc?.userId;
+
             const entry = await Post.decrementLikes(entryId, userId);
+
+            // ✅ Post-owner ka feed cache invalidate
+            if (postOwnerId) {
+                redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
+            }
 
             LoggerUtil.info('Post unliked successfully', {
                 entryId,
@@ -1308,6 +1349,11 @@ class PostService {
 
             const entry = await Post.addReaction(entryId, userId, type as any);
 
+            // ✅ Post-owner ka feed cache invalidate karo
+            if (postOwnerId) {
+                redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
+            }
+
             // Notify post owner (skip self-reactions)
             if (postOwnerId && postOwnerId !== userId) {
                 setImmediate(async () => {
@@ -1345,7 +1391,16 @@ class PostService {
         try {
             LoggerUtil.info('Removing reaction', { entryId, userId, correlationId });
 
+            // ✅ Post owner nikalne ke liye pehle doc dhoondo (cache invalidation ke liye)
+            const doc = await Post.findOne({ 'posts.entryId': entryId });
+            const postOwnerId = doc?.userId;
+
             const entry = await Post.removeReaction(entryId, userId);
+
+            // ✅ Post-owner ka feed cache invalidate karo
+            if (postOwnerId) {
+                redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
+            }
 
             LoggerUtil.info('Reaction removed successfully', { entryId, userId, correlationId });
 
