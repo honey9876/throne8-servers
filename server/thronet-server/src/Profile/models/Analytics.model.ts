@@ -39,6 +39,8 @@ export interface IPostImpression {
 export interface ISearchAppearance {
     searchQuery: string;
     searcherId?: string;
+    searcherName?: string;        // ✅ NEW
+    searcherPhotoUrl?: string;    // ✅ NEW
     appearedAt: Date;
     wasClicked: boolean;
     position?: number;
@@ -309,6 +311,8 @@ const AnalyticsSchema = new Schema<IAnalytics, IAnalyticsModel>(
             appearances: [{
                 searchQuery: { type: String, required: true },
                 searcherId: String,
+                searcherName: String,        // ✅ NEW
+                searcherPhotoUrl: String,    // ✅ NEW
                 appearedAt: { type: Date, default: Date.now },
                 wasClicked: { type: Boolean, default: false },
                 position: Number,

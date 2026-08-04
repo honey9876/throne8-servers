@@ -6,7 +6,7 @@
  * @version 1.0.0
  */
 
-import { Analytics, User } from '@/shared/models/index.models';
+import { Analytics, User,ProfilePhoto } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
 import Constants from '@/shared/constants.util';
 import { v4 as uuidv4 } from 'uuid';
@@ -34,6 +34,8 @@ interface PostImpressionData {
 interface SearchAppearanceData {
     searchQuery: string;
     searcherId?: string;
+    searcherName?: string;        // ✅ NEW
+    searcherPhotoUrl?: string;    // ✅ NEW
     appearedAt: Date;
     wasClicked: boolean;
     position?: number;
@@ -939,33 +941,56 @@ class AnalyticsService {
     //     }
     // }
 
+    
     /**
-     * Record search appearance
-     */
+ * Record search appearance
+ */
     static async recordSearchAppearance(
         userId: string,
         searchData: SearchAppearanceData
     ): Promise<void> {
         try {
-            await Analytics.recordSearchAppearance(userId, searchData);
-
-            // ✅ NEW: Emit real-time update
+            let enrichedData = { ...searchData };
+    
+            if (searchData.searcherId) {
+                try {
+                    const searcherUser = await User.findOne({ userId: searchData.searcherId });
+                    if (searcherUser) {
+                        enrichedData.searcherName =
+                            (searcherUser as any).fullName ||
+                            `${(searcherUser as any).firstName || ''} ${(searcherUser as any).lastName || ''}`.trim() ||
+                            undefined;
+    
+                        const photoId = (searcherUser as any).profilePhotoId;
+                        if (photoId) {
+                            const photo = await ProfilePhoto.findOne({ photoId });
+                            enrichedData.searcherPhotoUrl = (photo as any)?.cloudinarySecureUrl || undefined;
+                        }
+                    }
+                } catch (lookupError: any) {
+                    LoggerUtil.warn('Failed to fetch searcher details for search appearance', {
+                        error: lookupError.message,
+                        searcherId: searchData.searcherId,
+                    });
+                }
+            }
+    
+            await Analytics.recordSearchAppearance(userId, enrichedData);
+    
             emitToUser(userId, 'analytics:search-appearance', {
                 type: 'search-appearance',
                 searchQuery: searchData.searchQuery,
+                searcherName: enrichedData.searcherName,
                 timestamp: new Date(),
             });
-
-
+    
         } catch (error: any) {
             LoggerUtil.error('Record search appearance failed', {
                 error: error.message,
                 userId,
             });
-            // Don't throw - this is non-critical
         }
     }
-
     /**
     * ✅ NEW: Record post impression (called from feed/profile middleware)
     */
