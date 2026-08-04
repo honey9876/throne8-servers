@@ -3,7 +3,7 @@
  * Architecture: One document per user, posts[] array inside
  *
  * @module services/post.service
- * @version 2.2.0 (reach-based feed + connection status + feed cache invalidation)
+ * @version 2.3.0 (reach-based feed + connection status + feed cache invalidation + @mentions)
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -312,6 +312,26 @@ class PostService {
             // apni feed mein dikhe (non-blocking — cache clear fail ho to bhi
             // post-creation flow fail nahi hona chahiye)
             redisService.deleteByPattern(`feed:v1:${userId}:page:*`).catch(() => {});
+
+            // ✅ @mentions — content se mentioned userIds nikalo aur notify karo
+            // Format: @[Display Name](userId) — regex se sirf userId (group 2) extract hota hai
+            const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
+            const mentionedUserIds = [...new Set(
+                Array.from((postData.content || '').matchAll(mentionRegex), m => m[2])
+            )].filter(id => id !== userId);
+
+            if (mentionedUserIds.length > 0) {
+                setImmediate(async () => {
+                    try {
+                        for (const mentionedUserId of mentionedUserIds) {
+                            await NotificationService.notifyMentioned(mentionedUserId, userId, entryId, postData.title, 'post');
+                        }
+                        console.log('✅ [NOTIF] Mentioned users notified for post:', entryId);
+                    } catch (err: any) {
+                        console.warn('⚠️ [NOTIF] Mention notification failed (non-blocking):', err.message);
+                    }
+                });
+            }
 
             setImmediate(async () => {
                 try {

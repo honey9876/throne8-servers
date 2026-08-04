@@ -3,7 +3,7 @@
  * Handles comment operations on posts
  * 
  * @module services/comment.service
- * @version 1.1.0 (feed cache invalidation added)
+ * @version 1.2.0 (feed cache invalidation + @mentions)
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -129,6 +129,26 @@ class CommentService {
                         console.log('✅ [NOTIF] Post owner notified of comment:', postId);
                     } catch (err: any) {
                         console.warn('⚠️ [NOTIF] Comment notification failed (non-blocking):', err.message);
+                    }
+                });
+            }
+
+            // ✅ @mentions — comment content se mentioned userIds nikalo aur notify karo
+            // Format: @[Display Name](userId) — regex se sirf userId (group 2) extract hota hai
+            const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
+            const mentionedUserIds = [...new Set(
+                Array.from((content || '').matchAll(mentionRegex), m => m[2])
+            )].filter(id => id !== userId);
+
+            if (mentionedUserIds.length > 0) {
+                setImmediate(async () => {
+                    try {
+                        for (const mentionedUserId of mentionedUserIds) {
+                            await NotificationService.notifyMentioned(mentionedUserId, userId, postId, entry?.title, 'comment');
+                        }
+                        console.log('✅ [NOTIF] Mentioned users notified for comment:', commentId);
+                    } catch (err: any) {
+                        console.warn('⚠️ [NOTIF] Mention notification failed (non-blocking):', err.message);
                     }
                 });
             }

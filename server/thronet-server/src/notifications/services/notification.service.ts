@@ -96,11 +96,11 @@ class NotificationService {
     }
 
 
-/////////////////////////////Changed Modified
-/**
-     * Called after a post is liked.
-     * Notifies the post owner (unless they liked their own post).
-     */
+    /////////////////////////////Changed Modified
+    /**
+         * Called after a post is liked.
+         * Notifies the post owner (unless they liked their own post).
+         */
     static async notifyPostLiked(
         postOwnerId: string,
         likerId: string,
@@ -236,7 +236,77 @@ class NotificationService {
     }
 
 
+    ////////////////////////////////Changed Modified
+    /**
+     * Called after someone is @mentioned in a post or comment.
+     * Notifies the mentioned user (unless they mentioned themselves).
+     */
+    static async notifyMentioned(
+        mentionedUserId: string,
+        mentionerId: string,
+        entryId: string,
+        contextTitle?: string,
+        context: 'post' | 'comment' = 'post'
+    ): Promise<void> {
+        try {
+            if (mentionedUserId === mentionerId) return; // don't notify yourself
 
+            const mentioner = await User.findOne({ userId: mentionerId }).select('firstName lastName profilePhotoId').lean();
+            if (!mentioner) return;
+
+            const mentionerName = `${mentioner.firstName} ${mentioner.lastName || ''}`.trim();
+            const mentionerPhoto = mentioner.profilePhotoId || null;
+
+            const shortTitle = contextTitle ? `"${contextTitle.slice(0, 60)}${contextTitle.length > 60 ? '...' : ''}"` : 'a post';
+            const message = context === 'comment'
+                ? `${mentionerName} mentioned you in a comment on ${shortTitle}`
+                : `${mentionerName} mentioned you in ${shortTitle}`;
+
+            const notificationId = uuidv4();
+
+            await Notification.create({
+                notificationId,
+                recipientId: mentionedUserId,
+                senderId: mentionerId,
+                senderName: mentionerName,
+                senderPhoto: mentionerPhoto,
+                type: 'mentioned',
+                entityId: entryId,
+                entityType: context,
+                message,
+                isRead: false,
+            });
+
+            try {
+                const io = getIO();
+                io.to(`user:${mentionedUserId}`).emit('notification:new', {
+                    notificationId,
+                    type: 'mentioned',
+                    senderId: mentionerId,
+                    senderName: mentionerName,
+                    senderPhoto: mentionerPhoto,
+                    entityId: entryId,
+                    entityType: context,
+                    message,
+                    isRead: false,
+                    createdAt: new Date().toISOString(),
+                });
+            } catch (socketErr) {
+                logger.warn('Socket emit failed for mention notification', {
+                    error: socketErr instanceof Error ? socketErr.message : 'unknown',
+                });
+            }
+
+            logger.info('Mention notification sent', { mentionedUserId, mentionerId, entryId, context });
+        } catch (err) {
+            logger.error('notifyMentioned failed', {
+                error: err instanceof Error ? err.message : 'unknown',
+                mentionedUserId,
+                mentionerId,
+                entryId,
+            });
+        }
+    }
 
     /** Fetch paginated notifications for a user */
     static async getNotifications(
@@ -251,7 +321,7 @@ class NotificationService {
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
-                .lean(),
+                .lean<INotification>(),
             Notification.countDocuments({ recipientId: userId, isRead: false }),
             Notification.countDocuments({ recipientId: userId }),
         ]);

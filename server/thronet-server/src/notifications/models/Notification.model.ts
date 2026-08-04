@@ -7,9 +7,9 @@ export interface INotification extends Document {
     senderId: string;          // who triggered it
     senderName: string;
     senderPhoto?: string;
-    type: 'post_created' | 'post_liked' | 'post_commented' | 'connection_request' | 'connection_accepted';
+    type: 'post_created' | 'post_liked' | 'post_commented' | 'connection_request' | 'connection_accepted' | 'mentioned';
     entityId: string;          // postId, connectionId etc
-    entityType: 'post' | 'connection';
+    entityType: 'post' | 'connection' | 'comment';
     message: string;
     isRead: boolean;
     createdAt: Date;
@@ -26,11 +26,11 @@ const NotificationSchema = new Schema<INotification, INotificationModel>(
         senderPhoto: { type: String, default: null },
         type: {
             type: String,
-            enum: ['post_created', 'post_liked', 'post_commented', 'connection_request', 'connection_accepted'],
+            enum: ['post_created', 'post_liked', 'post_commented', 'connection_request', 'connection_accepted', 'mentioned'],
             required: true,
         },
         entityId: { type: String, required: true },
-        entityType: { type: String, enum: ['post', 'connection'], required: true },
+        entityType: { type: String, enum: ['post', 'connection', 'comment'], required: true },
         message: { type: String, required: true },
         isRead: { type: Boolean, default: false },
     },
