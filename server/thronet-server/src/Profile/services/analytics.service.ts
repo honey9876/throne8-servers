@@ -712,6 +712,8 @@ class AnalyticsService {
                 i => i.viewedAt >= startDate && i.viewedAt <= endDate
             );
 
+    
+
             const searchAppearances = analytics.searchAppearances.appearances.filter(
                 a => a.appearedAt >= startDate && a.appearedAt <= endDate
             );
@@ -1169,6 +1171,11 @@ class AnalyticsService {
                 i => i.postId === postId && i.viewedAt >= cutoffDate
             );
 
+
+            const postShares = (analytics.shares?.shares || []).filter(
+                (s: any) => s.postId === postId && s.sharedAt >= cutoffDate
+            );
+
             // ✅ DAILY BREAKDOWN
             const dailyBreakdown = postImpressions.reduce((acc: any, imp) => {
                 const date = imp.viewedAt.toISOString().split('T')[0];
@@ -1186,12 +1193,19 @@ class AnalyticsService {
             }, {});
 
             // ✅ ENGAGEMENT BREAKDOWN
-            const engagementBreakdown = postImpressions.reduce((acc: any, imp) => {
-                if (imp.engagementType) {
-                    acc[imp.engagementType] = (acc[imp.engagementType] || 0) + 1;
-                }
+            const engagementBreakdown = postImpressions.reduce((acc: any, imp: any) => {
+                const types: string[] = (imp.engagementTypes && imp.engagementTypes.length > 0)
+                    ? imp.engagementTypes
+                    : (imp.engagementType && !['view_only', 'impression'].includes(imp.engagementType)
+                        ? [imp.engagementType]
+                        : []);
+                types.forEach(t => {
+                    acc[t] = (acc[t] || 0) + 1;
+                });
                 return acc;
             }, { views: postImpressions.length });
+
+
 
             return {
                 postId,
@@ -1204,7 +1218,9 @@ class AnalyticsService {
                     views: postImpressions.length,
                     likes: engagementBreakdown.like || 0,
                     comments: engagementBreakdown.comment || 0,
-                    shares: engagementBreakdown.share || 0,
+                    shares: postShares.length,  
+
+                    // shares: engagementBreakdown.share || 0,
                     saves: engagementBreakdown.save || 0,
                 },
                 timeRange: {
@@ -2344,9 +2360,19 @@ static async getSearchAppearancesChange(
                 imp => imp.postId === engagementData.postId && imp.viewerId === engagementData.viewerId
             );
 
+
+
             if (existingImpression) {
-                // Existing impression ko engagement type se update karo
-                (existingImpression as any).engagementType = engagementData.engagementType;
+                const existing = existingImpression as any;
+                if (!existing.engagementTypes) {
+                    existing.engagementTypes = existing.engagementType && !['view_only', 'impression'].includes(existing.engagementType)
+                        ? [existing.engagementType]
+                        : [];
+                }
+                if (!existing.engagementTypes.includes(engagementData.engagementType)) {
+                    existing.engagementTypes.push(engagementData.engagementType);
+                }
+                existing.engagementType = engagementData.engagementType;
             } else {
                 // Agar impression exist nahi karta, naya entry banao
                 analytics.postImpressions.impressions.push({
@@ -2498,10 +2524,12 @@ static async getSearchAppearancesChange(
                 };
             }
 
+            
+
             const postImpressions = analytics.postImpressions.impressions.filter(
                 imp => imp.postId === postId
             );
-
+            
             if (postImpressions.length === 0) {
                 return {
                     postId,
@@ -2512,6 +2540,12 @@ static async getSearchAppearancesChange(
                     timeBreakdown: []
                 };
             }
+            
+            // ✅ NEW: shares alag array mein store hote hain, isliye alag se filter karo
+            const cutoffDate = new Date(0);
+            const postShares = (analytics.shares?.shares || []).filter(
+                (s: any) => s.postId === postId && s.sharedAt >= cutoffDate
+            );
 
             // Calculate stats
             const uniqueViewers = new Set(
@@ -2548,6 +2582,8 @@ static async getSearchAppearancesChange(
                     ? (totalViews / uniqueViewers.size).toFixed(2)
                     : 0,
                 sourceBreakdown,
+                shares: postShares.length,   // ← add this
+
                 timeBreakdown,
                 mostActiveViewers: this.getMostActiveViewers(postImpressions, 5)
             };
@@ -3144,12 +3180,11 @@ static async getSearchAppearancesChange(
         }
     }
 
-    /**
-     * ✅ Get Discovery Stats (Total Impressions, Engagements, Members Reached)
-     */
+
+
     static async getDiscoveryStats(userId: string, days?: number): Promise<any> {
         const correlationId = uuidv4();
-
+    
         try {
             const analytics = await Analytics.findOne({ userId });
             if (!analytics) {
@@ -3160,37 +3195,44 @@ static async getSearchAppearancesChange(
                     engagementRate: 0
                 };
             }
-
+    
             let impressions = analytics.postImpressions.impressions;
             let clicks = analytics.clicks.clicks;
             let shares = analytics.shares.shares;
-
+    
             if (days) {
                 const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
                 impressions = impressions.filter(i => i.viewedAt >= cutoffDate);
                 clicks = clicks.filter(c => c.clickedAt >= cutoffDate);
                 shares = shares.filter(s => s.sharedAt >= cutoffDate);
             }
-
-            // Total impressions (sum of all view counts)
+    
             const totalImpressions = impressions.reduce(
                 (sum, imp) => sum + (imp.viewCount || 1),
                 0
             );
-
-            // Total engagements (clicks + shares + reactions + comments from Post model)
-            const totalEngagements = clicks.length + shares.length;
-
-            // Members reached (unique viewers)
+    
+            // ✅ FIX: likes/comments/saves impressions array se count karo
+            // 'share' ko exclude kiya kyunki wo already `shares` collection mein separately count ho raha hai
+            const reactionEngagements = impressions.reduce((count: number, imp: any) => {
+                const types: string[] = (imp.engagementTypes && imp.engagementTypes.length > 0)
+                    ? imp.engagementTypes
+                    : (imp.engagementType && !['view_only', 'impression'].includes(imp.engagementType)
+                        ? [imp.engagementType]
+                        : []);
+                const relevantTypes = types.filter(t => ['like', 'comment', 'save'].includes(t));
+                return count + relevantTypes.length;
+            }, 0);
+    
+            const totalEngagements = clicks.length + shares.length + reactionEngagements;
+    
             const uniqueViewers = new Set(impressions.map(imp => imp.viewerId).filter(Boolean));
             const membersReached = uniqueViewers.size;
-
-            // Engagement rate
+    
             const engagementRate = totalImpressions > 0
                 ? (totalEngagements / totalImpressions) * 100
                 : 0;
-
+    
             return {
                 totalImpressions,
                 totalEngagements,
@@ -3198,7 +3240,8 @@ static async getSearchAppearancesChange(
                 engagementRate: Math.round(engagementRate * 100) / 100,
                 breakdown: {
                     clicks: clicks.length,
-                    shares: shares.length
+                    shares: shares.length,
+                    reactions: reactionEngagements   // ✅ naya field, debug ke liye useful
                 },
                 timeRange: days ? {
                     days,
@@ -3206,7 +3249,7 @@ static async getSearchAppearancesChange(
                     endDate: new Date()
                 } : undefined
             };
-
+    
         } catch (error: any) {
             LoggerUtil.error('Get discovery stats failed', {
                 error: error.message,
