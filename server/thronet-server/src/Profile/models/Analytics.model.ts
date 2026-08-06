@@ -26,6 +26,7 @@ export interface IPostImpression {
     viewerId?: string;
     viewedAt: Date;
     engagementType?: 'like' | 'comment' | 'share' | 'save' | 'view_only' | 'impression';
+    engagementTypes?: ('like' | 'comment' | 'share' | 'save')[];   // ← NEW LINE
     deviceType?: 'mobile' | 'desktop' | 'tablet';
     sessionId?: string;
     scrollDepth?: number;
@@ -241,6 +242,7 @@ const AnalyticsSchema = new Schema<IAnalytics, IAnalyticsModel>(
                     type: String,
                     enum: ['like', 'comment', 'share', 'save', 'view_only', 'impression'],
                 },
+                engagementTypes: [{ type: String, enum: ['like', 'comment', 'share', 'save'] }],   // ← NEW LINE
                 deviceType: { type: String, enum: ['mobile', 'desktop', 'tablet'] },
                 sessionId: String,
                 scrollDepth: Number,
