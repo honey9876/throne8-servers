@@ -5,6 +5,7 @@ import { Post, User } from '@/shared/models/index.models';
 import Repost from '@/Profile/models/Repost.model';
 import { IPostEntry } from '@/Profile/models/Post.model';
 import { LoggerUtil } from '@/shared/logger.util';
+import AnalyticsService from '../analytics.service';
 
 class RepostService {
 
@@ -70,6 +71,27 @@ class RepostService {
                 { userId: originalDoc.userId },
                 { $inc: { 'activityStats.totalReposts': 1 } }
             );
+
+
+
+
+            // ✅ Step 6.5 (NEW): Record share event so shares count / discovery stats update
+            try {
+                await AnalyticsService.recordShare(originalDoc.userId, {
+                    postId: originalPostEntryId,
+                    shareType: 'direct',
+                    sharerId: repostedBy,
+                });
+            } catch (analyticsError: any) {
+                // Analytics failure repost creation ko fail nahi karni chahiye
+                LoggerUtil.error('Failed to record share analytics', {
+                    error: analyticsError.message,
+                    repostId: repost.repostId,
+                });
+            }
+
+
+            
 
             LoggerUtil.info('Repost created successfully', {
                 repostId: repost.repostId,

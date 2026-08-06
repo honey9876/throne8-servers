@@ -2447,18 +2447,24 @@ static async getSearchAppearancesChange(
             }
 
             // Build daily timeline
-            const timelineMap: { [date: string]: { count: number; viewers: Set<string> } } = {};
+            const timelineMap: { [date: string]: { count: number; viewers: Set<string>;  engagements: number } } = {};
 
             impressions.forEach(imp => {
                 imp.timeBasedCounts?.forEach(tbc => {
                     if (tbc.date >= cutoffDateStr) {
                         if (!timelineMap[tbc.date]) {
-                            timelineMap[tbc.date] = { count: 0, viewers: new Set() };
+                            timelineMap[tbc.date] = { count: 0, viewers: new Set(), engagements: 0 };
                         }
                         timelineMap[tbc.date].count += tbc.count;
                         if (imp.viewerId) {
                             timelineMap[tbc.date].viewers.add(imp.viewerId);
                         }
+                          // ✅ NEW: engagement bhi count karo
+                         const types = (imp.engagementTypes && imp.engagementTypes.length > 0)
+                         ? imp.engagementTypes
+                         : (imp.engagementType && !['view_only', 'impression'].includes(imp.engagementType) ? [imp.engagementType] : []);
+                         timelineMap[tbc.date].engagements += types.length;
+
                     }
                 });
             });
@@ -2468,7 +2474,9 @@ static async getSearchAppearancesChange(
                 .map(([date, data]) => ({
                     date,
                     impressions: data.count,
-                    uniqueViewers: data.viewers.size
+                    uniqueViewers: data.viewers.size,
+                    engagements: data.engagements   // ✅ NEW
+
                 }))
                 .sort((a, b) => a.date.localeCompare(b.date));
 
