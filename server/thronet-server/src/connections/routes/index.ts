@@ -21,6 +21,7 @@ import { requestRouter } from './request.routes';
 import { followRouter } from './follow.routes';
 import mutualRouter from './mutual.routes';
 import searchRoutes from './search.routes';
+import blockRouter from './block.routes';
 
 // Mount other connection-related routes here as needed
 import catchupRoutes from './catchup.routes';
@@ -31,7 +32,6 @@ router.use('/requests', requestRouter);
 router.use('/follow', followRouter);
 router.use('/mutual', mutualRouter);
 // router.use('/search', searchRoutes);
-
+router.use('/block', blockRouter);
 export default router;
-
 console.log('🔍 ConnectionRoutes loaded successfully in routes/connections/index.ts');
