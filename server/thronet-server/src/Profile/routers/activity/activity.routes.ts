@@ -23,6 +23,7 @@ import {
 import ResponseUtil from '@/shared/response.util';
 import { PostService } from '@/shared/services/index.service';
 import RepostController from '@/Profile/controllers/activity/repost.controller';
+import ReportMuteController from '@/Profile/controllers/reportMute.controller';
 
 const router = express.Router();
 
@@ -595,5 +596,50 @@ router.get(
     RepostController.getRepostStatus as any
 );
 
+/**
+ * @route   POST /api/v1/activity/comments/:commentId/report
+ * @desc    Report a comment
+ * @access  Private
+ * @body    { reason?: string }
+ */
+router.post(
+    '/comments/:commentId/report',
+    AuthMiddleware.authenticate as any,
+    rateLimitMiddleware({ maxRequests: 20, windowMs: 60000 }),
+    ReportMuteController.reportComment as any
+);
 
+/**
+ * @route   POST /api/v1/activity/comments/:commentId/mute-thread
+ * @desc    Mute notifications for the whole post/thread this comment belongs to
+ * @access  Private
+ */
+router.post(
+    '/comments/:commentId/mute-thread',
+    AuthMiddleware.authenticate as any,
+    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
+    ReportMuteController.muteThread as any
+);
+
+/**
+ * @route   DELETE /api/v1/activity/posts/:postId/mute-thread
+ * @desc    Unmute a previously muted thread
+ * @access  Private
+ */
+router.delete(
+    '/posts/:postId/mute-thread',
+    AuthMiddleware.authenticate as any,
+    ReportMuteController.unmuteThread as any
+);
+
+/**
+ * @route   GET /api/v1/activity/muted-threads
+ * @desc    Get list of postIds the user has muted
+ * @access  Private
+ */
+router.get(
+    '/muted-threads',
+    AuthMiddleware.authenticate as any,
+    ReportMuteController.getMutedThreads as any
+);
 export default router;// Force Railway rebuild 07/30/2026 17:41:23
