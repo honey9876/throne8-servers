@@ -36,12 +36,10 @@ class HomePostService {
         try {
             LoggerUtil.info('Creating home post', { userId, correlationId });
 
-            // Step 1: Validate user
             const user = await User.findOne({ userId });
             if (!user) throw new Error('User not found');
             if (user.status !== 'active') throw new Error('User account is not active');
 
-            // Step 2: Validate media counts
             if (images.length > Constants.ACTIVITY_VALIDATION.POST.MAX_IMAGES_PER_POST)
                 throw new Error(`Maximum ${Constants.ACTIVITY_VALIDATION.POST.MAX_IMAGES_PER_POST} images allowed`);
             if (videos.length > Constants.ACTIVITY_VALIDATION.POST.MAX_VIDEOS_PER_POST)
@@ -49,7 +47,6 @@ class HomePostService {
             if (documents.length > Constants.ACTIVITY_VALIDATION.POST.MAX_DOCUMENTS_PER_POST)
                 throw new Error(`Maximum ${Constants.ACTIVITY_VALIDATION.POST.MAX_DOCUMENTS_PER_POST} documents allowed`);
 
-            // Step 3: Process poll
             let pollSetup = null;
             if (postData.pollData) {
                 const pollEndsAt = new Date();
@@ -69,7 +66,6 @@ class HomePostService {
                 };
             }
 
-            // Step 4: Process scheduled post
             let scheduledSetup = null;
             if (postData.scheduledFor) {
                 const scheduledTime = new Date(postData.scheduledFor);
@@ -79,7 +75,6 @@ class HomePostService {
                 scheduledSetup = { scheduledFor: scheduledTime, isScheduled: true };
             }
 
-            // Step 5: Process event
             let eventSetup = null;
             if (postData.eventData) {
                 const eventStartDateTime = new Date(
@@ -98,7 +93,6 @@ class HomePostService {
                 };
             }
 
-            // Step 6: Upload images
             const uploadedImages = await Promise.all(
                 images.map(async (file) => {
                     const metadata = await sharp(file.buffer).metadata();
@@ -130,7 +124,6 @@ class HomePostService {
                 })
             );
 
-            // Step 7: Upload videos
             const uploadedVideos = await Promise.all(
                 videos.map(async (file) => {
                     const uploadResult = await this.uploadToCloudinary(
@@ -153,7 +146,6 @@ class HomePostService {
                 })
             );
 
-            // Step 8: Upload documents
             const uploadedDocuments = await Promise.all(
                 documents.map(async (file) => {
                     const uploadResult = await this.uploadToCloudinary(
@@ -176,7 +168,6 @@ class HomePostService {
                 })
             );
 
-            // Step 9: Build entry
             const entryId = uuidv4();
             const newEntry: any = {
                 entryId,
@@ -221,7 +212,6 @@ class HomePostService {
                 isShadowbanned: false,
             };
 
-            // Step 10: Upsert document
             let userPostDoc = await Post.findOne({ userId });
             if (userPostDoc) {
                 userPostDoc.posts.push(newEntry);
@@ -238,7 +228,6 @@ class HomePostService {
                 await userPostDoc.save();
             }
 
-            // Step 11: Update user stats
             await User.findOneAndUpdate(
                 { userId },
                 {
@@ -250,14 +239,8 @@ class HomePostService {
 
             const savedEntry = userPostDoc.posts[userPostDoc.posts.length - 1];
 
-            // ✅ Apna khud ka feed cache invalidate karo taaki naya post turant
-            // apni feed mein dikhe. Baaki users ka cache 3-min TTL se apne aap
-            // expire ho jayega — poore platform ke saare users ka cache turant
-            // clear karna bahut expensive hoga, isliye sirf apna wala clear
-            // kar rahe hain.
             await redisService.deleteByPattern(`feed:v1:${userId}:page:*`);
 
-            // Scheduled response
             if (savedEntry.isScheduled && savedEntry.scheduledFor) {
                 return {
                     success: true,
@@ -299,9 +282,6 @@ class HomePostService {
     }
 
     // ==================== ✅ MERGED CONNECTION DATA ====================
-    // Ek hi query se status map + degree map (BFS) + current user's direct
-    // connection Set — teeno derive hote hain. Pehle 3 alag methods the jo
-    // independently poori active-connections collection scan kar rahe the.
     private static async getConnectionData(
         currentUserId: string,
         authorIds: string[]
@@ -380,8 +360,6 @@ class HomePostService {
         return { statusMap, degreeMap, connectionIdsSet };
     }
 
-    // ✅ LinkedIn-style feed score — engagement / age-decay + connection-degree
-    // boost + "your connections engaged with this" boost + fresh-post boost.
     private static calculateFeedScore(
         post: any,
         connectionDegree: 1 | 2 | 3 | null,
@@ -412,8 +390,6 @@ class HomePostService {
         return score;
     }
 
-    // ✅ Get home feed posts (all users, public only) — connectionStatus,
-    // reposts, feedScore, aur Redis caching ke saath
     static async getHomeFeedPosts(
         currentUserId: string,
         page: number = 1,
@@ -425,7 +401,6 @@ class HomePostService {
         try {
             LoggerUtil.info('Fetching home feed posts', { currentUserId, page, limit, correlationId });
 
-            // ✅ Cache check
             const cached = await redisService.get(cacheKey);
             if (cached) {
                 LoggerUtil.info('Home feed served from cache', { currentUserId, page, correlationId });
@@ -470,7 +445,13 @@ class HomePostService {
                     );
                     if (!originalEntry || !originalDoc) return null;
 
+                    // ✅ NOTE: reposter (repost.repostedBy) ka authorId bhi
+                    // push kar rahe hain kyunki "X reposted this" header ke
+                    // liye reposter ka connection-degree kabhi kaam aa sakta
+                    // hai future features mein. Connect button ke liye ye
+                    // use nahi hoga — us ke liye originalDoc.userId use hoga.
                     authorIds.push(repost.repostedBy);
+                    authorIds.push(originalDoc.userId);
 
                     return {
                         feedItemType: 'repost',
@@ -634,13 +615,27 @@ class HomePostService {
                     }))
                     .filter((x) => x.name);
 
+                // ✅ FIX: LinkedIn jaisa hi asli logic — connect button/degree
+                // hamesha ORIGINAL POST AUTHOR ke against decide hote hain,
+                // reposter ke against nahi. Normal post ke liye subject wahi
+                // hai jo post likh raha hai; repost ke liye subject original
+                // author hai (originalPost.userId), reposter nahi.
+                const connectionSubjectUserId =
+                    post.feedItemType === 'repost' ? post.originalPost.userId : post.userId;
+
                 const degree =
-                    post.userId === currentUserId ? null : connectionDegreeMap[post.userId] ?? null;
+                    connectionSubjectUserId === currentUserId
+                        ? null
+                        : connectionDegreeMap[connectionSubjectUserId] ?? null;
+
+                const connectionStatus =
+                    connectionSubjectUserId === currentUserId
+                        ? 'self'
+                        : connectionStatusMap[connectionSubjectUserId] || 'none';
 
                 return {
                     ...post,
-                    connectionStatus:
-                        post.userId === currentUserId ? 'self' : connectionStatusMap[post.userId] || 'none',
+                    connectionStatus,
                     connectionDegree: degree,
                     feedScore: this.calculateFeedScore(
                         post,
@@ -656,6 +651,16 @@ class HomePostService {
                     commentedByConnectionsCount: knownCommenterIds.length,
                     commentedByConnectionsFull,
                     likedByConnectionsFull,
+                    // ✅ FIX: originalPost object ke andar bhi explicitly attach
+                    // karo — frontend `originalPost.connectionStatus` se seedha
+                    // padhta hai (repost card mein connect button waha se aata hai)
+                    ...(post.feedItemType === 'repost' && {
+                        originalPost: {
+                            ...post.originalPost,
+                            connectionStatus,
+                            connectionDegree: degree,
+                        },
+                    }),
                 };
             });
 
@@ -677,7 +682,6 @@ class HomePostService {
                 },
             };
 
-            // ✅ Cache set — 3 minutes TTL
             await redisService.set(cacheKey, JSON.stringify(result), { ttl: 180 });
 
             LoggerUtil.info('Home feed posts fetched (DB, cached)', {
