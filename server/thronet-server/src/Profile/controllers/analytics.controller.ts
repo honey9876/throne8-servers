@@ -1698,6 +1698,21 @@ class AnalyticsController {
                 return;
             }
 
+
+
+        // ✅ NEW: Apna khud ka click count nahi karna (jaise LinkedIn)
+        if (clickerId === targetUserId) {
+            ResponseUtil.success(res, null, 'Self-click not recorded');
+            return;
+        }
+
+        const validClickTypes = ['profile_link', 'external_link', 'post_link', 'image', 'video', 'document', 'document_download'];
+if (!validClickTypes.includes(clickType)) {
+    ResponseUtil.validationError(res, ['Invalid clickType'], 'Validation failed');
+    return;
+}
+        
+
             await AnalyticsService.recordClick(targetUserId, {
                 clickType,
                 targetUrl,
@@ -1751,6 +1766,11 @@ class AnalyticsController {
                 return;
             }
 
+            if (sharerId === postOwnerId) {
+                ResponseUtil.success(res, null, 'Self-share not recorded');
+                return;
+            }
+
             await AnalyticsService.recordShare(postOwnerId, {
                 postId,
                 shareType,
@@ -1799,6 +1819,13 @@ class AnalyticsController {
                     'Validation failed'
                 );
                 return;
+            }
+
+
+            if (visitorId === profileOwnerId) {
+                ResponseUtil.success(res, null, 'Self-visit not recorded');
+                return;
+
             }
 
             await AnalyticsService.recordUniqueVisitor(profileOwnerId, {

@@ -906,21 +906,78 @@ class AnalyticsService {
             if (viewerData.viewerId === profileOwnerId) {
                 return;
             }
-
+    
+            // ✅ NEW: Viewer ka demographic data fetch karke Analytics.demographics me record karo
+            if (viewerData.viewerId) {
+                try {
+                    const viewer = await User.findOne({ userId: viewerData.viewerId });
+                    if (viewer) {
+                        await AnalyticsService.recordDemographic(profileOwnerId, {
+                            location: (viewer as any).location,
+                            jobTitle: (viewer as any).currentPosition,
+                            industry: (viewer as any).demographics?.industry,
+                        });
+                    }
+                } catch (demoError: any) {
+                    LoggerUtil.warn('Demographic enrichment failed', {
+                        error: demoError.message,
+                        profileOwnerId,
+                    });
+                    // Don't throw - non-critical
+                }
+            }
+    
             await Analytics.recordProfileView(profileOwnerId, viewerData);
-
+    
             // ✅ NEW: Emit real-time update to profile owner
             emitToUser(profileOwnerId, 'analytics:profile-view', {
                 type: 'profile-view',
                 timestamp: new Date(),
             });
-
+    
         } catch (error: any) {
             LoggerUtil.error('Record profile view failed', {
                 error: error.message,
                 profileOwnerId,
             });
             // Don't throw - this is non-critical
+        }
+    }
+    
+    /**
+     * ✅ NEW: Record viewer demographic (location/jobTitle/industry) — aggregated count
+     */
+    static async recordDemographic(
+        userId: string,
+        data: { location?: string; jobTitle?: string; industry?: string }
+    ): Promise<void> {
+        try {
+            let analytics = await Analytics.findOne({ userId });
+            if (!analytics) {
+                analytics = new Analytics({ analyticsId: uuidv4(), userId });
+            }
+    
+            const bump = (arr: any[], key: string, value?: string) => {
+                if (!value) return;
+                const existing = arr.find((x: any) => x[key] === value);
+                if (existing) {
+                    existing.count++;
+                } else {
+                    arr.push({ [key]: value, count: 1 });
+                }
+            };
+    
+            bump(analytics.demographics.locations, 'location', data.location);
+            bump(analytics.demographics.jobTitles, 'title', data.jobTitle);
+            bump(analytics.demographics.industries, 'industry', data.industry);
+    
+            await analytics.save();
+        } catch (error: any) {
+            LoggerUtil.error('Record demographic failed', {
+                error: error.message,
+                userId,
+            });
+            // Don't throw - non-critical
         }
     }
 
@@ -2668,6 +2725,15 @@ static async getSearchAppearancesChange(
 
             await analytics.save();
 
+
+            // ✅ ADD THIS
+    emitToUser(userId, 'analytics:click', {
+        type: 'click',
+        clickType: clickData.clickType,
+        timestamp: new Date(),
+    });
+
+
             LoggerUtil.info('Click recorded successfully', {
                 userId,
                 clickType: clickData.clickType,
@@ -2724,6 +2790,13 @@ static async getSearchAppearancesChange(
             analytics.shares.total++;
 
             await analytics.save();
+
+            // ✅ ADD THIS
+    emitToUser(userId, 'analytics:share', {
+        type: 'share',
+        postId: shareData.postId,
+        timestamp: new Date(),
+    });
 
             LoggerUtil.info('Share recorded successfully', {
                 userId,
@@ -2808,6 +2881,14 @@ static async getSearchAppearancesChange(
             }
 
             await analytics.save();
+
+            // ✅ ADD THIS
+    emitToUser(userId, 'analytics:unique-visitor', {
+        type: 'unique-visitor',
+        isNewVisitor: !existingVisitor,
+        timestamp: new Date(),
+    });
+
 
             LoggerUtil.info('Unique visitor recorded successfully', {
                 userId,
