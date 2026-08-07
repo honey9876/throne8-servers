@@ -24,6 +24,24 @@ interface HomePostData {
 
 class HomePostService {
 
+    // ==================== ✅ NEW: CANDIDATE GENERATION CONFIG ====================
+    // LinkedIn ke "10,000 posts -> 500 candidates" step ka equivalent.
+    // Poore Post collection ko scan karne ke bajaye, pehle relevant author IDs
+    // nikalte hain (network + discovery), phir sirf unhi ke posts fetch karte hain.
+    private static readonly MAX_CANDIDATE_AUTHORS = 300;
+    private static readonly MAX_CANDIDATE_POSTS = 500;
+    private static readonly DISCOVERY_SLOT_RATIO = 0.15; // 15% discovery, 85% network
+    private static readonly DISCOVERY_WINDOW_DAYS = 3;
+
+    // ==================== ✅ NEW: INTEREST / TOPIC MATCHING CONFIG ====================
+    // LinkedIn doc point #3 (interest ka role) aur #5 (topic extraction) ka
+    // simplified version. Post.contentClassification.topics field schema mein
+    // hai lekin kahin populate nahi hoti — jab NLP classification worker
+    // banega, wahi source of truth banega. Abhi ke liye user.skills ko
+    // interest-proxy ki tarah use kar rahe hain.
+    private static readonly INTEREST_MATCH_WEIGHT = 10;
+    private static readonly MAX_INTEREST_MATCHES = 4;
+
     static async createHomePost(
         userId: string,
         postData: HomePostData,
@@ -281,7 +299,135 @@ class HomePostService {
         }
     }
 
-    // ==================== ✅ MERGED CONNECTION DATA ====================
+    // ==================== ✅ NEW: CANDIDATE AUTHOR POOL ====================
+    // ⚠️ VERIFY: field names 'fromUserId'/'toUserId' (Connection) aur
+    // 'followerId'/'followingId' (Follow) — apni actual model files se
+    // confirm karo, maine getConnectionData() ke existing usage se copy kiya hai.
+    private static async getCandidateAuthorIds(
+        currentUserId: string
+    ): Promise<{ networkAuthorIds: string[]; discoveryAuthorIds: string[] }> {
+        const { Connection, Follow } = await import('@/connections/models');
+
+        // 1st degree — direct active connections
+        const directConnections = await Connection.find({
+            status: 'active',
+            $or: [{ fromUserId: currentUserId }, { toUserId: currentUserId }],
+        }).lean().select('fromUserId toUserId');
+
+        const firstDegreeIds = new Set<string>();
+        directConnections.forEach((c: any) => {
+            firstDegreeIds.add(c.fromUserId === currentUserId ? c.toUserId : c.fromUserId);
+        });
+
+        // Followed people/companies (asymmetric — follow ke liye mutual connection zaroori nahi)
+        // ⚠️ VERIFY: Follow model mein field 'followerId' hai ya kuch aur (e.g. 'userId')
+        const follows = await Follow.find({ followerId: currentUserId })
+            .lean()
+            .select('followingId')
+            .limit(200);
+        follows.forEach((f: any) => firstDegreeIds.add(f.followingId));
+
+        // 2nd degree — 1st degree logon ke connections, capped taaki explosion na ho
+        const secondDegreeIds = new Set<string>();
+        if (firstDegreeIds.size > 0) {
+            const secondDegreeConnections = await Connection.find({
+                status: 'active',
+                $or: [
+                    { fromUserId: { $in: [...firstDegreeIds] } },
+                    { toUserId: { $in: [...firstDegreeIds] } },
+                ],
+            }).lean().select('fromUserId toUserId').limit(1000);
+
+            secondDegreeConnections.forEach((c: any) => {
+                const otherId = firstDegreeIds.has(c.fromUserId) ? c.toUserId : c.fromUserId;
+                if (otherId !== currentUserId && !firstDegreeIds.has(otherId)) {
+                    secondDegreeIds.add(otherId);
+                }
+            });
+        }
+
+        const networkAuthorIds = [...firstDegreeIds, ...secondDegreeIds]
+            .slice(0, this.MAX_CANDIDATE_AUTHORS);
+
+        // Discovery slice — network ke bahar ke high-engagement authors,
+        // taaki feed filter-bubble na bane (LinkedIn "Recommended posts" jaisa)
+        const discoverySlots = Math.max(
+            0,
+            Math.floor(this.MAX_CANDIDATE_AUTHORS * this.DISCOVERY_SLOT_RATIO)
+        );
+
+        let discoveryAuthorIds: string[] = [];
+        if (discoverySlots > 0) {
+            const excludeIds = [currentUserId, ...networkAuthorIds];
+            const windowStart = new Date(Date.now() - this.DISCOVERY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
+            const discoveryDocs = await Post.aggregate([
+                { $match: { userId: { $nin: excludeIds } } },
+                { $unwind: '$posts' },
+                {
+                    $match: {
+                        'posts.isDeleted': false,
+                        'posts.isArchived': false,
+                        'posts.isScheduled': { $ne: true },
+                        'posts.isPublic': { $ne: false },
+                        'posts.isShadowbanned': { $ne: true },
+                        'posts.createdAt': { $gte: windowStart },
+                    },
+                },
+                {
+                    $addFields: {
+                        engagement: {
+                            $add: ['$posts.likesCount', { $multiply: ['$posts.commentsCount', 2] }],
+                        },
+                    },
+                },
+                { $sort: { engagement: -1 } },
+                { $group: { _id: '$userId' } },
+                { $limit: discoverySlots },
+            ]);
+            discoveryAuthorIds = discoveryDocs.map((d: any) => d._id);
+        }
+
+        return { networkAuthorIds, discoveryAuthorIds };
+    }
+
+    // ==================== ✅ NEW: USER INTEREST KEYWORDS ====================
+    // User ki Skill.skillName list ko interest signal ki tarah use karte hain.
+    // Skill collection already Profile feature mein maintain hoti hai —
+    // koi naya data model nahi banaya.
+    private static async getUserInterestKeywords(userId: string): Promise<string[]> {
+        const { default: Skill } = await import('@/Profile/models/Skill.model');
+        const skills = await Skill.find({ userId, isDeleted: false, isArchived: false })
+            .lean()
+            .select('skillName');
+        return skills
+            .map((s: any) => (s.skillName || '').trim().toLowerCase())
+            .filter((s: string) => s.length > 0);
+    }
+
+    // Post ke title+content mein user ki kitni skills match hoti hain —
+    // substring match with word-boundary check (case-insensitive). Multi-word
+    // skills bhi handle hoti hain ("Node.js", "Machine Learning") kyunki
+    // tokenize nahi kar rahe, seedha substring check kar rahe hain.
+    private static getMatchedInterests(post: any, interestKeywords: string[]): string[] {
+        if (interestKeywords.length === 0) return [];
+
+        const textSource = post.feedItemType === 'repost' ? post.originalPost : post;
+        const text = `${textSource?.title || ''} ${textSource?.content || ''}`.toLowerCase();
+        if (!text.trim()) return [];
+
+        const matched: string[] = [];
+        for (const keyword of interestKeywords) {
+            if (matched.length >= this.MAX_INTEREST_MATCHES) break;
+            // word-boundary check taaki "java" "javascript" ke andar match na ho
+            const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
+            if (regex.test(text)) matched.push(keyword);
+        }
+        return matched;
+    }
+
+    // ==================== MERGED CONNECTION DATA ====================
     private static async getConnectionData(
         currentUserId: string,
         authorIds: string[]
@@ -407,7 +553,18 @@ class HomePostService {
                 return JSON.parse(cached);
             }
 
-            const allUserDocs = await Post.find({}).lean();
+            // ✅ CHANGED: poore collection ke bajaye sirf candidate authors ke posts.
+            // Pehle: const allUserDocs = await Post.find({}).lean();
+            const { networkAuthorIds, discoveryAuthorIds } =
+                await this.getCandidateAuthorIds(currentUserId);
+
+            const candidateAuthorIds = [
+                ...new Set([currentUserId, ...networkAuthorIds, ...discoveryAuthorIds]),
+            ];
+
+            const allUserDocs = await Post.find({ userId: { $in: candidateAuthorIds } })
+                .lean()
+                .limit(this.MAX_CANDIDATE_AUTHORS + 50);
 
             let allPosts: any[] = [];
             const authorIds: string[] = [];
@@ -432,8 +589,20 @@ class HomePostService {
                 allPosts.push(...entries);
             });
 
+            // ✅ NEW: agar candidate posts limit se zyada ho jayein, scoring se
+            // pehle hi recency-based cap laga do (LinkedIn ka "500 candidates" cap)
+            if (allPosts.length > this.MAX_CANDIDATE_POSTS) {
+                allPosts = allPosts
+                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                    .slice(0, this.MAX_CANDIDATE_POSTS);
+            }
+
             const { default: Repost } = await import('@/Profile/models/Repost.model');
-            const allReposts = await Repost.find({ isDeleted: false }).lean();
+            // ✅ CHANGED: reposts bhi sirf candidate authors ke liye fetch karo
+            const allReposts = await Repost.find({
+                isDeleted: false,
+                repostedBy: { $in: candidateAuthorIds },
+            }).lean();
 
             const repostEntries = await Promise.all(
                 allReposts.map(async (repost: any) => {
@@ -615,11 +784,8 @@ class HomePostService {
                     }))
                     .filter((x) => x.name);
 
-                // ✅ FIX: LinkedIn jaisa hi asli logic — connect button/degree
-                // hamesha ORIGINAL POST AUTHOR ke against decide hote hain,
-                // reposter ke against nahi. Normal post ke liye subject wahi
-                // hai jo post likh raha hai; repost ke liye subject original
-                // author hai (originalPost.userId), reposter nahi.
+                // LinkedIn jaisa hi asli logic — connect button/degree hamesha
+                // ORIGINAL POST AUTHOR ke against decide hote hain, reposter ke nahi.
                 const connectionSubjectUserId =
                     post.feedItemType === 'repost' ? post.originalPost.userId : post.userId;
 
@@ -651,9 +817,6 @@ class HomePostService {
                     commentedByConnectionsCount: knownCommenterIds.length,
                     commentedByConnectionsFull,
                     likedByConnectionsFull,
-                    // ✅ FIX: originalPost object ke andar bhi explicitly attach
-                    // karo — frontend `originalPost.connectionStatus` se seedha
-                    // padhta hai (repost card mein connect button waha se aata hai)
                     ...(post.feedItemType === 'repost' && {
                         originalPost: {
                             ...post.originalPost,
@@ -688,6 +851,7 @@ class HomePostService {
                 currentUserId,
                 total,
                 page,
+                candidateAuthorCount: candidateAuthorIds.length,
                 correlationId,
             });
 

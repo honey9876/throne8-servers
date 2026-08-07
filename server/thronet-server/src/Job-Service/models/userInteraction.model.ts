@@ -13,7 +13,7 @@ interface ILocation {
   timezone?: string;
 }
 
-interface IPlatform {
+interface IPlatform { 
   device: 'desktop' | 'mobile' | 'tablet';
   os?: string;
   browser?: string;
