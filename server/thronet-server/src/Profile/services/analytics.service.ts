@@ -587,6 +587,8 @@ class AnalyticsService {
      */
     static async getViewerDemographics(userId: string): Promise<any> {
         const correlationId = uuidv4();
+        const MIN_SAMPLE_SIZE = 5; // ✅ NEW: jab tak kam se kam 5 unique data points na ho, % misleading hota hai
+
 
         try {
             LoggerUtil.info('Get viewer demographics', {
@@ -602,21 +604,53 @@ class AnalyticsService {
                     jobTitles: [],
                     industries: [],
                     experienceLevels: [],
+                    hasEnoughData: false, // ✅ NEW
+
                 };
             }
 
+            // ✅ NEW: helper — count ko percentage me convert karo, total ke against
+        const withPercentage = (arr: { count: number;[key: string]: any }[], total: number) =>
+            arr.map(item => ({
+                ...item,
+                percentage: total > 0 ? Math.round((item.count / total) * 100) : 0,
+            }));
+
+        const totalLocations = analytics.demographics.locations.reduce((s, l) => s + l.count, 0);
+        const totalJobTitles = analytics.demographics.jobTitles.reduce((s, j) => s + j.count, 0);
+        const totalIndustries = analytics.demographics.industries.reduce((s, i) => s + i.count, 0);
+
             return {
-                locations: analytics.demographics.locations
-                    .sort((a, b) => b.count - a.count)
-                    .slice(0, 10),  // Top 10
-                jobTitles: analytics.demographics.jobTitles
-                    .sort((a, b) => b.count - a.count)
-                    .slice(0, 10),
-                industries: analytics.demographics.industries
-                    .sort((a, b) => b.count - a.count)
-                    .slice(0, 10),
+                // locations: analytics.demographics.locations
+                //     .sort((a, b) => b.count - a.count)
+                //     .slice(0, 10),  // Top 10
+                // jobTitles: analytics.demographics.jobTitles
+                //     .sort((a, b) => b.count - a.count)
+                //     .slice(0, 10),
+                // industries: analytics.demographics.industries
+                //     .sort((a, b) => b.count - a.count)
+                //     .slice(0, 10),
+                // experienceLevels: analytics.demographics.experienceLevels
+                //     .sort((a, b) => b.count - a.count),
+
+
+                locations: withPercentage(
+                    analytics.demographics.locations.sort((a, b) => b.count - a.count).slice(0, 10),
+                    totalLocations
+                ),
+                jobTitles: withPercentage(
+                    analytics.demographics.jobTitles.sort((a, b) => b.count - a.count).slice(0, 10),
+                    totalJobTitles
+                ),
+                industries: withPercentage(
+                    analytics.demographics.industries.sort((a, b) => b.count - a.count).slice(0, 10),
+                    totalIndustries
+                ),
                 experienceLevels: analytics.demographics.experienceLevels
                     .sort((a, b) => b.count - a.count),
+
+                    // ✅ NEW: frontend ko bata do ki data reliable hai ya nahi
+            hasEnoughData: totalLocations >= MIN_SAMPLE_SIZE,
             };
 
         } catch (error: any) {
