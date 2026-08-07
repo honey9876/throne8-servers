@@ -88,8 +88,8 @@ export interface IAnalytics extends Document {
         last30Days: number;
         clicks: Array<{
             clickId: string;
-            clickType: 'profile_link' | 'external_link' | 'post_link' | 'image' | 'video' | 'document';
-            targetUrl: string;
+            clickType: 'profile_link' | 'external_link' | 'post_link' | 'image' | 'video' | 'document'| 'document_download';
+            targetUrl?: string;
             postId?: string;
             clickedAt: Date;
             clickerId?: string;
@@ -329,7 +329,7 @@ const AnalyticsSchema = new Schema<IAnalytics, IAnalyticsModel>(
                 clickId: { type: String, default: () => uuidv4() },
                 clickType: {
                     type: String,
-                    enum: ['profile_link', 'external_link', 'post_link', 'image', 'video', 'document'],
+                    enum: ['profile_link', 'external_link', 'post_link', 'image', 'video', 'document','document_download'],
                     required: true,
                 },
                 targetUrl: String,
@@ -419,6 +419,14 @@ AnalyticsSchema.pre('save', function (next) {
     this.postImpressions.last30Days = this.postImpressions.impressions.filter((i) => i.viewedAt >= d30).length;
     this.searchAppearances.last7Days = this.searchAppearances.appearances.filter((a) => a.appearedAt >= d7).length;
     this.searchAppearances.last30Days = this.searchAppearances.appearances.filter((a) => a.appearedAt >= d30).length;
+    // ✅ FIX: clicks/shares/uniqueVisitors ke last7/30Days bhi calculate karo
+    this.clicks.last7Days = this.clicks.clicks.filter((c) => c.clickedAt >= d7).length;
+    this.clicks.last30Days = this.clicks.clicks.filter((c) => c.clickedAt >= d30).length;
+    this.shares.last7Days = this.shares.shares.filter((s) => s.sharedAt >= d7).length;
+    this.shares.last30Days = this.shares.shares.filter((s) => s.sharedAt >= d30).length;
+    this.uniqueVisitors.last7Days = this.uniqueVisitors.visitors.filter((v) => v.lastVisit >= d7).length;
+    this.uniqueVisitors.last30Days = this.uniqueVisitors.visitors.filter((v) => v.lastVisit >= d30).length;
+
     this.lastCalculatedAt = now;
     next();
 });
