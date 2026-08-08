@@ -6,7 +6,8 @@ import Repost from '@/Profile/models/Repost.model';
 import { IPostEntry } from '@/Profile/models/Post.model';
 import { LoggerUtil } from '@/shared/logger.util';
 import AnalyticsService from '../analytics.service';
-import redisService from '@/services/redis.service'; // ✅ NEW
+import redisService from '@/services/redis.service';
+import { emitToUser } from '@/socket/index'; // ✅ NEW
 
 class RepostService {
 
@@ -100,6 +101,38 @@ class RepostService {
                 // Non-critical — cache invalidation fail hone se repost creation fail nahi honi chahiye
                 LoggerUtil.warn('Feed cache invalidation failed after repost (non-critical)', {
                     error: cacheError.message,
+                    repostedBy,
+                });
+            }
+
+            // ✅ NEW: Real-time push — reposter ke khule hue tabs/devices ko turant
+            // batao ki naya repost aaya hai, taaki UI bina reload kiye update ho sake.
+            // Payload wahi shape hai jo frontend optimistic-update mein already banata hai.
+            try {
+                emitToUser(repostedBy, 'feed:new-post', {
+                    feedItemType: 'repost',
+                    repostId: repost.repostId,
+                    repostType: repost.repostType,
+                    thoughtText: repost.thoughtText,
+                    userId: repostedBy, // ✅ FIX: 'repostedBy' nahi — feed API (getHomeFeedPosts) aur
+                    // frontend transformPosts() dono 'userId' field expect karte hain repost ke liye
+                    createdAt: repost.createdAt,
+                    originalPost: {
+                        entryId: originalEntry.entryId,
+                        title: originalEntry.title,
+                        content: originalEntry.content,
+                        userId: originalDoc.userId,
+                        images: originalEntry.images || [],
+                        videos: originalEntry.videos || [],
+                        documents: originalEntry.documents || [],
+                        likesCount: originalEntry.likesCount,
+                        commentsCount: originalEntry.commentsCount,
+                        createdAt: originalEntry.createdAt,
+                    },
+                });
+            } catch (emitError: any) {
+                LoggerUtil.warn('Socket emit failed after repost (non-critical)', {
+                    error: emitError.message,
                     repostedBy,
                 });
             }
