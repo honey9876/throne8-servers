@@ -999,14 +999,15 @@ class AuthController {
                 return;
             }
 
-            // Step 4: Validate session still exists
-            const session = await Session.findById(decoded.sessionId);
-            if (!session || !session.isActive) {
-                LoggerUtil.warn('Session not found or inactive', {
-                    sessionId: decoded.sessionId,
-                });
-                ResponseUtil.unauthorized(res, 'Session has been terminated');
-                return;
+            // Step 4: Validate session if sessionId exists in decoded payload
+            let session: any = null;
+            if (decoded.sessionId) {
+                session = await Session.findById(decoded.sessionId);
+                if (session && !session.isActive) {
+                    LoggerUtil.warn('Session is inactive', { sessionId: decoded.sessionId });
+                    ResponseUtil.unauthorized(res, 'Session has been terminated');
+                    return;
+                }
             }
 
             // Step 5: ✅ BLACKLIST OLD REFRESH TOKEN (Token Rotation)
@@ -1017,20 +1018,19 @@ class AuthController {
             );
 
             // Step 6: ✅ GENERATE NEW TOKENS
-            const newPayload = {
+            const newPayload: any = {
                 userId: user.userId,
                 role: user.role,
-                sessionId: session._id,
-                deviceId: decoded.deviceId,
             };
+            if (session?._id) newPayload.sessionId = session._id;
+            if (decoded.deviceId) newPayload.deviceId = decoded.deviceId;
 
             const newAccessToken = User.generateAccessToken(newPayload);
             const newRefreshToken = User.generateRefreshToken(newPayload);
 
             // Step 7: Cache new tokens
             const accessTokenExpiresIn = 15 * 60; // 15 minutes
-            const refreshTokenExpiresIn = 7 * 24 * 60 * 60; // 7 days
-
+            const refreshTokenExpiresIn = 30 * 24 * 60 * 60; // 30 days 
             await CacheUtil.set(
                 `access_token:${newAccessToken}`,
                 {
@@ -1041,10 +1041,12 @@ class AuthController {
                 accessTokenExpiresIn
             );
 
-            // Step 8: Update session refresh token
-            session.refreshToken = newRefreshToken;
-            session.lastActivity = new Date();
-            await session.save();
+            // Step 8: Update session refresh token if session exists
+            if (session) {
+                session.refreshToken = newRefreshToken;
+                session.lastActivity = new Date();
+                await session.save();
+            }
 
             // Step 9: Audit log
             await AuditLog.logAction({
@@ -1056,7 +1058,7 @@ class AuthController {
                 status: 'SUCCESS',
                 severity: 'LOW',
                 metadata: new Map([
-                    ['sessionId', session._id],
+                    ['sessionId', session?._id || 'none'],
                     ['correlationId', correlationId],
                 ]),
             });
