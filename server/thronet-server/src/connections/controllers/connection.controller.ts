@@ -912,6 +912,45 @@ class connectionController {
 
         res.status(HttpStatus.OK).json(SuccessResponse(activity, 'Connection activity retrieved', HttpStatus.OK));
     });
+
+
+
+    /**
+     * ✅ 21. GET MUTUAL CONNECTIONS
+     * GET /api/v1/connections/mutual/:userId1/:userId2
+     * @access Private
+     * @authorization Requesting user must be userId1 or userId2 (or admin)
+     */
+    static getMutualConnections = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
+        const { userId1, userId2 } = req.params;
+        const { limit = '10' } = req.query;
+        const authUserId = req.user?.userId || req.user?.id;
+
+        if (!authUserId) {
+            return next(new ErrorResponse('Authentication required', HttpStatus.UNAUTHORIZED, 'AUTH_ERROR'));
+        }
+
+        if (!userId1 || !userId2) {
+            return next(new ErrorResponse('userId1 and userId2 are required', HttpStatus.BAD_REQUEST, 'INVALID_INPUT'));
+        }
+
+        // ✅ AUTHORIZATION: Requesting user must be one of the two users (or admin)
+        if (userId1 !== authUserId && userId2 !== authUserId && req.user?.role !== 'admin') {
+            return next(new ErrorResponse('Not authorized to view these mutual connections', HttpStatus.FORBIDDEN, 'AUTH_ERROR'));
+        }
+
+        const mutuals = await connectionService.getMutualConnections(
+            userId1,
+            userId2,
+            parseInt(limit as string)
+        );
+
+        res.status(HttpStatus.OK).json(SuccessResponse(
+            { mutuals, count: mutuals.length },
+            'Mutual connections retrieved',
+            HttpStatus.OK
+        ));
+    });
 }
 
 export { connectionController };

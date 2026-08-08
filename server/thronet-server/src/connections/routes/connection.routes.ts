@@ -149,6 +149,17 @@ router.delete(
     asyncHandler(connectionController.deleteConnection)
 );
 
+
+// 2.5 Get mutual connections between two users (MUST be before GET /:connectionId)
+router.get(
+    '/mutual/:userId1/:userId2',
+    connectionLimiter,
+    asyncHandler(connectionController.getMutualConnections)
+);
+
+
+
+
 // 3. Get connection details
 router.get(
     '/:connectionId',
