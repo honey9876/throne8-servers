@@ -24,21 +24,16 @@ interface HomePostData {
 
 class HomePostService {
 
-    // ==================== ✅ NEW: CANDIDATE GENERATION CONFIG ====================
+    // ==================== ✅ CANDIDATE GENERATION CONFIG ====================
     // LinkedIn ke "10,000 posts -> 500 candidates" step ka equivalent.
-    // Poore Post collection ko scan karne ke bajaye, pehle relevant author IDs
-    // nikalte hain (network + discovery), phir sirf unhi ke posts fetch karte hain.
     private static readonly MAX_CANDIDATE_AUTHORS = 300;
     private static readonly MAX_CANDIDATE_POSTS = 500;
     private static readonly DISCOVERY_SLOT_RATIO = 0.15; // 15% discovery, 85% network
     private static readonly DISCOVERY_WINDOW_DAYS = 3;
 
-    // ==================== ✅ NEW: INTEREST / TOPIC MATCHING CONFIG ====================
-    // LinkedIn doc point #3 (interest ka role) aur #5 (topic extraction) ka
-    // simplified version. Post.contentClassification.topics field schema mein
-    // hai lekin kahin populate nahi hoti — jab NLP classification worker
-    // banega, wahi source of truth banega. Abhi ke liye user.skills ko
-    // interest-proxy ki tarah use kar rahe hain.
+    // ==================== ✅ INTEREST / TOPIC MATCHING CONFIG ====================
+    // User.skills ko interest-proxy ki tarah use kar rahe hain jab tak
+    // contentClassification.topics NLP se populate nahi hoti.
     private static readonly INTEREST_MATCH_WEIGHT = 10;
     private static readonly MAX_INTEREST_MATCHES = 4;
 
@@ -299,16 +294,12 @@ class HomePostService {
         }
     }
 
-    // ==================== ✅ NEW: CANDIDATE AUTHOR POOL ====================
-    // ⚠️ VERIFY: field names 'fromUserId'/'toUserId' (Connection) aur
-    // 'followerId'/'followingId' (Follow) — apni actual model files se
-    // confirm karo, maine getConnectionData() ke existing usage se copy kiya hai.
+    // ==================== ✅ CANDIDATE AUTHOR POOL ====================
     private static async getCandidateAuthorIds(
         currentUserId: string
     ): Promise<{ networkAuthorIds: string[]; discoveryAuthorIds: string[] }> {
         const { Connection, Follow } = await import('@/connections/models');
 
-        // 1st degree — direct active connections
         const directConnections = await Connection.find({
             status: 'active',
             $or: [{ fromUserId: currentUserId }, { toUserId: currentUserId }],
@@ -319,15 +310,12 @@ class HomePostService {
             firstDegreeIds.add(c.fromUserId === currentUserId ? c.toUserId : c.fromUserId);
         });
 
-        // Followed people/companies (asymmetric — follow ke liye mutual connection zaroori nahi)
-        // ⚠️ VERIFY: Follow model mein field 'followerId' hai ya kuch aur (e.g. 'userId')
         const follows = await Follow.find({ followerId: currentUserId })
             .lean()
             .select('followingId')
             .limit(200);
         follows.forEach((f: any) => firstDegreeIds.add(f.followingId));
 
-        // 2nd degree — 1st degree logon ke connections, capped taaki explosion na ho
         const secondDegreeIds = new Set<string>();
         if (firstDegreeIds.size > 0) {
             const secondDegreeConnections = await Connection.find({
@@ -349,8 +337,6 @@ class HomePostService {
         const networkAuthorIds = [...firstDegreeIds, ...secondDegreeIds]
             .slice(0, this.MAX_CANDIDATE_AUTHORS);
 
-        // Discovery slice — network ke bahar ke high-engagement authors,
-        // taaki feed filter-bubble na bane (LinkedIn "Recommended posts" jaisa)
         const discoverySlots = Math.max(
             0,
             Math.floor(this.MAX_CANDIDATE_AUTHORS * this.DISCOVERY_SLOT_RATIO)
@@ -391,10 +377,7 @@ class HomePostService {
         return { networkAuthorIds, discoveryAuthorIds };
     }
 
-    // ==================== ✅ NEW: USER INTEREST KEYWORDS ====================
-    // User ki Skill.skillName list ko interest signal ki tarah use karte hain.
-    // Skill collection already Profile feature mein maintain hoti hai —
-    // koi naya data model nahi banaya.
+    // ==================== ✅ USER INTEREST KEYWORDS ====================
     private static async getUserInterestKeywords(userId: string): Promise<string[]> {
         const { default: Skill } = await import('@/Profile/models/Skill.model');
         const skills = await Skill.find({ userId, isDeleted: false, isArchived: false })
@@ -405,10 +388,6 @@ class HomePostService {
             .filter((s: string) => s.length > 0);
     }
 
-    // Post ke title+content mein user ki kitni skills match hoti hain —
-    // substring match with word-boundary check (case-insensitive). Multi-word
-    // skills bhi handle hoti hain ("Node.js", "Machine Learning") kyunki
-    // tokenize nahi kar rahe, seedha substring check kar rahe hain.
     private static getMatchedInterests(post: any, interestKeywords: string[]): string[] {
         if (interestKeywords.length === 0) return [];
 
@@ -419,7 +398,6 @@ class HomePostService {
         const matched: string[] = [];
         for (const keyword of interestKeywords) {
             if (matched.length >= this.MAX_INTEREST_MATCHES) break;
-            // word-boundary check taaki "java" "javascript" ke andar match na ho
             const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
             if (regex.test(text)) matched.push(keyword);
@@ -506,11 +484,23 @@ class HomePostService {
         return { statusMap, degreeMap, connectionIdsSet };
     }
 
+    // ✅ NEW: dwell time config — LinkedIn doc point #7 (engagement/dwell signals)
+    private static readonly DWELL_TIME_CAP_SECONDS = 30;
+    private static readonly DWELL_TIME_MAX_BONUS = 20;
+
+    // ✅ NEW: negative signal (previous behaviour) config
+    private static readonly IGNORE_SIGNAL_PENALTY_PER_COUNT = 3;
+    private static readonly IGNORE_SIGNAL_MAX_PENALTY = 15;
+
+    // ✅ CHANGED: ignoreCount naya param add hua
     private static calculateFeedScore(
         post: any,
         connectionDegree: 1 | 2 | 3 | null,
         knownLikersCount: number = 0,
-        knownCommentersCount: number = 0
+        knownCommentersCount: number = 0,
+        interestMatchCount: number = 0,
+        avgDwellTime: number = 0,
+        ignoreCount: number = 0 // ✅ NEW — is author ko viewer ne kitni baar "ignore" kiya
     ): number {
         const ageInHours = (Date.now() - new Date(post.createdAt).getTime()) / (1000 * 60 * 60);
         const ageInDays = ageInHours / 24;
@@ -531,9 +521,44 @@ class HomePostService {
         score += knownLikersCount * 5;
         score += knownCommentersCount * 8;
 
+        score += Math.min(interestMatchCount, this.MAX_INTEREST_MATCHES) * this.INTEREST_MATCH_WEIGHT;
+
+        const dwellRatio = Math.min(avgDwellTime, this.DWELL_TIME_CAP_SECONDS) / this.DWELL_TIME_CAP_SECONDS;
+        score += dwellRatio * this.DWELL_TIME_MAX_BONUS;
+
+        // ✅ NEW: negative signal penalty — jitna zyada is author ko viewer
+        // ne ignore kiya hai, utna neeche jaayega (capped, taaki ek author
+        // permanently feed se gayab na ho jaaye)
+        const ignorePenalty = Math.min(ignoreCount, this.IGNORE_SIGNAL_MAX_PENALTY / this.IGNORE_SIGNAL_PENALTY_PER_COUNT)
+            * this.IGNORE_SIGNAL_PENALTY_PER_COUNT;
+        score -= ignorePenalty;
+
         if (ageInHours < 1) score += 25;
 
         return score;
+    }
+
+    // ✅ NEW: viewer ke against candidate authors ka ignore-count batch fetch karta hai
+    private static async getIgnoreSignalsForAuthors(
+        viewerId: string,
+        authorIds: string[]
+    ): Promise<Record<string, number>> {
+        const map: Record<string, number> = {};
+        const uniqueAuthorIds = [...new Set(authorIds)];
+        if (uniqueAuthorIds.length === 0) return map;
+
+        await Promise.all(
+            uniqueAuthorIds.map(async (authorId) => {
+                try {
+                    const raw = await redisService.get(`feed:ignore:${viewerId}:${authorId}`);
+                    map[authorId] = raw ? parseInt(raw, 10) || 0 : 0;
+                } catch {
+                    map[authorId] = 0;
+                }
+            })
+        );
+
+        return map;
     }
 
     static async getHomeFeedPosts(
@@ -553,14 +578,15 @@ class HomePostService {
                 return JSON.parse(cached);
             }
 
-            // ✅ CHANGED: poore collection ke bajaye sirf candidate authors ke posts.
-            // Pehle: const allUserDocs = await Post.find({}).lean();
             const { networkAuthorIds, discoveryAuthorIds } =
                 await this.getCandidateAuthorIds(currentUserId);
 
             const candidateAuthorIds = [
                 ...new Set([currentUserId, ...networkAuthorIds, ...discoveryAuthorIds]),
             ];
+
+            // interest keywords ek baar fetch kar lo
+            const interestKeywords = await this.getUserInterestKeywords(currentUserId);
 
             const allUserDocs = await Post.find({ userId: { $in: candidateAuthorIds } })
                 .lean()
@@ -575,7 +601,8 @@ class HomePostService {
                         !p.isDeleted &&
                         !p.isArchived &&
                         !p.isScheduled &&
-                        p.isPublic !== false
+                        p.isPublic !== false &&
+                        !p.isShadowbanned // ✅ FIX: pehle ye check missing tha — shadowbanned posts normal feed mein dikh rahe the
                     )
                     .map((p: any) => {
                         authorIds.push(doc.userId);
@@ -589,8 +616,6 @@ class HomePostService {
                 allPosts.push(...entries);
             });
 
-            // ✅ NEW: agar candidate posts limit se zyada ho jayein, scoring se
-            // pehle hi recency-based cap laga do (LinkedIn ka "500 candidates" cap)
             if (allPosts.length > this.MAX_CANDIDATE_POSTS) {
                 allPosts = allPosts
                     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -598,7 +623,6 @@ class HomePostService {
             }
 
             const { default: Repost } = await import('@/Profile/models/Repost.model');
-            // ✅ CHANGED: reposts bhi sirf candidate authors ke liye fetch karo
             const allReposts = await Repost.find({
                 isDeleted: false,
                 repostedBy: { $in: candidateAuthorIds },
@@ -614,11 +638,6 @@ class HomePostService {
                     );
                     if (!originalEntry || !originalDoc) return null;
 
-                    // ✅ NOTE: reposter (repost.repostedBy) ka authorId bhi
-                    // push kar rahe hain kyunki "X reposted this" header ke
-                    // liye reposter ka connection-degree kabhi kaam aa sakta
-                    // hai future features mein. Connect button ke liye ye
-                    // use nahi hoga — us ke liye originalDoc.userId use hoga.
                     authorIds.push(repost.repostedBy);
                     authorIds.push(originalDoc.userId);
 
@@ -647,6 +666,7 @@ class HomePostService {
                             commentsCount: originalEntry.commentsCount,
                             isLikedByCurrentUser: (originalEntry.likedBy || []).includes(currentUserId),
                             createdAt: originalEntry.createdAt,
+                            analytics: originalEntry.analytics || null, // ✅ NEW: dwell time score ke liye chahiye
                         },
                     };
                 })
@@ -751,6 +771,14 @@ class HomePostService {
                 }, {});
             }
 
+            // ✅ NEW: is user ke against candidate authors ka ignore-count fetch karo,
+            // score penalty ke liye
+            const authorIdsForIgnoreCheck = [...new Set(authorIds)];
+            const ignoreSignalsMap = await this.getIgnoreSignalsForAuthors(
+                currentUserId,
+                authorIdsForIgnoreCheck
+            );
+
             allPosts = allPosts.map((post) => {
                 const knownLikerIds = likedByConnectionsMap[post.entryId] || [];
                 const likedByConnections = knownLikerIds
@@ -784,8 +812,6 @@ class HomePostService {
                     }))
                     .filter((x) => x.name);
 
-                // LinkedIn jaisa hi asli logic — connect button/degree hamesha
-                // ORIGINAL POST AUTHOR ke against decide hote hain, reposter ke nahi.
                 const connectionSubjectUserId =
                     post.feedItemType === 'repost' ? post.originalPost.userId : post.userId;
 
@@ -799,15 +825,33 @@ class HomePostService {
                         ? 'self'
                         : connectionStatusMap[connectionSubjectUserId] || 'none';
 
+                // is post ke against interest match nikaalo, score mein pass karo
+                const matchedInterests = this.getMatchedInterests(post, interestKeywords);
+
+                // original post ka analytics.avgDwellTime nikaalo (repost ke case
+                // mein original post ka dwell time use hota hai, reposter ka nahi)
+                const dwellSource = post.feedItemType === 'repost' ? post.originalPost : post;
+                const avgDwellTime = dwellSource?.analytics?.avgDwellTime || 0;
+
+                // ✅ NEW: is post ke actual author (original author, reposter nahi) ka
+                // ignore-count nikaalo — connectionSubjectUserId already yahi represent karta hai
+                const ignoreCount = connectionSubjectUserId
+                    ? (ignoreSignalsMap[connectionSubjectUserId] || 0)
+                    : 0;
+
                 return {
                     ...post,
                     connectionStatus,
                     connectionDegree: degree,
+                    matchedInterests, // debugging/UI ke liye bhi expose kar diya (e.g. "matches your skill: React")
                     feedScore: this.calculateFeedScore(
                         post,
                         degree,
                         knownLikerIds.length,
-                        knownCommenterIds.length
+                        knownCommenterIds.length,
+                        matchedInterests.length,
+                        avgDwellTime,
+                        ignoreCount // ✅ NEW
                     ),
                     likedByConnections,
                     likedByConnectionsAvatars,
@@ -852,6 +896,7 @@ class HomePostService {
                 total,
                 page,
                 candidateAuthorCount: candidateAuthorIds.length,
+                interestKeywordCount: interestKeywords.length,
                 correlationId,
             });
 

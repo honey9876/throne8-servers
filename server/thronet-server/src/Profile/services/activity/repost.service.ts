@@ -6,6 +6,7 @@ import Repost from '@/Profile/models/Repost.model';
 import { IPostEntry } from '@/Profile/models/Post.model';
 import { LoggerUtil } from '@/shared/logger.util';
 import AnalyticsService from '../analytics.service';
+import redisService from '@/services/redis.service'; // ✅ NEW
 
 class RepostService {
 
@@ -90,8 +91,18 @@ class RepostService {
                 });
             }
 
-
-            
+            // ✅ NEW: Reposter ka apna feed-cache clear karo — taaki uska naya
+            // repost turant top pe dikhe, 180-sec cache expiry ka wait na ho.
+            // createHomePost() mein bhi yahi pattern hai, repost mein missing tha.
+            try {
+                await redisService.deleteByPattern(`feed:v1:${repostedBy}:page:*`);
+            } catch (cacheError: any) {
+                // Non-critical — cache invalidation fail hone se repost creation fail nahi honi chahiye
+                LoggerUtil.warn('Feed cache invalidation failed after repost (non-critical)', {
+                    error: cacheError.message,
+                    repostedBy,
+                });
+            }
 
             LoggerUtil.info('Repost created successfully', {
                 repostId: repost.repostId,
@@ -141,6 +152,17 @@ class RepostService {
                 { userId: repost.originalPostOwnerId },
                 { $inc: { 'activityStats.totalReposts': -1 } }
             );
+
+            // ✅ NEW: delete karne par bhi apna feed-cache clear karo — taaki
+            // delete hui repost turant feed se gayab ho jaaye
+            try {
+                await redisService.deleteByPattern(`feed:v1:${userId}:page:*`);
+            } catch (cacheError: any) {
+                LoggerUtil.warn('Feed cache invalidation failed after repost delete (non-critical)', {
+                    error: cacheError.message,
+                    userId,
+                });
+            }
 
             LoggerUtil.info('Repost deleted', { repostId, userId, correlationId });
 

@@ -1521,7 +1521,7 @@ class AnalyticsController {
         }
     }
 
-    // Add this NEW method:
+   // ✅ CHANGED: viewDuration ab body se accept hota hai aur service ko pass hota hai
     static async recordPostImpressionSmart(
         req: Request & { user?: UserPayload },
         res: Response
@@ -1535,7 +1535,7 @@ class AnalyticsController {
             }
 
             const viewerId = req.user.userId;
-            const { postId, postOwnerId, source } = req.body;
+            const { postId, postOwnerId, source, viewDuration } = req.body;
 
             // Generate session/device fingerprint
             const sessionId = req.headers['x-session-id'] as string || uuidv4();
@@ -1556,11 +1556,18 @@ class AnalyticsController {
                 return;
             }
 
+            // ✅ NEW: sanity check — negative ya bahut bada duration ignore karo (junk data se bachne ke liye)
+            const sanitizedDuration =
+                typeof viewDuration === 'number' && viewDuration >= 0 && viewDuration <= 3600
+                    ? viewDuration
+                    : undefined;
+
             LoggerUtil.info('Recording smart post impression', {
                 viewerId,
                 postOwnerId,
                 postId,
                 source,
+                viewDuration: sanitizedDuration,
                 correlationId,
             });
 
@@ -1569,7 +1576,8 @@ class AnalyticsController {
                 source,
                 viewerId,
                 sessionId,
-                deviceFingerprint
+                deviceFingerprint,
+                viewDuration: sanitizedDuration, // ✅ NEW
             });
 
             ResponseUtil.success(

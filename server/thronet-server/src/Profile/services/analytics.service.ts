@@ -2289,7 +2289,20 @@ static async getSearchAppearancesChange(
         }
     }
 
-    // Add this NEW method:
+// ✅ NEW: negative signal config — jab post bahut kam dwell ke saath dekha
+    // jaaye (matlab scroll se guzar gaya, ruka nahi), us author ke against
+    // per-viewer "ignore" counter badhta hai. LinkedIn doc ka "previous
+    // behaviour check" point ka simplified version.
+    private static readonly IGNORE_DWELL_THRESHOLD_SECONDS = 4;
+    private static readonly IGNORE_SIGNAL_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 din
+    private static getIgnoreSignalKey(viewerId: string, authorId: string): string {
+        return `feed:ignore:${viewerId}:${authorId}`;
+    }
+
+    // ✅ CHANGED: viewDuration accept karta hai. Ab teen jagah update hota hai:
+    //   1. Analytics collection (dashboard ke liye)
+    //   2. Post model ke us entry ka analytics.avgDwellTime + viewCount (feed scoring ke liye)
+    //   3. ✅ NEW: Redis mein per-viewer-per-author "ignore" counter (agar dwell kam raha)
     static async recordPostImpressionSmart(
         postOwnerId: string,
         impressionData: {
@@ -2298,18 +2311,19 @@ static async getSearchAppearancesChange(
             viewerId?: string;
             sessionId?: string;
             deviceFingerprint?: string;
+            viewDuration?: number; // seconds mein
         }
     ): Promise<void> {
         try {
 
-              // ✅ NEW: Don't count if viewer is the post owner
-        if (impressionData.viewerId === postOwnerId) {
-            LoggerUtil.info('Impression ignored - viewer is post owner', {
-                postId: impressionData.postId,
-                postOwnerId
-            });
-            return;
-        }
+            // Don't count if viewer is the post owner
+            if (impressionData.viewerId === postOwnerId) {
+                LoggerUtil.info('Impression ignored - viewer is post owner', {
+                    postId: impressionData.postId,
+                    postOwnerId
+                });
+                return;
+            }
             const MIN_TIME_BETWEEN_COUNTS = 10 * 60 * 1000; // 10 minutes
             const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
 
@@ -2328,25 +2342,26 @@ static async getSearchAppearancesChange(
             );
 
             const now = new Date();
+            let shouldUpdatePostDwellTime = false; // sirf tabhi Post model touch karo jab naya countable view ho
 
-          if (existingImpression) {
-    if (!existingImpression.timeBasedCounts) {
-        existingImpression.timeBasedCounts = [];
-    }
+            if (existingImpression) {
+                if (!existingImpression.timeBasedCounts) {
+                    existingImpression.timeBasedCounts = [];
+                }
 
-    // Fallback for legacy impressions that predate lastViewedAt/viewCount tracking
-    const lastViewedAt = existingImpression.lastViewedAt ?? existingImpression.viewedAt;
-    const currentViewCount = existingImpression.viewCount ?? 1;
+                const lastViewedAt = existingImpression.lastViewedAt ?? existingImpression.viewedAt;
+                const currentViewCount = existingImpression.viewCount ?? 1;
 
-    // Check if enough time has passed since last view
-    const timeSinceLastView = now.getTime() - lastViewedAt.getTime();
+                const timeSinceLastView = now.getTime() - lastViewedAt.getTime();
 
-    if (timeSinceLastView >= MIN_TIME_BETWEEN_COUNTS) {
-        // ✅ COUNT THIS VIEW
-        existingImpression.viewCount = currentViewCount + 1;
-        existingImpression.lastViewedAt = now;
+                if (timeSinceLastView >= MIN_TIME_BETWEEN_COUNTS) {
+                    existingImpression.viewCount = currentViewCount + 1;
+                    existingImpression.lastViewedAt = now;
+                    if (impressionData.viewDuration !== undefined) {
+                        (existingImpression as any).viewDuration = impressionData.viewDuration;
+                    }
+                    shouldUpdatePostDwellTime = true;
 
-                    // Update time-based counts
                     const todayCount = existingImpression.timeBasedCounts?.find(
                         tc => tc.date === today
                     );
@@ -2365,7 +2380,6 @@ static async getSearchAppearancesChange(
 
                     analytics.postImpressions.total++;
                 } else {
-                    // ❌ TOO SOON - DON'T COUNT
                     LoggerUtil.info('Impression ignored - too soon', {
                         postId: impressionData.postId,
                         viewerId: impressionData.viewerId,
@@ -2373,7 +2387,7 @@ static async getSearchAppearancesChange(
                     });
                 }
             } else {
-                // ✅ FIRST TIME VIEW - ALWAYS COUNT
+                // FIRST TIME VIEW - ALWAYS COUNT
                 analytics.postImpressions.impressions.push({
                     postId: impressionData.postId,
                     source: impressionData.source,
@@ -2383,6 +2397,7 @@ static async getSearchAppearancesChange(
                     viewCount: 1,
                     sessionId: impressionData.sessionId,
                     deviceFingerprint: impressionData.deviceFingerprint,
+                    viewDuration: impressionData.viewDuration,
                     timeBasedCounts: [{
                         date: today,
                         count: 1,
@@ -2393,19 +2408,80 @@ static async getSearchAppearancesChange(
                 } as any);
 
                 analytics.postImpressions.total++;
+                shouldUpdatePostDwellTime = true;
             }
 
             await analytics.save();
 
+            // Post model ke us entry ka avgDwellTime/viewCount update karo
+            // — feed ranking yahi se padhta hai, Analytics collection se nahi.
+            if (shouldUpdatePostDwellTime && impressionData.viewDuration !== undefined) {
+                try {
+                    const { Post } = await import('@/shared/models/index.models');
 
-            // ✅ NEW: Emit real-time update
+                    const postDoc = await Post.findOne(
+                        { userId: postOwnerId, 'posts.entryId': impressionData.postId },
+                        { 'posts.$': 1 }
+                    );
+
+                    const targetEntry = postDoc?.posts?.[0] as any;
+
+                    if (targetEntry) {
+                        const prevAvg = targetEntry.analytics?.avgDwellTime || 0;
+                        const prevCount = targetEntry.analytics?.viewCount || 0;
+                        const newCount = prevCount + 1;
+                        const newAvg = ((prevAvg * prevCount) + impressionData.viewDuration) / newCount;
+
+                        await Post.updateOne(
+                            { userId: postOwnerId, 'posts.entryId': impressionData.postId },
+                            {
+                                $set: {
+                                    'posts.$.analytics.avgDwellTime': newAvg,
+                                    'posts.$.analytics.viewCount': newCount,
+                                },
+                            }
+                        );
+                    }
+                } catch (dwellError: any) {
+                    LoggerUtil.warn('Post dwell-time update failed (non-critical)', {
+                        error: dwellError.message,
+                        postId: impressionData.postId,
+                        postOwnerId,
+                    });
+                }
+            }
+
+            // ✅ NEW: negative signal — agar dwell time threshold se kam raha,
+            // is author ke against viewer ka "ignore" counter badhao
+            if (
+                shouldUpdatePostDwellTime &&
+                impressionData.viewerId &&
+                impressionData.viewDuration !== undefined &&
+                impressionData.viewDuration < this.IGNORE_DWELL_THRESHOLD_SECONDS
+            ) {
+                try {
+                    const redisService = (await import('@/services/redis.service')).default;
+                    const key = this.getIgnoreSignalKey(impressionData.viewerId, postOwnerId);
+                    const existingRaw = await redisService.get(key);
+                    const existingCount = existingRaw ? parseInt(existingRaw, 10) || 0 : 0;
+                    await redisService.set(key, String(existingCount + 1), {
+                        ttl: this.IGNORE_SIGNAL_TTL_SECONDS,
+                    });
+                } catch (ignoreError: any) {
+                    LoggerUtil.warn('Ignore-signal update failed (non-critical)', {
+                        error: ignoreError.message,
+                        viewerId: impressionData.viewerId,
+                        postOwnerId,
+                    });
+                }
+            }
+
+            // Emit real-time update
             emitToUser(postOwnerId, 'analytics:post-impression', {
                 type: 'post-impression',
                 postId: impressionData.postId,
                 timestamp: new Date(),
             });
-
-
 
         } catch (error: any) {
             LoggerUtil.error('Smart impression recording failed', {
@@ -2414,10 +2490,15 @@ static async getSearchAppearancesChange(
             });
         }
     }
-    /**
+ /**
      * ✅ Record Engagement (like/comment/share/save)
      * Updates existing impression's engagementType, or creates a new impression
      * entry if none exists — so getPostAnalytics can count it correctly
+     *
+     * ✅ CHANGED: ab viewer (jisne like/comment/share kiya) ka apna feed-cache
+     * bhi clear karta hai — taaki agli baar feed load ho to naya signal
+     * turant reflect ho, purane 180-second cache ka wait na karna pade.
+     * (LinkedIn doc: "User interacts -> new signals -> ranking changes")
      */
     static async recordEngagement(
         postOwnerId: string,
@@ -2451,8 +2532,6 @@ static async getSearchAppearancesChange(
                 imp => imp.postId === engagementData.postId && imp.viewerId === engagementData.viewerId
             );
 
-
-
             if (existingImpression) {
                 const existing = existingImpression as any;
                 if (!existing.engagementTypes) {
@@ -2476,6 +2555,30 @@ static async getSearchAppearancesChange(
             }
 
             await analytics.save();
+
+            // ✅ NEW: engagement ek positive signal hai — is author ke against
+            // viewer ka "ignore" counter reset kar do (agar tha), taaki past
+            // ke skips future posts ko galat penalize na karein
+            try {
+                const redisService = (await import('@/services/redis.service')).default;
+                const ignoreKey = `feed:ignore:${engagementData.viewerId}:${postOwnerId}`;
+                await redisService.set(ignoreKey, '0', { ttl: 30 * 24 * 60 * 60 });
+            } catch (resetError: any) {
+                LoggerUtil.warn('Ignore-signal reset failed (non-critical)', {
+                    error: resetError.message,
+                });
+            }
+
+            // ✅ NEW: viewer ka apna feed cache clear karo — real-time re-ranking
+            try {
+                const redisService = (await import('@/services/redis.service')).default;
+                await redisService.deleteByPattern(`feed:v1:${engagementData.viewerId}:page:*`);
+            } catch (cacheError: any) {
+                LoggerUtil.warn('Feed cache invalidation failed (non-critical)', {
+                    error: cacheError.message,
+                    viewerId: engagementData.viewerId,
+                });
+            }
 
             emitToUser(postOwnerId, 'analytics:engagement', {
                 type: 'engagement',
