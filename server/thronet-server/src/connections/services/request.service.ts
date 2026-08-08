@@ -12,6 +12,7 @@ import redisService from '@/services/redis.service';
 import { emitNotificationCount } from '@/socket/handlers/notificationHandler';
 import { emitConnectionAccepted, emitConnectionRequest } from '@/socket/handlers/connectionHandler';
 import { getIO } from '@/socket';
+import NotificationService from '@/notifications/services/notification.service';
 
 // ✅ KAFKA IMPORTS
 // import { requestProducer } from '../kafka/producers/requestProducer';
@@ -108,6 +109,7 @@ class connectionRequestService {
    * ✅ KAFKA: Publishes REQUEST_SENT event - FIXED
    */
   static async sendConnectionRequest(
+    
     fromUserId: string,
     toUserId: string,
     message?: string,
@@ -115,6 +117,10 @@ class connectionRequestService {
     templateId?: string,
     region: string = 'global'
   ): Promise<IConnectionRequest> {
+    console.log('🔥🔥🔥 SEND CONNECTION SERVICE REACHED 🔥🔥🔥', {
+  fromUserId,
+  toUserId,
+});
     if (!['low', 'medium', 'high'].includes(priority)) {
       throw new ErrorResponse('Invalid priority', 400);
     }
@@ -168,6 +174,43 @@ class connectionRequestService {
         data: { error: socketError instanceof Error ? socketError.message : 'Unknown' },
       });
     }
+
+    // ✅ Persist Notification document so Notifications page can fetch it
+    logger.info('🔴 BEFORE notifyConnectionRequest', {
+  category: LogCategory.CONNECTION,
+  data: {
+    fromUserId,
+    toUserId,
+    requestId: request.requestId,
+  },
+});
+
+try {
+  await NotificationService.notifyConnectionRequest(
+    fromUserId,
+    toUserId,
+    request.requestId
+  );
+
+  logger.info('🟢 AFTER notifyConnectionRequest SUCCESS', {
+    category: LogCategory.CONNECTION,
+    data: {
+      fromUserId,
+      toUserId,
+      requestId: request.requestId,
+    },
+  });
+} catch (err) {
+  logger.error('🔴 notifyConnectionRequest FAILED', {
+    category: LogCategory.CONNECTION,
+    data: {
+      error: err instanceof Error ? err.stack : String(err),
+      fromUserId,
+      toUserId,
+      requestId: request.requestId,
+    },
+  });
+}
 
     logger.info(`Connection request sent - RequestID: ${request.requestId}, From: ${fromUserId}, To: ${toUserId}, Region: ${region}, Priority: ${priority}`, {
       category: LogCategory.CONNECTION
@@ -285,6 +328,18 @@ class connectionRequestService {
         data: { error: socketError instanceof Error ? socketError.message : 'Unknown' },
       });
     }
+
+    // ✅ Persist Notification document for the original request sender
+    NotificationService.notifyConnectionAccepted(
+      userId,                              // acceptedByUserId (User B)
+      request.fromUserId.toString(),       // originalSenderId (User A)
+      connection.connectionId
+    ).catch((err) => {
+      logger.warn('Failed to persist connection_accepted notification (non-critical)', {
+        category: LogCategory.CONNECTION,
+        data: { error: err instanceof Error ? err.message : 'Unknown' },
+      });
+    });
 
     // ✅ KAFKA: Publish REQUEST_ACCEPTED event - FIXED
     // try {
@@ -470,7 +525,7 @@ class connectionRequestService {
           category: LogCategory.CONNECTION
         });
       }
-    } catch (error : any) {
+    } catch (error: any) {
       logger.warn(`Failed to get request from cache - RequestID: ${requestId}, Error: ${error instanceof Error ? error.message : 'Unknown error'}`, {
         category: LogCategory.CONNECTION
       });
@@ -835,7 +890,7 @@ class connectionRequestService {
           });
           return JSON.parse(cachedStats);
         }
-      } catch (error : any) {
+      } catch (error: any) {
         logger.warn(`Failed to get stats from cache - UserID: ${userId}, Error: ${error instanceof Error ? error.message : 'Unknown error'}`, {
           category: LogCategory.CONNECTION
         });
@@ -1013,7 +1068,7 @@ class connectionRequestService {
           category: LogCategory.CONNECTION
         });
       }
-    } catch (error : any) {
+    } catch (error: any) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.warn(`Cache operation failed - RequestID: ${requestId}, Action: ${action}, Error: ${errorMessage}`, {
         category: LogCategory.CONNECTION
@@ -1050,7 +1105,7 @@ class connectionRequestService {
           category: LogCategory.CONNECTION
         });
       }
-    } catch (error : any) {
+    } catch (error: any) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.warn(`Connection cache operation failed - ConnectionID: ${connectionId}, Action: ${action}, Error: ${errorMessage}`, {
         category: LogCategory.CONNECTION
@@ -1251,7 +1306,7 @@ class connectionRequestService {
         category: LogCategory.CONNECTION
       });
 
-    } catch (error : any) {
+    } catch (error: any) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       errors.push(`Batch processing failed: ${errorMessage}`);
       logger.error(`Batch processing error - ProcessingType: ${processingType}, Error: ${errorMessage}`, {
