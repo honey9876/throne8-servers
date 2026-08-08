@@ -95,7 +95,7 @@ class NotificationService {
         }
     }
 
-////////Changed Modified
+    ////////Changed Modified
     /**
          * Called after a post is liked.
          * Notifies the post owner (unless they liked their own post).
@@ -303,6 +303,138 @@ class NotificationService {
                 mentionedUserId,
                 mentionerId,
                 entryId,
+            });
+        }
+    }
+
+    /**
+     * Called when User A sends a connection request to User B.
+     * Creates a persistent Notification for User B and emits notification:new.
+     */
+    static async notifyConnectionRequest(
+        fromUserId: string,
+        toUserId: string,
+        requestId: string
+    ): Promise<void> {
+        try {
+            if (fromUserId === toUserId) return;
+
+            const sender = await User.findOne({ userId: fromUserId })
+                .select('firstName lastName profilePhotoId')
+                .lean();
+            if (!sender) return;
+
+            const senderName = `${sender.firstName} ${sender.lastName || ''}`.trim();
+            const senderPhoto = (sender as any).profilePhotoId || null;
+            const message = `${senderName} sent you a connection request`;
+            const notificationId = uuidv4();
+
+            await Notification.create({
+                notificationId,
+                recipientId: toUserId,
+                senderId: fromUserId,
+                senderName,
+                senderPhoto,
+                type: 'connection_request' as const,
+                entityId: requestId,
+                entityType: 'connection' as const,
+                message,
+                isRead: false,
+            });
+
+            try {
+                const io = getIO();
+                io.to(`user:${toUserId}`).emit('notification:new', {
+                    notificationId,
+                    type: 'connection_request',
+                    senderId: fromUserId,
+                    senderName,
+                    senderPhoto,
+                    entityId: requestId,
+                    entityType: 'connection',
+                    message,
+                    isRead: false,
+                    createdAt: new Date().toISOString(),
+                });
+            } catch (socketErr) {
+                logger.warn('Socket emit failed for connection_request notification', {
+                    error: socketErr instanceof Error ? socketErr.message : 'unknown',
+                });
+            }
+
+            logger.info('Connection request notification sent', { fromUserId, toUserId, requestId });
+        } catch (err) {
+            logger.error('notifyConnectionRequest failed', {
+                error: err instanceof Error ? err.message : 'unknown',
+                fromUserId,
+                toUserId,
+                requestId,
+            });
+        }
+    }
+
+    /**
+     * Called when User B accepts User A's connection request.
+     * Creates a persistent Notification for User A and emits notification:new.
+     */
+    static async notifyConnectionAccepted(
+        acceptedByUserId: string,
+        originalSenderId: string,
+        connectionId: string
+    ): Promise<void> {
+        try {
+            if (acceptedByUserId === originalSenderId) return;
+
+            const acceptor = await User.findOne({ userId: acceptedByUserId })
+                .select('firstName lastName profilePhotoId')
+                .lean();
+            if (!acceptor) return;
+
+            const acceptorName = `${acceptor.firstName} ${acceptor.lastName || ''}`.trim();
+            const acceptorPhoto = (acceptor as any).profilePhotoId || null;
+            const message = `${acceptorName} accepted your connection request`;
+            const notificationId = uuidv4();
+
+            await Notification.create({
+                notificationId,
+                recipientId: originalSenderId,
+                senderId: acceptedByUserId,
+                senderName: acceptorName,
+                senderPhoto: acceptorPhoto,
+                type: 'connection_accepted' as const,
+                entityId: connectionId,
+                entityType: 'connection' as const,
+                message,
+                isRead: false,
+            });
+
+            try {
+                const io = getIO();
+                io.to(`user:${originalSenderId}`).emit('notification:new', {
+                    notificationId,
+                    type: 'connection_accepted',
+                    senderId: acceptedByUserId,
+                    senderName: acceptorName,
+                    senderPhoto: acceptorPhoto,
+                    entityId: connectionId,
+                    entityType: 'connection',
+                    message,
+                    isRead: false,
+                    createdAt: new Date().toISOString(),
+                });
+            } catch (socketErr) {
+                logger.warn('Socket emit failed for connection_accepted notification', {
+                    error: socketErr instanceof Error ? socketErr.message : 'unknown',
+                });
+            }
+
+            logger.info('Connection accepted notification sent', { acceptedByUserId, originalSenderId, connectionId });
+        } catch (err) {
+            logger.error('notifyConnectionAccepted failed', {
+                error: err instanceof Error ? err.message : 'unknown',
+                acceptedByUserId,
+                originalSenderId,
+                connectionId,
             });
         }
     }

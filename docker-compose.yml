@@ -102,7 +102,7 @@ services:
             echo "✅ All 3 Redis nodes are responding"
             break
           fi
-          echo "⏳ Attempt $i: Waiting for nodes..."
+          echo "⏳ Attempt $$i: Waiting for nodes..."
           sleep 5
         done
 

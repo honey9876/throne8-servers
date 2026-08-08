@@ -3433,16 +3433,20 @@ static async getSearchAppearancesChange(
                 }
             }
     
-            // ✅ Build enrichedAppearances BEFORE the return, still inside try
             const enrichedAppearances = paginatedAppearances.map((a: any) => {
-                const u = a.searcherId ? searcherUsersMap[a.searcherId] : null;
+                // ✅ FIX: Mongoose subdocument ko plain object me convert karo pehle,
+                // warna spread ({...a}) ke through appearedAt/searchQuery jaise fields
+                // correctly copy nahi hote (Mongoose getters ki wajah se)
+                const plain = typeof a.toObject === 'function' ? a.toObject() : a;
+            
+                const u = plain.searcherId ? searcherUsersMap[plain.searcherId] : null;
                 const liveName = u
                     ? (u.fullName?.trim() || `${u.firstName || ''} ${u.lastName || ''}`.trim())
                     : null;
-    
+            
                 return {
-                    ...a,
-                    searcherName: (liveName && liveName.length > 0) ? liveName : (a.searcherName || undefined),
+                    ...plain,
+                    searcherName: (liveName && liveName.length > 0) ? liveName : (plain.searcherName || undefined),
                 };
             });
     
