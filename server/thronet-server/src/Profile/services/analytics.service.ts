@@ -1038,42 +1038,66 @@ class AnalyticsService {
     /**
  * Record search appearance
  */
+    // static async recordSearchAppearance(
+    //     userId: string,
+    //     searchData: SearchAppearanceData
+    // ): Promise<void> {
+    //     try {
+    //         let enrichedData = { ...searchData };
+    
+    //         if (searchData.searcherId) {
+    //             try {
+    //                 const searcherUser = await User.findOne({ userId: searchData.searcherId });
+    //                 if (searcherUser) {
+    //                     enrichedData.searcherName =
+    //                         (searcherUser as any).fullName ||
+    //                         `${(searcherUser as any).firstName || ''} ${(searcherUser as any).lastName || ''}`.trim() ||
+    //                         undefined;
+    
+    //                     const photoId = (searcherUser as any).profilePhotoId;
+    //                     if (photoId) {
+    //                         const photo = await ProfilePhoto.findOne({ photoId });
+    //                         enrichedData.searcherPhotoUrl = (photo as any)?.cloudinarySecureUrl || undefined;
+    //                     }
+    //                 }
+    //             } catch (lookupError: any) {
+    //                 LoggerUtil.warn('Failed to fetch searcher details for search appearance', {
+    //                     error: lookupError.message,
+    //                     searcherId: searchData.searcherId,
+    //                 });
+    //             }
+    //         }
+    
+    //         await Analytics.recordSearchAppearance(userId, enrichedData);
+    
+    //         emitToUser(userId, 'analytics:search-appearance', {
+    //             type: 'search-appearance',
+    //             searchQuery: searchData.searchQuery,
+    //             searcherName: enrichedData.searcherName,
+    //             timestamp: new Date(),
+    //         });
+    
+    //     } catch (error: any) {
+    //         LoggerUtil.error('Record search appearance failed', {
+    //             error: error.message,
+    //             userId,
+    //         });
+    //     }
+    // }
     static async recordSearchAppearance(
         userId: string,
         searchData: SearchAppearanceData
     ): Promise<void> {
         try {
-            let enrichedData = { ...searchData };
-    
-            if (searchData.searcherId) {
-                try {
-                    const searcherUser = await User.findOne({ userId: searchData.searcherId });
-                    if (searcherUser) {
-                        enrichedData.searcherName =
-                            (searcherUser as any).fullName ||
-                            `${(searcherUser as any).firstName || ''} ${(searcherUser as any).lastName || ''}`.trim() ||
-                            undefined;
-    
-                        const photoId = (searcherUser as any).profilePhotoId;
-                        if (photoId) {
-                            const photo = await ProfilePhoto.findOne({ photoId });
-                            enrichedData.searcherPhotoUrl = (photo as any)?.cloudinarySecureUrl || undefined;
-                        }
-                    }
-                } catch (lookupError: any) {
-                    LoggerUtil.warn('Failed to fetch searcher details for search appearance', {
-                        error: lookupError.message,
-                        searcherId: searchData.searcherId,
-                    });
-                }
-            }
-    
-            await Analytics.recordSearchAppearance(userId, enrichedData);
+            // ✅ FIX: searcherName/searcherPhotoUrl ko write-time pe snapshot nahi karte —
+            // sync-lag ki wajah se naam permanently missing save ho sakta tha ("LinkedIn Member" bug).
+            // Sirf searcherId store karo; naam read-time pe live lookup se nikalega (getSearchAppearancesWithHighlights).
+            await Analytics.recordSearchAppearance(userId, searchData);
     
             emitToUser(userId, 'analytics:search-appearance', {
                 type: 'search-appearance',
                 searchQuery: searchData.searchQuery,
-                searcherName: enrichedData.searcherName,
+                searcherId: searchData.searcherId,
                 timestamp: new Date(),
             });
     
@@ -1084,6 +1108,8 @@ class AnalyticsService {
             });
         }
     }
+
+
     /**
     * ✅ NEW: Record post impression (called from feed/profile middleware)
     */
@@ -3225,13 +3251,15 @@ static async getSearchAppearancesChange(
     /**
      * ✅ Get Search Appearances with Highlighted Terms
      */
+
+
     static async getSearchAppearancesWithHighlights(
         userId: string,
         page: number = 1,
         limit: number = 50
     ): Promise<any> {
         const correlationId = uuidv4();
-
+    
         try {
             const analytics = await Analytics.findOne({ userId });
             if (!analytics) {
@@ -3242,20 +3270,17 @@ static async getSearchAppearancesChange(
                     clickThroughRate: 0
                 };
             }
-
+    
             const sortedAppearances = analytics.searchAppearances.appearances
                 .sort((a, b) => b.appearedAt.getTime() - a.appearedAt.getTime());
-
-            // Calculate click-through rate
+    
             const totalAppearances = sortedAppearances.length;
             const totalClicks = sortedAppearances.filter(a => a.wasClicked).length;
             const clickThroughRate = totalAppearances > 0
                 ? (totalClicks / totalAppearances) * 100
                 : 0;
-
-            // Get top keywords with frequency
+    
             const keywordFrequency: { [key: string]: { count: number; clicks: number } } = {};
-
             sortedAppearances.forEach(a => {
                 const keyword = a.searchQuery.toLowerCase();
                 if (!keywordFrequency[keyword]) {
@@ -3266,25 +3291,60 @@ static async getSearchAppearancesChange(
                     keywordFrequency[keyword].clicks++;
                 }
             });
-
+    
             const topTerms = Object.entries(keywordFrequency)
                 .map(([term, data]) => ({
                     term,
                     count: data.count,
                     clicks: data.clicks,
                     ctr: data.count > 0 ? (data.clicks / data.count) * 100 : 0,
-                    isHighlighted: data.clicks > data.count * 0.5  // >50% CTR = highlighted
+                    isHighlighted: data.clicks > data.count * 0.5
                 }))
                 .sort((a, b) => b.count - a.count)
                 .slice(0, 20);
-
+    
             // Pagination
             const startIndex = (page - 1) * limit;
             const endIndex = startIndex + limit;
             const paginatedAppearances = sortedAppearances.slice(startIndex, endIndex);
-
+    
+            // Read-time enrichment: live lookup for fresh name/photo
+            const uniqueSearcherIds = [
+                ...new Set(
+                    paginatedAppearances
+                        .map((a: any) => a.searcherId)
+                        .filter(Boolean)
+                )
+            ] as string[];
+    
+            let searcherUsersMap: Record<string, any> = {};
+            if (uniqueSearcherIds.length > 0) {
+                try {
+                    const searcherUsers = await User.find({ userId: { $in: uniqueSearcherIds } });
+                    searcherUsersMap = searcherUsers.reduce((acc: Record<string, any>, u: any) => {
+                        acc[u.userId] = u;
+                        return acc;
+                    }, {});
+                } catch (bulkLookupError: any) {
+                    LoggerUtil.warn('Bulk searcher lookup failed', { error: bulkLookupError.message });
+                }
+            }
+    
+            // ✅ Build enrichedAppearances BEFORE the return, still inside try
+            const enrichedAppearances = paginatedAppearances.map((a: any) => {
+                const u = a.searcherId ? searcherUsersMap[a.searcherId] : null;
+                const liveName = u
+                    ? (u.fullName?.trim() || `${u.firstName || ''} ${u.lastName || ''}`.trim())
+                    : null;
+    
+                return {
+                    ...a,
+                    searcherName: (liveName && liveName.length > 0) ? liveName : (a.searcherName || undefined),
+                };
+            });
+    
             return {
-                appearances: paginatedAppearances,
+                appearances: enrichedAppearances,
                 total: sortedAppearances.length,
                 page,
                 limit,
@@ -3292,7 +3352,7 @@ static async getSearchAppearancesChange(
                 topTerms,
                 clickThroughRate: Math.round(clickThroughRate * 100) / 100
             };
-
+    
         } catch (error: any) {
             LoggerUtil.error('Get search appearances with highlights failed', {
                 error: error.message,
@@ -3302,10 +3362,7 @@ static async getSearchAppearancesChange(
             throw error;
         }
     }
-
-
-
-    static async getDiscoveryStats(userId: string, days?: number): Promise<any> {
+     static async getDiscoveryStats(userId: string, days?: number): Promise<any> {
         const correlationId = uuidv4();
     
         try {
