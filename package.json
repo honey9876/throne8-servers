@@ -68,6 +68,7 @@
     "express-validator": "^7.3.2",
     "franc-min": "^6.2.0",
     "geoip-lite": "^1.4.10",
+    "google-auth-library": "^11.0.0",
     "handlebars": "^4.7.8",
     "helmet": "^8.1.0",
     "ioredis": "^5.9.1",
