@@ -31,21 +31,37 @@ import { LoggerUtil } from '@/shared/logger.util';
 // ─── Config ───────────────────────────────────────────────────────────────────
 const MAX_ROOM_SIZE = 16; // WebRTC mesh: 16 peers = 120 connections — hard limit
 
-import mongoose from 'mongoose';
+
+
 
 // ─── Helper: verify active group membership ───────────────────────────────────
 async function isMember(userId: string, groupId: string): Promise<boolean> {
   // Allow mock group ID '1' for frontend UI testing
   if (groupId === '1' || groupId === 1 as any) return true;
   
-  if (!mongoose.Types.ObjectId.isValid(groupId) || !mongoose.Types.ObjectId.isValid(userId)) {
-    LoggerUtil.warn(`Invalid ObjectId passed to isMember: userId=${userId}, groupId=${groupId}`);
-    return false; // Or true if you want to bypass completely, but false is safer
+  // OLD: ObjectId.isValid() rejects UUID strings — our app uses UUIDs, not ObjectIds
+  // if (!mongoose.Types.ObjectId.isValid(groupId) || !mongoose.Types.ObjectId.isValid(userId)) {
+  //   LoggerUtil.warn(`Invalid ObjectId passed to isMember: userId=${userId}, groupId=${groupId}`);
+  //   return false;
+  // }
+
+  // NEW: userId and groupId are UUID strings, not MongoDB ObjectIds
+  if (!userId || !groupId) {
+    LoggerUtil.warn(`Missing userId or groupId in isMember check`);
+    return false;
   }
 
+  // OLD: field names 'user' and 'group' don't exist on GroupMember model
+  // const member = await GroupMember.findOne({
+  //   user: userId,
+  //   group: groupId,
+  //   status: 'active',
+  // }).lean();
+
+  // NEW: correct field names matching GroupMember model schema
   const member = await GroupMember.findOne({
-    user: userId,
-    group: groupId,
+    userId: userId,
+    groupId: groupId,
     status: 'active',
   }).lean();
   return !!member;
