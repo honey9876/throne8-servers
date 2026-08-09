@@ -170,8 +170,6 @@ const rankingSchema = new Schema<IRanking>(
  * ==========================================
  */
 // ✅ KEEP ONLY THESE - Schema-level indexes
-rankingSchema.index({ rankingId: 1 }, { unique: true });
-rankingSchema.index({ userId: 1 }, { unique: true });
 rankingSchema.index({ globalRank: 1 });
 rankingSchema.index({ categoryRank: 1, category: 1 });
 rankingSchema.index({ groupRank: 1, groupId: 1 });

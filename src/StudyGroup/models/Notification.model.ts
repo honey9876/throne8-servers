@@ -31,7 +31,6 @@ const notificationSchema = new Schema<INotification, NotificationModel, INotific
       type: String,
       required: true,
       unique: true,
-      index: true,
       default: (v: any) => validId(v),
     },
     type: {
