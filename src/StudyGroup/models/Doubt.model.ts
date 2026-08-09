@@ -35,7 +35,6 @@ const doubtSchema = new Schema<IDoubt, DoubtModel, IDoubtMethods>(
       type: String,
       required: true,
       unique: true,
-      index: true,
       default: (v: any) => validId(v),
     },
     title: {

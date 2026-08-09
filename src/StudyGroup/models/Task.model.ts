@@ -25,7 +25,6 @@ const taskSchema = new Schema<ITask>(
       type: String,
       required: true,
       unique: true,
-      index: true,
     },
     groupId: {
   type: String,
