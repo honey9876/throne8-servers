@@ -44,9 +44,17 @@ async function assertMembership(
   socket: Socket,
   event: string
 ): Promise<boolean> {
+  // OLD: field names 'user' and 'group' don't match GroupMember model (uses userId, groupId)
+  // const member = await GroupMember.findOne({
+  //   user: userId,
+  //   group: groupId,
+  //   status: 'active',
+  // }).lean();
+
+  // NEW: correct field names matching GroupMember model schema
   const member = await GroupMember.findOne({
-    user: userId,
-    group: groupId,
+    userId: userId,
+    groupId: groupId,
     status: 'active',
   }).lean();
 
@@ -237,9 +245,18 @@ export const handleChatEvents = (io: Server, socket: Socket, userId: string): vo
 
       // Check leader role only if not the sender (saves one DB query for senders)
       if (!isSender) {
+        // OLD: wrong field names
+        // const isLeader = await GroupMember.findOne({
+        //   user: userId,
+        //   group: message.groupId,
+        //   role: 'leader',
+        //   status: 'active',
+        // }).lean();
+
+        // NEW: correct field names matching GroupMember model schema
         const isLeader = await GroupMember.findOne({
-          user: userId,
-          group: message.groupId,
+          userId: userId,
+          groupId: message.groupId,
           role: 'leader',
           status: 'active',
         }).lean();
@@ -361,9 +378,18 @@ export const handleChatEvents = (io: Server, socket: Socket, userId: string): vo
         return;
       }
 
+      // OLD: wrong field names
+      // const isLeaderOrMod = await GroupMember.findOne({
+      //   user: userId,
+      //   group: message.groupId,
+      //   role: { $in: ['leader', 'moderator'] },
+      //   status: 'active',
+      // }).lean();
+
+      // NEW: correct field names matching GroupMember model schema
       const isLeaderOrMod = await GroupMember.findOne({
-        user: userId,
-        group: message.groupId,
+        userId: userId,
+        groupId: message.groupId,
         role: { $in: ['leader', 'moderator'] },
         status: 'active',
       }).lean();

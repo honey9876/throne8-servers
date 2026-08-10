@@ -69,9 +69,17 @@ const verifyGroupMembership = async (
   groupId: string
 ): Promise<boolean> => {
   try {
+    // OLD: wrong field names — GroupMember model uses userId/groupId, not user/group
+    // const membership = await GroupMember.findOne({
+    //   user: userId,
+    //   group: groupId,
+    //   status: 'active',
+    // });
+
+    // NEW: correct field names matching GroupMember model schema
     const membership = await GroupMember.findOne({
-      user: userId,
-      group: groupId,
+      userId: userId,
+      groupId: groupId,
       status: 'active',
     });
 
