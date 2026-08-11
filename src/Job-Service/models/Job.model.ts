@@ -443,7 +443,7 @@ const jobSchema = new Schema<IJob, IJobModel>(
     },
     dates: {
       posted: { type: Date, default: Date.now, index: true },
-      expires: { type: Date, index: true },
+      expires: { type: Date },
       lastUpdated: { type: Date, default: Date.now },
     },
     status: {
