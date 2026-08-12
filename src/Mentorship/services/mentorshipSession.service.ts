@@ -4,7 +4,7 @@ import { PaymentMethod, PaymentStatus } from '@/Mentorship/interface/session.typ
 import { Availability, Mentor, SessionMentor } from '../models';
 import { logger } from '@/shared/logger.util';
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/shared/errors/app.error';
-import { User } from '@/shared/models/index.models';
+import { User, ProfilePhoto } from '@/shared/models/index.models';
 import { BookingStatus } from '@/shared/constants/bookingStatus';
 import sessionRepository from '../repositories/session.repository';
 import mentorRepository from '../repositories/mentor.repository';
@@ -141,15 +141,80 @@ class MentorshipSessionService {
   }
 
   /**
+   * Helper to enrich sessions and their bookings with real user details (fullName, profilePhoto)
+   */
+  async enrichSessionsWithUserDetails(sessions: any[]): Promise<any[]> {
+    if (!sessions || sessions.length === 0) return sessions;
+
+    const userIds = new Set<string>();
+    for (const session of sessions) {
+      if (session.menteeId) {
+        userIds.add(session.menteeId);
+      }
+      if (session.bookings && Array.isArray(session.bookings)) {
+        for (const b of session.bookings) {
+          if (b.menteeId) userIds.add(b.menteeId);
+          if (b.bookedBy) userIds.add(b.bookedBy);
+        }
+      }
+    }
+
+    const userIdList = Array.from(userIds);
+    const usersMap = new Map<string, { name: string; photo: string }>();
+
+    if (userIdList.length > 0) {
+      const users = await User.find({ userId: { $in: userIdList } }).lean();
+      const profilePhotos = await ProfilePhoto.find({ userId: { $in: userIdList }, isActive: true }).lean();
+
+      const photoMap = new Map<string, string>();
+      for (const photo of profilePhotos) {
+        photoMap.set(photo.userId, photo.cloudinarySecureUrl);
+      }
+
+      for (const u of users) {
+        const fullName = (u.firstName || u.lastName)
+          ? `${u.firstName || ''} ${u.lastName || ''}`.trim()
+          : (u.username || (u.email ? u.email.split('@')[0] : 'User'));
+        const photoUrl = photoMap.get(u.userId) || '';
+        usersMap.set(u.userId, { name: fullName, photo: photoUrl });
+      }
+    }
+
+    for (const session of sessions) {
+      if (session.menteeId) {
+        const userInfo = usersMap.get(session.menteeId);
+        if (userInfo) {
+          session.menteeName = userInfo.name;
+          session.menteeProfilePhoto = userInfo.photo;
+          session.bookedMenteeName = userInfo.name;
+        }
+      }
+      if (session.bookings && Array.isArray(session.bookings)) {
+        for (const b of session.bookings) {
+          const userInfo = usersMap.get(b.menteeId || b.bookedBy);
+          if (userInfo) {
+            b.menteeName = userInfo.name;
+            b.menteeProfilePhoto = userInfo.photo;
+          }
+        }
+      }
+    }
+
+    return sessions;
+  }
+
+  /**
    * Get all sessions for a mentor (no filter)
    */
   async getMentorAssignedSessions(mentorId: string): Promise<any[]> {
     try {
       logger.info(`Fetching assigned sessions for mentor: ${mentorId}`);
 
-      return await SessionMentor.find({ mentorId })
+      const sessions = await SessionMentor.find({ mentorId })
         .sort({ scheduledAt: 1 })
         .lean();
+
+      return await this.enrichSessionsWithUserDetails(sessions);
     } catch (error: any) {
       logger.error(`Failed to fetch mentor assigned sessions: ${error.message}`);
       throw error;
@@ -225,14 +290,15 @@ class MentorshipSessionService {
 
       logger.info(`✅ Booking added: ${session.sessionId} for mentee: ${input.menteeId}`);
 
-      const myBooking = session.bookings[session.bookings.length - 1];
+      const enrichedSessions = await this.enrichSessionsWithUserDetails([session.toObject()]);
+      const myEnrichedBooking = enrichedSessions[0].bookings.find((b: any) => b.bookedBy === input.menteeId);
       return {
         sessionId: session.sessionId,
         mentorId: session.mentorId,
         title: session.title,
         sessionType: session.sessionType,
         duration: session.duration,
-        booking: myBooking,
+        booking: myEnrichedBooking,
         totalBookings: session.bookings.length,
       };
     } catch (error: any) {
@@ -343,7 +409,8 @@ class MentorshipSessionService {
       // ✅ FIX: findAll returns { data, total } — not [sessions, total]
       const { data: sessions, total } = await sessionRepository.findAll(query, skip, limit);
 
-      return { sessions, total, page, limit };
+      const enriched = await this.enrichSessionsWithUserDetails(sessions);
+      return { sessions: enriched, total, page, limit };
     } catch (error: any) {
       logger.error(`Failed to fetch sessions: ${error.message}`);
       throw error;
@@ -360,7 +427,8 @@ class MentorshipSessionService {
 
       // ✅ FIX: findAll returns { data, total }
       const { data: sessions, total } = await sessionRepository.findAll({}, skip, limit);
-      return { sessions, total, page, limit };
+      const enriched = await this.enrichSessionsWithUserDetails(sessions);
+      return { sessions: enriched, total, page, limit };
     } catch (error: any) {
       logger.error(`Failed to fetch all sessions: ${error.message}`);
       throw error;
@@ -388,10 +456,12 @@ class MentorshipSessionService {
         query.menteeId = userId;
       }
 
-      return await SessionMentor.find(query)
+      const sessions = await SessionMentor.find(query)
         .sort({ scheduledAt: 1 })
         .limit(limit)
         .lean();
+
+      return await this.enrichSessionsWithUserDetails(sessions);
     } catch (error: any) {
       logger.error(`Failed to fetch upcoming sessions: ${error.message}`);
       throw error;
@@ -419,10 +489,12 @@ class MentorshipSessionService {
         query.menteeId = userId;
       }
 
-      return await SessionMentor.find(query)
+      const sessions = await SessionMentor.find(query)
         .sort({ scheduledAt: -1 })
         .limit(limit)
         .lean();
+
+      return await this.enrichSessionsWithUserDetails(sessions);
     } catch (error: any) {
       logger.error(`Failed to fetch past sessions: ${error.message}`);
       throw error;

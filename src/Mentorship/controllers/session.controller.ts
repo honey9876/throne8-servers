@@ -108,7 +108,8 @@ class SessionController {
       const authToken = getAuthToken(req) || undefined;
 
       const session = await mentorshipSessionService.getSessionById(id, userId, authToken);
-      ResponseHandler.success(res, 'Session retrieved successfully', session);
+      const enriched = (await mentorshipSessionService.enrichSessionsWithUserDetails([session.toObject()]))[0];
+      ResponseHandler.success(res, 'Session retrieved successfully', enriched);
     } catch (error: any) {
       logger.error('Failed to fetch session:', error);
       next(error);
@@ -272,7 +273,8 @@ class SessionController {
         thumbnailImageFile: req.file
       };
       const session = await mentorshipSessionService.updateSession(id, userId, updates, authToken);
-      ResponseHandler.success(res, 'Session updated successfully', session);
+      const enriched = (await mentorshipSessionService.enrichSessionsWithUserDetails([session.toObject()]))[0];
+      ResponseHandler.success(res, 'Session updated successfully', enriched);
     } catch (error: any) {
       logger.error('Failed to update session:', error);
       next(error);
@@ -296,7 +298,8 @@ class SessionController {
       const { bookingId } = req.body;
 
       const session = await mentorshipSessionService.confirmSession(id, userId, authToken, bookingId);
-      ResponseHandler.success(res, 'Session confirmed successfully', session);
+      const enriched = (await mentorshipSessionService.enrichSessionsWithUserDetails([session.toObject()]))[0];
+      ResponseHandler.success(res, 'Session confirmed successfully', enriched);
     } catch (error: any) {
       logger.error('Failed to confirm session:', error);
       next(error);
@@ -318,7 +321,8 @@ class SessionController {
 
       const authToken = getAuthToken(req) || undefined;
       const session = await mentorshipSessionService.startSession(id, userId, authToken);
-      ResponseHandler.success(res, 'Session started successfully', session);
+      const enriched = (await mentorshipSessionService.enrichSessionsWithUserDetails([session.toObject()]))[0];
+      ResponseHandler.success(res, 'Session started successfully', enriched);
     } catch (error: any) {
       logger.error('Failed to start session:', error);
       next(error);
@@ -347,7 +351,8 @@ class SessionController {
         { actualDuration, wasSuccessful, followUpRequired, followUpNotes },
         authToken
       );
-      ResponseHandler.success(res, 'Session completed successfully', session);
+      const enriched = (await mentorshipSessionService.enrichSessionsWithUserDetails([session.toObject()]))[0];
+      ResponseHandler.success(res, 'Session completed successfully', enriched);
     } catch (error: any) {
       logger.error('Failed to complete session:', error);
       next(error);
