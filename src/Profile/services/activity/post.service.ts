@@ -499,17 +499,43 @@ class PostService {
                 });
             });
 
+            // ── NEW CODE: Merging Reposts ──
+            const { RepostService } = require('./repost.service');
+            const repostsResult = await RepostService.default.getUserReposts(userId);
+            const userReposts = (repostsResult.reposts || []).map((r: any) => ({
+                feedItemType: 'repost',
+                repostId: r.repostId,
+                repostType: r.repostType,
+                thoughtText: r.thoughtText || null,
+                repostedBy: r.repostedBy,
+                createdAt: r.createdAt,
+                originalPost: r.originalPost ? {
+                    ...cleanPost(r.originalPost),
+                    isLikedByCurrentUser: currentUserId ? (r.originalPost.likedBy || []).includes(currentUserId) : false,
+                } : null,
+            })).filter((r: any) => r.originalPost !== null);
+
+            // Combine both
+            const combinedFeed = [...postsWithLikeStatus, ...userReposts];
+
+            // Sort: pinned first, then by createdAt desc
+            combinedFeed.sort((a: any, b: any) => {
+                if (a.isPinned && !b.isPinned) return -1;
+                if (!a.isPinned && b.isPinned) return 1;
+                return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+            });
+
             LoggerUtil.info('Posts fetched successfully', {
                 userId,
-                count: postsWithLikeStatus.length,
+                count: combinedFeed.length,
                 correlationId,
             });
 
             return {
-                posts: postsWithLikeStatus,
-                total: postsWithLikeStatus.length,
-                pinnedPosts: postsWithLikeStatus.filter((p: any) => p.isPinned),
-                savedPosts: postsWithLikeStatus.filter((p: any) => p.isSaved),
+                posts: combinedFeed,
+                total: combinedFeed.length,
+                pinnedPosts: combinedFeed.filter((p: any) => p.isPinned),
+                savedPosts: combinedFeed.filter((p: any) => p.isSaved),
             };
 
         } catch (error: any) {

@@ -170,6 +170,35 @@ class RepostService {
                         (p: IPostEntry) => p.entryId === repost.originalPostEntryId
                     );
 
+                    const authorUser = await User.findOne({ userId: originalDoc?.userId })
+                        .select('userId username firstName lastName profilePhotoId headlineId')
+                        .lean();
+                    let authorName = 'Throne8 User';
+                    let authorAvatar = '';
+                    let authorHeadline = '';
+
+                    if (authorUser) {
+                        authorName = authorUser.firstName
+                            ? `${authorUser.firstName} ${authorUser.lastName || ''}`.trim()
+                            : (authorUser.username || 'Throne8 User');
+                        
+                        const { ProfilePhoto, Headline } = require('@/shared/models/index.models');
+                        const photo = await ProfilePhoto.findOne({ userId: authorUser.userId, isActive: true }).lean();
+                        if (photo) {
+                            authorAvatar = photo.cloudinarySecureUrl;
+                        }
+
+                        if (authorUser.headlineId) {
+                            const headline = await Headline.findOne({
+                                headlineId: authorUser.headlineId,
+                                'flags.isDeleted': false,
+                            }).lean();
+                            if (headline) {
+                                authorHeadline = headline.title || headline.message || headline.headline || '';
+                            }
+                        }
+                    }
+
                     return {
                         repostId: repost.repostId,
                         repostType: repost.repostType,
@@ -188,6 +217,9 @@ class RepostService {
                                 likesCount: originalEntry.likesCount,
                                 commentsCount: originalEntry.commentsCount,
                                 createdAt: originalEntry.createdAt,
+                                authorName,
+                                authorAvatar,
+                                authorHeadline,
                             }
                             : null,
                     };
@@ -251,6 +283,35 @@ class RepostService {
                     const reposterUser = await User.findOne({ userId: repost.repostedBy }).lean();
                     const reposterName = reposterUser ? (reposterUser.firstName ? `${reposterUser.firstName} ${reposterUser.lastName || ''}`.trim() : reposterUser.username) : repost.repostedBy;
 
+                    const authorUser = await User.findOne({ userId: originalDoc?.userId })
+                        .select('userId username firstName lastName profilePhotoId headlineId')
+                        .lean();
+                    let authorName = 'Throne8 User';
+                    let authorAvatar = '';
+                    let authorHeadline = '';
+
+                    if (authorUser) {
+                        authorName = authorUser.firstName
+                            ? `${authorUser.firstName} ${authorUser.lastName || ''}`.trim()
+                            : (authorUser.username || 'Throne8 User');
+                        
+                        const { ProfilePhoto, Headline } = require('@/shared/models/index.models');
+                        const photo = await ProfilePhoto.findOne({ userId: authorUser.userId, isActive: true }).lean();
+                        if (photo) {
+                            authorAvatar = photo.cloudinarySecureUrl;
+                        }
+
+                        if (authorUser.headlineId) {
+                            const headline = await Headline.findOne({
+                                headlineId: authorUser.headlineId,
+                                'flags.isDeleted': false,
+                            }).lean();
+                            if (headline) {
+                                authorHeadline = headline.title || headline.message || headline.headline || '';
+                            }
+                        }
+                    }
+
                     return {
                         feedItemType: 'repost',
                         repostId: repost.repostId,
@@ -271,6 +332,9 @@ class RepostService {
                             commentsCount: originalEntry.commentsCount,
                             isLikedByCurrentUser: originalEntry.likedBy?.includes(currentUserId),
                             createdAt: originalEntry.createdAt,
+                            authorName,
+                            authorAvatar,
+                            authorHeadline,
                         },
                     };
                 })
