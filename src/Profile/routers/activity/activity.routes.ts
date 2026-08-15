@@ -513,6 +513,13 @@ router.post(
 // ==================== REPOST ROUTES ====================
 // Existing routes ke baad add karo
 
+// Get my reposts — MUST be before /:entryId routes to avoid wildcard clash
+router.get(
+    '/posts/reposts/my-reposts',
+    AuthMiddleware.authenticate as any,
+    RepostController.getMyReposts as any
+);
+
 // Create repost / quote repost
 router.post(
     '/posts/:entryId/repost',
@@ -533,13 +540,6 @@ router.get(
     '/posts/:entryId/reposts',
     AuthMiddleware.authenticate as any,
     RepostController.getRepostsByPost as any
-);
-
-// Get my reposts
-router.get(
-    '/posts/reposts/my-reposts',
-    AuthMiddleware.authenticate as any,
-    RepostController.getMyReposts as any
 );
 
 // Check repost status

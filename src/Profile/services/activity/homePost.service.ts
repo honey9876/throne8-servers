@@ -328,7 +328,7 @@ class HomePostService {
 
             // ── NEW CODE: Merging Reposts ──
             const repostsResult = await RepostService.getFeedReposts(currentUserId, limit, (page - 1) * limit);
-            const feedReposts = repostsResult.reposts || [];\n
+            const feedReposts = repostsResult.reposts || [];
             // Build a set of entryIds the current user has reposted so we can tag them in the feed
             const myRepostsResult = await RepostService.getUserReposts(currentUserId);
             const myRepostedEntryIds = new Set(
