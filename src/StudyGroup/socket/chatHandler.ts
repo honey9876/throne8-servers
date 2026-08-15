@@ -147,11 +147,13 @@ export const handleChatEvents = (io: Server, socket: Socket, userId: string): vo
         try {
           // Import ProfilePhoto if not imported, or use mongoose.model
           const ProfilePhoto = mongoose.model('ProfilePhoto');
-          const photo = await ProfilePhoto.findById(senderPayload.profilePhotoId).lean().exec();
+          const photo = await ProfilePhoto.findOne({ photoId: senderPayload.profilePhotoId }).lean().exec();
           if (photo) {
             senderPayload.profileImage = (photo as any).cloudinarySecureUrl;
           }
-        } catch (e) {}
+        } catch (e) {
+          LoggerUtil.error('Failed to fetch profile photo in chat handler', { error: (e as Error).message });
+        }
       }
 
       LoggerUtil.info(`Message created: ${message._id} in group ${groupId}`);
