@@ -149,6 +149,9 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
     const { roomId, cameraOn } = data;
     if (!roomId) return;
 
+    // Store state in socket data for new users who join later
+    socket.data.camOn = cameraOn;
+
     socket.to(`live-room:${roomId}`).emit('user-camera-toggle', {
       userId,
       cameraOn,
@@ -160,6 +163,9 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
   socket.on('toggle-mic', (data: ToggleMicPayload) => {
     const { roomId, micOn } = data;
     if (!roomId) return;
+
+    // Store state in socket data for new users who join later
+    socket.data.micOn = micOn;
 
     socket.to(`live-room:${roomId}`).emit('user-mic-toggle', {
       userId,
@@ -192,6 +198,8 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
           userId:   s.data.userId,
           userName: s.data.userName ?? 'Unknown',
           socketId: s.id,
+          camOn: s.data.camOn || false,
+          micOn: s.data.micOn || false,
         }))
         .filter((p) => p.userId);
 

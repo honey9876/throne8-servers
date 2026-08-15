@@ -71,6 +71,21 @@ async function assertMembership(
 export const handleChatEvents = (io: Server, socket: Socket, userId: string): void => {
 
   // ========================================================
+  // JOIN & LEAVE GROUP CHAT ROOMS
+  // ========================================================
+  socket.on('join-group', (groupId: string) => {
+    if (!groupId || typeof groupId !== 'string') return;
+    socket.join(groupId);
+    LoggerUtil.debug(`User ${userId} joined chat group: ${groupId}`);
+  });
+
+  socket.on('leave-group', (groupId: string) => {
+    if (!groupId || typeof groupId !== 'string') return;
+    socket.leave(groupId);
+    LoggerUtil.debug(`User ${userId} left chat group: ${groupId}`);
+  });
+
+  // ========================================================
   // SEND MESSAGE
   // ========================================================
   socket.on('send-message', async (data: {
