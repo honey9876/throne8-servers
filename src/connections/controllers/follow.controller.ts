@@ -82,7 +82,14 @@ class FollowController {
       }).lean();
 
       if (existingFollow && existingFollow.status === 'active') {
-        return next(new ErrorResponse('Already following this user', HttpStatus.CONFLICT, ERROR_CODES.CONNECTION_ALREADY_EXISTS));
+        logger.info('User is already following', {
+          category: LogCategory.FOLLOW,
+          followerId,
+          followingId: validatedData.followingId
+        });
+        return res.status(HttpStatus.OK).json(
+          SuccessResponse(this.formatFollowResponse(existingFollow), 'Already following this user', HttpStatus.OK)
+        );
       }
 
       let follow;

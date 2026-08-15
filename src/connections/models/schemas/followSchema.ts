@@ -7,12 +7,13 @@ import { Types } from 'mongoose';
  * Custom ObjectId validation for Joi
  */
 const objectIdValidator = Joi.string().custom((value, helpers) => {
-  if (!Types.ObjectId.isValid(value)) {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!Types.ObjectId.isValid(value) && !uuidRegex.test(value)) {
     return helpers.error('any.invalid');
   }
   return value;
-}, 'ObjectId validation').messages({
-  'any.invalid': '{{#label}} must be a valid ObjectId',
+}, 'ObjectId or UUID validation').messages({
+  'any.invalid': '{{#label}} must be a valid ObjectId or UUID',
 });
 
 /**

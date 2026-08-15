@@ -3,7 +3,7 @@
 import { Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import logger, { LogCategory } from '@/shared/logger.util';
-import { Connection, ConnectionRequest, } from '../models/index';
+import { Connection, ConnectionRequest, Follow } from '../models/index';
 import { IConnectionRequest } from '@/connections/models/ConnectionRequest';
 import { User } from '@/shared/models/index.models';
 import { ErrorResponse } from '@/shared/response.util';
@@ -257,6 +257,28 @@ class connectionRequestService {
       shardKey: connectionShardKey,
       metadata: { createdFromRequest: requestId },
     });
+
+    try {
+      const followOps = [
+        {
+          updateOne: {
+            filter: { followerId: request.fromUserId.toString(), followingId: request.toUserId.toString() },
+            update: { $setOnInsert: { status: 'active', createdAt: new Date(), updatedAt: new Date(), notificationEnabled: true, isBlocked: false } },
+            upsert: true
+          }
+        },
+        {
+          updateOne: {
+            filter: { followerId: request.toUserId.toString(), followingId: request.fromUserId.toString() },
+            update: { $setOnInsert: { status: 'active', createdAt: new Date(), updatedAt: new Date(), notificationEnabled: true, isBlocked: false } },
+            upsert: true
+          }
+        }
+      ];
+      await Follow.bulkWrite(followOps, { ordered: false });
+    } catch (error) {
+      logger.warn(`Failed to create mutual follows - RequestID: ${requestId}`, { category: LogCategory.CONNECTION });
+    }
 
     // ✅ EMIT SOCKET EVENT
     try {
@@ -723,6 +745,30 @@ class connectionRequestService {
     );
 
     await ConnectionRequest.bulkUpdateStatus(authorizedIds, 'accepted', userId);
+
+    try {
+      const followOps = authorizedRequests.flatMap(request => [
+        {
+          updateOne: {
+            filter: { followerId: request.fromUserId.toString(), followingId: request.toUserId.toString() },
+            update: { $setOnInsert: { status: 'active', createdAt: new Date(), updatedAt: new Date(), notificationEnabled: true, isBlocked: false } },
+            upsert: true
+          }
+        },
+        {
+          updateOne: {
+            filter: { followerId: request.toUserId.toString(), followingId: request.fromUserId.toString() },
+            update: { $setOnInsert: { status: 'active', createdAt: new Date(), updatedAt: new Date(), notificationEnabled: true, isBlocked: false } },
+            upsert: true
+          }
+        }
+      ]);
+      if (followOps.length > 0) {
+        await Follow.bulkWrite(followOps, { ordered: false });
+      }
+    } catch (error) {
+      logger.warn(`Failed to create mutual follows in bulk accept - RequestCount: ${authorizedIds.length}`, { category: LogCategory.CONNECTION });
+    }
 
     Promise.all([
       ...authorizedIds.map((id) => connectionRequestService.manageRequestCaching(id, 'delete')),

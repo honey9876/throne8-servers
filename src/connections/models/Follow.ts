@@ -20,7 +20,10 @@ const followSchema = new Schema<IFollow>({
     type: String, 
     required: true,
     validate: {
-      validator: (v: string) => Types.ObjectId.isValid(v),
+      validator: (v: string) => {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        return Types.ObjectId.isValid(v) || uuidRegex.test(v);
+      },
       message: 'Invalid follower ID'
     }
   },
@@ -28,7 +31,10 @@ const followSchema = new Schema<IFollow>({
     type: String, 
     required: true,
     validate: {
-      validator: (v: string) => Types.ObjectId.isValid(v),
+      validator: (v: string) => {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        return Types.ObjectId.isValid(v) || uuidRegex.test(v);
+      },
       message: 'Invalid following ID'
     }
   },

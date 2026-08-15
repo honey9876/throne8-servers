@@ -24,14 +24,20 @@ interface RateLimitOverride {
 
 // ── Helper: resolve policy for current request ────────────────────────────
 
-function resolvePolicy(path: string, override?: RateLimitOverride): RateLimitPolicy {
+function resolvePolicy(req: Request, override?: RateLimitOverride): RateLimitPolicy {
     // 1. Exact match on req.path (e.g. "/login")
-    const matched = rateLimitPolicies[path] ?? rateLimitPolicies['*'];
+    const matched = rateLimitPolicies[req.path] ?? rateLimitPolicies['*'];
+
+    let prefix = matched.redisPrefix;
+    if (matched === rateLimitPolicies['*'] && override && !override.redisPrefix) {
+        const routePattern = req.route?.path || req.path;
+        prefix = `rl:override:${req.baseUrl || ''}${routePattern}`.replace(/[\/:]/g, '_');
+    }
 
     return {
         windowMs: override?.windowMs ?? matched.windowMs,
         maxRequests: override?.maxRequests ?? matched.maxRequests,
-        redisPrefix: override?.redisPrefix ?? matched.redisPrefix,
+        redisPrefix: override?.redisPrefix ?? prefix,
         message: override?.message ?? matched.message,
     };
 }
@@ -63,7 +69,7 @@ const rateLimitMiddleware = (override?: RateLimitOverride) =>
         const userId = (req as any).user?.userId ?? null;
         const path = req.path; // "/login", "/register" etc.
 
-        const policy = resolvePolicy(path, override);
+        const policy = resolvePolicy(req, override);
         const ttlSeconds = Math.floor(policy.windowMs / 1000); // 60
         const { redisPrefix, maxRequests, message } = policy;
 
