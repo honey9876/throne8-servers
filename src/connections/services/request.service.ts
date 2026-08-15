@@ -263,14 +263,20 @@ class connectionRequestService {
         {
           updateOne: {
             filter: { followerId: request.fromUserId.toString(), followingId: request.toUserId.toString() },
-            update: { $setOnInsert: { status: 'active', createdAt: new Date(), updatedAt: new Date(), notificationEnabled: true, isBlocked: false } },
+            update: { 
+              $set: { status: 'active', updatedAt: new Date() },
+              $setOnInsert: { createdAt: new Date(), notificationEnabled: true, isBlocked: false } 
+            },
             upsert: true
           }
         },
         {
           updateOne: {
             filter: { followerId: request.toUserId.toString(), followingId: request.fromUserId.toString() },
-            update: { $setOnInsert: { status: 'active', createdAt: new Date(), updatedAt: new Date(), notificationEnabled: true, isBlocked: false } },
+            update: { 
+              $set: { status: 'active', updatedAt: new Date() },
+              $setOnInsert: { createdAt: new Date(), notificationEnabled: true, isBlocked: false } 
+            },
             upsert: true
           }
         }
@@ -751,14 +757,20 @@ class connectionRequestService {
         {
           updateOne: {
             filter: { followerId: request.fromUserId.toString(), followingId: request.toUserId.toString() },
-            update: { $setOnInsert: { status: 'active', createdAt: new Date(), updatedAt: new Date(), notificationEnabled: true, isBlocked: false } },
+            update: { 
+              $set: { status: 'active', updatedAt: new Date() },
+              $setOnInsert: { createdAt: new Date(), notificationEnabled: true, isBlocked: false } 
+            },
             upsert: true
           }
         },
         {
           updateOne: {
             filter: { followerId: request.toUserId.toString(), followingId: request.fromUserId.toString() },
-            update: { $setOnInsert: { status: 'active', createdAt: new Date(), updatedAt: new Date(), notificationEnabled: true, isBlocked: false } },
+            update: { 
+              $set: { status: 'active', updatedAt: new Date() },
+              $setOnInsert: { createdAt: new Date(), notificationEnabled: true, isBlocked: false } 
+            },
             upsert: true
           }
         }

@@ -990,7 +990,7 @@ class AuthService {
             const activePhotos = await ProfilePhoto.find({
                 userId: { $in: userIds },
                 isActive: true,
-                isDeleted: false
+                isDeleted: { $ne: true }
             }).lean().exec();
 
             const photoMap = new Map();

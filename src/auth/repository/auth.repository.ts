@@ -48,7 +48,7 @@ export class UserRepository {
      * Find user by userId (excludes sensitive fields)
      */
     static async findByUserId(userId: string): Promise<any | null> {
-        const query: any = { 'flags.isDeleted': false };
+        const query: any = { 'flags.isDeleted': { $ne: true } };
         if (/^[0-9a-fA-F]{24}$/.test(userId)) {
             query.$or = [{ userId }, { _id: userId }];
         } else {
@@ -135,7 +135,7 @@ export class UserRepository {
         updates: Record<string, any>
     ): Promise<any | null> {
         return User.findOneAndUpdate(
-            { userId, 'flags.isDeleted': false },
+            { userId, 'flags.isDeleted': { $ne: true } },
             { $set: { ...updates, updatedAt: new Date() } },
             {
                 new: true,
@@ -170,7 +170,7 @@ export class UserRepository {
     ): Promise<GetAllUsersResult> {
         const { page, limit, skip, filters, sortBy } = params;
 
-        const query: any = { 'flags.isDeleted': false };
+        const query: any = { 'flags.isDeleted': { $ne: true } };
 
         if (filters.status) query.status = filters.status;
         if (filters.role) query.role = filters.role;
