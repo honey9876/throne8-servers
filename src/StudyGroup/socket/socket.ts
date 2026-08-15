@@ -47,7 +47,7 @@ const authenticateSocket = async (socket: Socket): Promise<string | null> => {
     // Verify user exists and is active
     // BUG FIX: must select 'status' — selecting '_id isActive' left status=undefined,
     // so user.status !== 'active' was always true → blocked ALL socket connections.
-    const user = await User.findById(decoded.userId).select('_id status isActive');
+    const user = await User.findOne({ userId: decoded.userId }).select('userId status isActive');
 
     if (!user || user.status !== 'active') {
       LoggerUtil.warn(`⚠️  Invalid or inactive user for socket: ${socket.id}`);
@@ -121,8 +121,8 @@ export const setupSocketHandlers = (io: Server): void => {
     socket.data.userId = userId;
 
     // Get user details for live room handler
-    // BUG FIX: select both 'username' and 'name' — User model may use either field
-    const user = await User.findById(userId).select('username name firstName lastName');
+    // BUG FIX: userId is a UUID string, so we must use findOne({ userId }) instead of findById
+    const user = await User.findOne({ userId }).select('username name firstName lastName');
     const userName =
       user?.username ||
       (user as any)?.name ||

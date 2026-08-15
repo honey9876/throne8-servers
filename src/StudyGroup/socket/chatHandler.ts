@@ -13,12 +13,14 @@
  *  6. No N+1 on populate — single populate call with nested paths
  */
 
+import mongoose from 'mongoose';
 import { Server, Socket } from 'socket.io';
 import { LoggerUtil } from '@/shared/logger.util';
 import Message from '../models/Message.model';
 import GroupMember from '../models/GroupMember.model';
 import { MessageType } from '../enums/MessageType.enum';
 import ProfilePhoto from '@/Profile/models/ProfilePhoto.model';
+import { generateSecureId } from '@/shared/security';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_CONTENT_LENGTH = 2_000;
@@ -119,6 +121,7 @@ export const handleChatEvents = (io: Server, socket: Socket, userId: string): vo
 
       // ── Persist ──────────────────────────────────────────────────────────
       const message = await Message.create({
+        messageId: generateSecureId(),
         groupId,
         sender: userId,
         content: sanitizedContent,
@@ -129,19 +132,24 @@ export const handleChatEvents = (io: Server, socket: Socket, userId: string): vo
         fileSize: fileSize || null,
       });
 
-      // Single populate call with all needed paths
-      await message.populate([
-        { path: 'sender', select: 'name profilePhotoId email firstName lastName username' },
-        ...(replyTo ? [{ path: 'replyTo', select: 'content sender' }] : []),
-      ]);
+      // Populate replyTo if exists
+      if (replyTo) {
+        await message.populate({ path: 'replyTo', select: 'content sender' });
+      }
 
-      let senderPayload: any = message.sender;
+      // Manually fetch sender because Mongoose populate fails on UUID string reference
+      const User = mongoose.model('User');
+      const senderUser = await User.findOne({ userId }).select('userId name profilePhotoId email firstName lastName username').lean().exec();
+      
+      let senderPayload: any = senderUser || { userId, name: 'User' };
+      
       if (senderPayload && senderPayload.profilePhotoId) {
         try {
+          // Import ProfilePhoto if not imported, or use mongoose.model
+          const ProfilePhoto = mongoose.model('ProfilePhoto');
           const photo = await ProfilePhoto.findById(senderPayload.profilePhotoId).lean().exec();
           if (photo) {
-            senderPayload = senderPayload.toJSON ? senderPayload.toJSON() : { ...senderPayload };
-            senderPayload.profileImage = photo.cloudinarySecureUrl;
+            senderPayload.profileImage = (photo as any).cloudinarySecureUrl;
           }
         } catch (e) {}
       }
