@@ -352,7 +352,7 @@ class MentorService {
           userId: mentorObj.userId,
           'flags.isDeleted': false,
         })
-          .select('userId email firstName lastName fullName profilePhotoId')
+          .select('userId email firstName lastName fullName profilePhotoId profileImage')
           .lean();
       } catch (error: any) {
         logger.error(`Failed to fetch user for mentor enrichment: ${error.message}`, {
