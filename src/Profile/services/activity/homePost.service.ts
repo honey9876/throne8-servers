@@ -9,6 +9,7 @@ import sharp from 'sharp';
 import Constants from '@/shared/constants.util';
 import { Post, User } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
+import RepostService from './repost.service';
 
 interface HomePostData {
     title: string;
@@ -325,15 +326,22 @@ class HomePostService {
                 allPosts.push(...entries);
             });
 
+            // ── NEW CODE: Merging Reposts ──
+            const repostsResult = await RepostService.getFeedReposts(currentUserId, limit, (page - 1) * limit);
+            const feedReposts = repostsResult.reposts || [];
+
+            // Combine both
+            const combinedFeed = [...allPosts, ...feedReposts];
+
             // Sort by latest
-            allPosts.sort(
+            combinedFeed.sort(
                 (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
             );
 
             // Pagination
-            const total = allPosts.length;
+            const total = combinedFeed.length;
             const startIndex = (page - 1) * limit;
-            const paginatedPosts = allPosts.slice(startIndex, startIndex + limit);
+            const paginatedPosts = combinedFeed.slice(startIndex, startIndex + limit);
 
             LoggerUtil.info('Home feed posts fetched', {
                 currentUserId,

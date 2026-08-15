@@ -248,12 +248,16 @@ class RepostService {
 
                     if (!originalEntry) return null;
 
+                    const reposterUser = await User.findOne({ userId: repost.repostedBy }).lean();
+                    const reposterName = reposterUser ? (reposterUser.firstName ? `${reposterUser.firstName} ${reposterUser.lastName || ''}`.trim() : reposterUser.username) : repost.repostedBy;
+
                     return {
                         feedItemType: 'repost',
                         repostId: repost.repostId,
                         repostType: repost.repostType,
                         thoughtText: repost.thoughtText || null,
                         repostedBy: repost.repostedBy,
+                        repostedByName: reposterName,
                         createdAt: repost.createdAt,
                         originalPost: {
                             entryId: originalEntry.entryId,
