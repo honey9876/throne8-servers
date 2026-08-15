@@ -102,6 +102,98 @@ class NotificationService {
         }
     }
 
+    static async sendNotification(
+        payload: {
+            recipientId: string;
+            senderId: string;
+            type: 'post_created' | 'post_liked' | 'post_commented' | 'connection_request' | 'connection_accepted';
+            entityId: string;
+            entityType: 'post' | 'connection';
+            message: string;
+        }
+    ): Promise<void> {
+        try {
+            const { recipientId, senderId, type, entityId, entityType, message } = payload;
+            
+            // 1. Get sender's profile
+            const sender = await User.findOne({ userId: senderId }).select('firstName lastName profilePhotoId').lean();
+            if (!sender) return;
+
+            const senderName = `${sender.firstName} ${sender.lastName || ''}`.trim();
+            let senderPhoto = null;
+            if (sender.profilePhotoId) {
+                const photo = await ProfilePhoto.findOne({ photoId: sender.profilePhotoId }).lean();
+                if (photo) {
+                    senderPhoto = photo.cloudinarySecureUrl;
+                }
+            }
+
+            const doc = {
+                notificationId: uuidv4(),
+                recipientId,
+                senderId,
+                senderName,
+                senderPhoto,
+                type,
+                entityId,
+                entityType,
+                message,
+                isRead: false,
+            };
+
+            await Notification.create(doc);
+
+            // Emit real-time event
+            try {
+                const io = getIO();
+                io.to(`user:${recipientId}`).emit('notification:new', {
+                    ...doc,
+                    createdAt: new Date().toISOString(),
+                });
+                
+                // Update unread count
+                const unreadCount = await Notification.countDocuments({ recipientId, isRead: false });
+                io.to(`user:${recipientId}`).emit('notification:unread:count', { count: unreadCount });
+            } catch (socketErr) {
+                logger.warn('Socket emit failed for notification', {
+                    error: socketErr instanceof Error ? socketErr.message : 'unknown',
+                });
+            }
+
+            logger.info(`Notification sent to ${recipientId}`, { type, senderId, entityId });
+        } catch (err) {
+            logger.error('sendNotification failed', {
+                error: err instanceof Error ? err.message : 'unknown',
+                payload,
+            });
+        }
+    }
+
+    static async createConnectionNotification(
+        recipientId: string,
+        senderId: string,
+        type: 'connection_request' | 'connection_accepted',
+        connectionId: string
+    ): Promise<void> {
+        const message = type === 'connection_request' 
+            ? 'sent you a connection request.'
+            : 'accepted your connection request.';
+            
+        // The senderName is dynamically prefixed on the frontend, but we'll include it in the message just in case
+        const sender = await User.findOne({ userId: senderId }).select('firstName lastName').lean();
+        const senderName = sender ? `${sender.firstName} ${sender.lastName || ''}`.trim() : 'Someone';
+        const fullMessage = `${senderName} ${message}`;
+
+        await this.sendNotification({
+            recipientId,
+            senderId,
+            type,
+            entityId: connectionId,
+            entityType: 'connection',
+            message: fullMessage,
+        });
+    }
+
     /** Fetch paginated notifications for a user */
     static async getNotifications(
         userId: string,

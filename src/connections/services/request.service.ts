@@ -12,6 +12,7 @@ import redisService from '@/services/redis.service';
 import { emitNotificationCount } from '@/socket/handlers/notificationHandler';
 import { emitConnectionAccepted, emitConnectionRequest } from '@/socket/handlers/connectionHandler';
 import { getIO } from '@/socket';
+import NotificationService from '@/notifications/services/notification.service';
 
 // ✅ KAFKA IMPORTS
 // import { requestProducer } from '../kafka/producers/requestProducer';
@@ -173,6 +174,14 @@ class connectionRequestService {
       category: LogCategory.CONNECTION
     });
 
+    // Create Notification
+    NotificationService.createConnectionNotification(
+      toUserId,
+      fromUserId,
+      'connection_request',
+      request.requestId
+    ).catch(err => logger.error('Failed to create connection notification', { error: err }));
+
     // ✅ KAFKA: Publish REQUEST_SENT event - FIXED
     // try {
     //   await requestProducer.publishRequestSent(
@@ -313,6 +322,14 @@ class connectionRequestService {
         data: { error: socketError instanceof Error ? socketError.message : 'Unknown' },
       });
     }
+
+    // Create Notification
+    NotificationService.createConnectionNotification(
+      request.fromUserId.toString(),
+      userId,
+      'connection_accepted',
+      connection.connectionId
+    ).catch(err => logger.error('Failed to create connection accepted notification', { error: err }));
 
     // ✅ KAFKA: Publish REQUEST_ACCEPTED event - FIXED
     // try {
@@ -795,6 +812,16 @@ class connectionRequestService {
     logger.info(`Bulk connection requests accepted - RequestCount: ${authorizedIds.length}, AcceptedCount: ${connections.length}`, {
       category: LogCategory.CONNECTION
     });
+
+    // Create Notifications
+    Promise.all(connections.map((conn, idx) => 
+      NotificationService.createConnectionNotification(
+        authorizedRequests[idx].fromUserId.toString(),
+        userId,
+        'connection_accepted',
+        conn.connectionId
+      )
+    )).catch(err => logger.error('Failed to create bulk connection accepted notifications', { error: err }));
 
     return { connections: connections.map(c => c.toObject() as IConnection), acceptedCount: authorizedIds.length };
   }
