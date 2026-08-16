@@ -1,7 +1,7 @@
 // src/Profile/services/repost.service.ts
 
 import { v4 as uuidv4 } from 'uuid';
-import { Post, User } from '@/shared/models/index.models';
+import { Post, User, ProfilePhoto, Headline } from '@/shared/models/index.models';
 import Repost from '@/Profile/models/Repost.model';
 import { IPostEntry } from '@/Profile/models/Post.model';
 import { LoggerUtil } from '@/shared/logger.util';
@@ -182,7 +182,6 @@ class RepostService {
                             ? `${authorUser.firstName} ${authorUser.lastName || ''}`.trim()
                             : (authorUser.username || 'Throne8 User');
                         
-                        const { ProfilePhoto, Headline } = require('@/shared/models/index.models');
                         const photo = await ProfilePhoto.findOne({ userId: authorUser.userId, isActive: true }).lean();
                         if (photo) {
                             authorAvatar = photo.cloudinarySecureUrl;
@@ -295,7 +294,6 @@ class RepostService {
                             ? `${authorUser.firstName} ${authorUser.lastName || ''}`.trim()
                             : (authorUser.username || 'Throne8 User');
                         
-                        const { ProfilePhoto, Headline } = require('@/shared/models/index.models');
                         const photo = await ProfilePhoto.findOne({ userId: authorUser.userId, isActive: true }).lean();
                         if (photo) {
                             authorAvatar = photo.cloudinarySecureUrl;

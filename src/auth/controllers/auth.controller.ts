@@ -1074,6 +1074,11 @@ class AuthController {
             ResponseUtil.success(
                 res,
                 {
+                    user: {
+                        userId: user.userId,
+                        email: user.email,
+                        role: user.role || 'user',
+                    },
                     tokens: {
                         accessToken: newAccessToken,
                         refreshToken: newRefreshToken,

@@ -14,6 +14,7 @@ import { Post, User, ProfilePhoto, Headline, Connection } from '@/shared/models/
 import { LoggerUtil } from '@/shared/logger.util';
 import { IPostEntry } from '@/Profile/models/Post.model';
 import NotificationService from '@/notifications/services/notification.service';
+import RepostService from './repost.service';
 
 // ==================== INTERFACES ====================
 
@@ -355,7 +356,7 @@ class PostService {
                 entryId: savedEntry.entryId,
                 title: savedEntry.title,
                 content: savedEntry.content,
-                mood: savedEntry.mood,        
+                mood: savedEntry.mood,
                 isPublic: savedEntry.isPublic,
                 postUrl: savedEntry.postUrl,
                 // ✅ AFTER
@@ -500,20 +501,24 @@ class PostService {
             });
 
             // ── NEW CODE: Merging Reposts ──
-            const { RepostService } = require('./repost.service');
-            const repostsResult = await RepostService.default.getUserReposts(userId);
-            const userReposts = (repostsResult.reposts || []).map((r: any) => ({
-                feedItemType: 'repost',
-                repostId: r.repostId,
-                repostType: r.repostType,
-                thoughtText: r.thoughtText || null,
-                repostedBy: r.repostedBy,
-                createdAt: r.createdAt,
-                originalPost: r.originalPost ? {
-                    ...cleanPost(r.originalPost),
-                    isLikedByCurrentUser: currentUserId ? (r.originalPost.likedBy || []).includes(currentUserId) : false,
-                } : null,
-            })).filter((r: any) => r.originalPost !== null);
+            let userReposts: any[] = [];
+            try {
+                const repostsResult = await RepostService.getUserReposts(userId);
+                userReposts = (repostsResult?.reposts || []).map((r: any) => ({
+                    feedItemType: 'repost',
+                    repostId: r.repostId,
+                    repostType: r.repostType,
+                    thoughtText: r.thoughtText || null,
+                    repostedBy: r.repostedBy,
+                    createdAt: r.createdAt,
+                    originalPost: r.originalPost ? {
+                        ...cleanPost(r.originalPost),
+                        isLikedByCurrentUser: currentUserId ? (r.originalPost.likedBy || []).includes(currentUserId) : false,
+                    } : null,
+                })).filter((r: any) => r.originalPost !== null);
+            } catch (repostError: any) {
+                LoggerUtil.warn('Failed to fetch user reposts in getAllPosts (non-blocking)', { error: repostError.message });
+            }
 
             // Combine both
             const combinedFeed = [...postsWithLikeStatus, ...userReposts];
@@ -560,19 +565,19 @@ class PostService {
             const allUserDocs = await Post.find({}).lean();
 
             // 2. Extract unique userIds form  the post documents
-            const userIds = [...new Set(allUserDocs.map((doc:any) => doc.userId))];
+            const userIds = [...new Set(allUserDocs.map((doc: any) => doc.userId))];
 
             // 3. Fetch user details for all those userIds
             const users = await User.find({ userId: { $in: userIds } })
                 .select('userId username firstName lastName profilePhotoId headlineId')
                 .lean();
-            
+
             // Fetch Profile Photos and Headlines for the users
             const profilePhotos = await ProfilePhoto.find({ userId: { $in: userIds }, isActive: true }).lean();
             // 4. Create a fast lookup map for the users
             const headlineIds = users.map((u: any) => u.headlineId).filter(Boolean);
             const headlines = await Headline.find({ headlineId: { $in: headlineIds }, 'flags.isDeleted': false }).lean();
-            
+
             const photoMap = profilePhotos.reduce((acc: any, photo: any) => {
                 acc[photo.userId] = photo.cloudinarySecureUrl;
                 return acc;
@@ -592,7 +597,7 @@ class PostService {
                         { fromUserId: { $in: userIds }, toUserId: currentUserId }
                     ]
                 }).lean();
-                
+
                 connectionMap = connections.reduce((acc: any, conn: any) => {
                     const otherUserId = conn.fromUserId === currentUserId ? conn.toUserId : conn.fromUserId;
                     acc[otherUserId] = conn.status;
@@ -610,7 +615,7 @@ class PostService {
                 };
                 return acc;
             }, {});
-                
+
             // ✅ cleanPost helper — same logic, lean() use hota hai isliye plain objects milte hain
             const cleanPost = (obj: any): any => {
                 if (!obj.images?.length) delete obj.images;
@@ -710,7 +715,7 @@ class PostService {
                 authorName = authorUser.firstName
                     ? `${authorUser.firstName} ${authorUser.lastName || ''}`.trim()
                     : (authorUser.username || 'Throne8 User');
-                
+
                 const photo = await ProfilePhoto.findOne({ userId: doc.userId, isActive: true }).lean();
                 if (photo) {
                     authorAvatar = photo.cloudinarySecureUrl;
