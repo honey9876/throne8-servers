@@ -106,6 +106,37 @@ class CommentService {
             // Step 4: Increment post comment count
             await Post.incrementComments(comment.postId);
 
+            if (post && post.userId !== userId) {
+                const NotificationService = (await import('@/notifications/services/notification.service')).default;
+                await NotificationService.sendNotification({
+                    recipientId: post.userId,
+                    senderId: userId,
+                    type: 'post_commented',
+                    entityId: postId,
+                    entityType: 'post',
+                    message: `commented on your post.`,
+                });
+            }
+
+            if (parentCommentId) {
+                const parentComment = await Comment.findOne({
+                    commentId: parentCommentId,
+                    isDeleted: false
+                });
+
+                if (parentComment && parentComment.userId !== userId && parentComment.userId !== post?.userId) {
+                    const NotificationService = (await import('@/notifications/services/notification.service')).default;
+                    await NotificationService.sendNotification({
+                        recipientId: parentComment.userId,
+                        senderId: userId,
+                        type: 'post_commented',
+                        entityId: postId,
+                        entityType: 'post',
+                        message: `replied to your comment.`,
+                    });
+                }
+            }
+
             // Step 5: Update user's activity stats
             await User.findOneAndUpdate(
                 { userId },
@@ -490,6 +521,18 @@ class CommentService {
             comment.likedBy.push(userId);
             comment.likesCount++;
             await comment.save();
+
+            if (comment.userId !== userId) {
+                const NotificationService = (await import('@/notifications/services/notification.service')).default;
+                await NotificationService.sendNotification({
+                    recipientId: comment.userId,
+                    senderId: userId,
+                    type: 'post_liked',
+                    entityId: comment.postId,
+                    entityType: 'post',
+                    message: `liked your comment.`,
+                });
+            }
 
             LoggerUtil.info('Comment liked successfully', {
                 commentId,

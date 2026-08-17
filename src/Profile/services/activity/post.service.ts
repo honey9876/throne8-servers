@@ -1125,6 +1125,20 @@ class PostService {
             LoggerUtil.info('Liking post', { entryId, userId, correlationId });
 
             const entry = await Post.incrementLikes(entryId, userId);
+            
+            // fetch the post owner
+            const doc = await Post.findOne({ 'posts.entryId': entryId }).lean();
+            if (doc && doc.userId !== userId) {
+                // Send notification
+                await NotificationService.sendNotification({
+                    recipientId: doc.userId,
+                    senderId: userId,
+                    type: 'post_liked',
+                    entityId: entryId,
+                    entityType: 'post',
+                    message: `liked your post.`,
+                });
+            }
 
             LoggerUtil.info('Post liked successfully', {
                 entryId,

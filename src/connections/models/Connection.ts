@@ -442,13 +442,13 @@ ConnectionSchema.statics.findUserConnectionsPaginated = async function (
         tag,
         projection,
         useEstimatedCount = false,
-        region = 'global'
+        region
     } = options;
     let filter: any = {
         $or: [{ fromUserId: userId }, { toUserId: userId }],
         isArchived: false,
-        region,
     };
+    if (region) filter.region = region;
     if (status) filter.status = status;
     if (tag) filter.tags = tag;
     let query = this.find(filter).sort({ createdAt: -1 })// /* .hint(...) */;

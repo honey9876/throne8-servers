@@ -314,15 +314,20 @@ class connectionController {
     static getUserConnections = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
         const authUserId = req.user?.userId;
         const { userId } = req.params;
-        const { page = '1', limit = environmentConfig.PAGINATION_DEFAULT_LIMIT, status, tag } = req.query;
+        let { page = '1', limit = environmentConfig.PAGINATION_DEFAULT_LIMIT, status, tag } = req.query;
 
         if (!authUserId) {
             return next(new ErrorResponse('Authentication required', HttpStatus.UNAUTHORIZED, 'AUTH_ERROR'));
         }
 
-        // ✅ AUTHORIZATION: User can only view their own connections (unless admin)
+        // ✅ If status is not provided, default to 'active'
+        if (!status) {
+            status = 'active';
+        }
+
+        // ✅ AUTHORIZATION: If requesting someone else's connections, force status to 'active'
         if (userId !== authUserId && req.user?.role !== 'admin') {
-            return next(new ErrorResponse('You can only view your own connections', HttpStatus.FORBIDDEN, 'AUTH_ERROR'));
+            status = 'active';
         }
 
         const result = await Connection.findUserConnectionsPaginated(userId, {
@@ -341,20 +346,24 @@ class connectionController {
      * ✅ 6. GET CONNECTION COUNT
      * GET /api/v1/connections/user/:userId/count
      * @access Private
-     * @authorization User can only view their own count (or admin)
      */
     static getConnectionCount = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
         const authUserId = req.user?.userId;
         const { userId } = req.params;
-        const { status } = req.query;
+        let { status } = req.query;
 
         if (!authUserId) {
             return next(new ErrorResponse('Authentication required', HttpStatus.UNAUTHORIZED, 'AUTH_ERROR'));
         }
 
-        // ✅ AUTHORIZATION
+        // ✅ If status is not provided, default to 'active'
+        if (!status) {
+            status = 'active';
+        }
+
+        // ✅ AUTHORIZATION: If requesting someone else's count, force status to 'active'
         if (userId !== authUserId && req.user?.role !== 'admin') {
-            return next(new ErrorResponse('You can only view your own connection count', HttpStatus.FORBIDDEN, 'AUTH_ERROR'));
+            status = 'active';
         }
 
         const filter: any = {

@@ -127,6 +127,12 @@ class NotificationService {
                     senderPhoto = photo.cloudinarySecureUrl;
                 }
             }
+            if (!senderPhoto) {
+                const photo = await ProfilePhoto.findOne({ userId: senderId, isActive: true }).lean();
+                if (photo) {
+                    senderPhoto = photo.cloudinarySecureUrl;
+                }
+            }
 
             const doc = {
                 notificationId: uuidv4(),

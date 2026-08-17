@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
 import sharp from 'sharp';
 import Constants from '@/shared/constants.util';
-import { Post, User } from '@/shared/models/index.models';
+import { Post, User, ProfilePhoto, Headline, Connection } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
 import RepostService from './repost.service';
 
@@ -305,11 +305,81 @@ class HomePostService {
         try {
             LoggerUtil.info('Fetching home feed posts', { currentUserId, page, limit, correlationId });
 
+            // 1. Fetch all posts documents
             const allUserDocs = await Post.find({}).lean();
+
+            // 2. Extract unique userIds form the post documents
+            const userIds = [...new Set(allUserDocs.map((doc: any) => doc.userId))];
+
+            // 3. Fetch user details for all those userIds
+            const users = await User.find({ userId: { $in: userIds } })
+                .select('userId username firstName lastName profilePhotoId headlineId')
+                .lean();
+
+            // Fetch Profile Photos and Headlines for the users
+            const profilePhotos = await ProfilePhoto.find({ userId: { $in: userIds }, isActive: true }).lean();
+            const headlineIds = users.map((u: any) => u.headlineId).filter(Boolean);
+            const headlines = await Headline.find({ headlineId: { $in: headlineIds }, 'flags.isDeleted': false }).lean();
+
+            const photoMap = profilePhotos.reduce((acc: any, photo: any) => {
+                acc[photo.userId] = photo.cloudinarySecureUrl;
+                return acc;
+            }, {});
+
+            const headlineMap = headlines.reduce((acc: any, hl: any) => {
+                acc[hl.headlineId] = hl.title || hl.message || hl.headline;
+                return acc;
+            }, {});
+
+            // 5. Fetch Connections for the current user and the post authors
+            let connectionMap: Record<string, string> = {};
+            if (Connection) {
+                const connections = await Connection.find({
+                    $or: [
+                        { fromUserId: currentUserId, toUserId: { $in: userIds } },
+                        { fromUserId: { $in: userIds }, toUserId: currentUserId }
+                    ]
+                }).lean();
+
+                connectionMap = connections.reduce((acc: any, conn: any) => {
+                    const otherUserId = conn.fromUserId === currentUserId ? conn.toUserId : conn.fromUserId;
+                    acc[otherUserId] = conn.status;
+                    return acc;
+                }, {});
+            }
+
+            // 6. Create a fast lookup map for the users
+            const userMap = users.reduce((acc: any, user: any) => {
+                acc[user.userId] = {
+                    ...user,
+                    profileImage: photoMap[user.userId],
+                    headline: headlineMap[user.headlineId],
+                    connectionStatus: connectionMap[user.userId] || 'none'
+                };
+                return acc;
+            }, {});
+
+            const cleanPost = (obj: any): any => {
+                if (!obj.images?.length) delete obj.images;
+                if (!obj.videos?.length) delete obj.videos;
+                if (!obj.documents?.length) delete obj.documents;
+                if (!obj.pollData?.question) delete obj.pollData;
+                if (!obj.eventData?.eventType) delete obj.eventData;
+                if (!obj.shadowbanReason) delete obj.shadowbanReason;
+                if (!obj.scheduledFor) delete obj.scheduledFor;
+                if (!obj.publishedAt) delete obj.publishedAt;
+                if (!obj.pinnedAt) delete obj.pinnedAt;
+                if (!obj.savedAt) delete obj.savedAt;
+                if (!obj.archivedAt) delete obj.archivedAt;
+                if (!obj.deletedAt) delete obj.deletedAt;
+                return obj;
+            };
 
             let allPosts: any[] = [];
 
             allUserDocs.forEach((doc: any) => {
+                const author = userMap[doc.userId] || {};
+
                 const entries = (doc.posts || [])
                     .filter((p: any) =>
                         !p.isDeleted &&
@@ -317,11 +387,15 @@ class HomePostService {
                         !p.isScheduled &&        // scheduled posts skip
                         p.isPublic !== false     // sirf public posts
                     )
-                    .map((p: any) => ({
+                    .map((p: any) => cleanPost({
                         ...p,
                         userId: doc.userId,
                         documentPostId: doc.postId,
                         isLikedByCurrentUser: (p.likedBy || []).includes(currentUserId),
+                        authorName: author.firstName ? `${author.firstName} ${author.lastName || ''}`.trim() : (author.username || 'Throne8 User'),
+                        authorAvatar: author.profileImage || '',
+                        authorHeadline: author.headline || '',
+                        authorConnectionStatus: author.connectionStatus || 'none'
                     }));
                 allPosts.push(...entries);
             });
@@ -345,7 +419,89 @@ class HomePostService {
             }));
 
             // Combine both
-            const combinedFeed = [...allPosts, ...feedReposts];
+            const rawCombinedFeed = [...allPosts, ...feedReposts];
+
+            // ── Deduplication and Aggregation ──
+            const aggregatedMap = new Map<string, any>();
+            let combinedFeed: any[] = [];
+
+            for (const item of rawCombinedFeed) {
+                // If it's a quote repost (has thoughtText), don't aggregate it
+                if (item.feedItemType === 'repost' && item.thoughtText) {
+                    combinedFeed.push(item);
+                    continue;
+                }
+
+                const targetEntryId = item.feedItemType === 'repost' ? item.originalPost?.entryId : item.entryId;
+                if (!targetEntryId) {
+                    combinedFeed.push(item);
+                    continue;
+                }
+
+                if (aggregatedMap.has(targetEntryId)) {
+                    const existing = aggregatedMap.get(targetEntryId);
+                    
+                    if (item.feedItemType === 'repost') {
+                        if (!existing.reposters) existing.reposters = [];
+                        if (existing.feedItemType === 'repost' && existing.repostedBy) {
+                            if (!existing.reposters.some((r: any) => r.id === existing.repostedBy)) {
+                                existing.reposters.push({ id: existing.repostedBy, name: existing.repostedByName, createdAt: existing.createdAt });
+                            }
+                        }
+                        if (!existing.reposters.some((r: any) => r.id === item.repostedBy)) {
+                            existing.reposters.push({ id: item.repostedBy, name: item.repostedByName, createdAt: item.createdAt });
+                        }
+                        // Update createdAt to the most recent repost
+                        if (new Date(item.createdAt) > new Date(existing.createdAt)) {
+                            existing.createdAt = item.createdAt;
+                        }
+                    } else {
+                        // This is the original post coming in, we already have a repost of it.
+                        // We should retain the existing repost structure but ensure the originalPost object is fresh.
+                        if (existing.feedItemType === 'repost') {
+                            existing.originalPost = { ...item, currentUserHasReposted: existing.originalPost?.currentUserHasReposted || item.currentUserHasReposted };
+                        } else {
+                            Object.assign(existing, item);
+                        }
+                    }
+                } else {
+                    if (item.feedItemType === 'repost') {
+                        item.reposters = [{ id: item.repostedBy, name: item.repostedByName, createdAt: item.createdAt }];
+                    } else {
+                        item.reposters = [];
+                    }
+                    aggregatedMap.set(targetEntryId, item);
+                    combinedFeed.push(item);
+                }
+            }
+
+            // Post-process the aggregated posts to format the repost header
+            for (const item of combinedFeed) {
+                if (item.reposters && item.reposters.length > 0) {
+                    item.feedItemType = 'repost';
+                    if (!item.originalPost) {
+                        const { reposters, feedItemType, currentUserHasReposted, ...originalData } = item;
+                        item.originalPost = { ...originalData, currentUserHasReposted };
+                    }
+                    
+                    const currentUserReposter = item.reposters.find((r: any) => r.id === currentUserId);
+                    const otherReposters = item.reposters.filter((r: any) => r.id !== currentUserId);
+                    
+                    if (currentUserReposter && otherReposters.length === 0) {
+                        item.repostedByName = "You";
+                    } else if (currentUserReposter && otherReposters.length === 1) {
+                        item.repostedByName = `You and ${otherReposters[0].name}`;
+                    } else if (currentUserReposter && otherReposters.length > 1) {
+                        item.repostedByName = `You, ${otherReposters[0].name} and ${otherReposters.length - 1} others`;
+                    } else if (!currentUserReposter && otherReposters.length === 1) {
+                        item.repostedByName = otherReposters[0].name;
+                    } else if (!currentUserReposter && otherReposters.length === 2) {
+                        item.repostedByName = `${otherReposters[0].name} and ${otherReposters[1].name}`;
+                    } else if (!currentUserReposter && otherReposters.length > 2) {
+                        item.repostedByName = `${otherReposters[0].name} and ${otherReposters.length - 1} others`;
+                    }
+                }
+            }
 
             // Sort by latest
             combinedFeed.sort(
