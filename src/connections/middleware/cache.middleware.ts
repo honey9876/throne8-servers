@@ -17,14 +17,14 @@ const redis = new Redis({
   // maxRetriesPerRequest: 3,
 });
 */
-const redis = process.env.REDIS_URL 
-  ? new Redis(process.env.REDIS_URL) 
+const redis = process.env.REDIS_URL
+  ? new Redis(process.env.REDIS_URL)
   : new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379'),
-      // retryDelayOnFailover: 100,
-      // maxRetriesPerRequest: 3,
-    });
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379'),
+    // retryDelayOnFailover: 100,
+    // maxRetriesPerRequest: 3,
+  });
 
 export const cacheMiddleware = (options: CacheOptions) => {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -36,7 +36,7 @@ export const cacheMiddleware = (options: CacheOptions) => {
 
       // Generate cache key
       const keyParts = [options.prefix || 'cache'];
-      
+
       if (options.varyBy) {
         options.varyBy.forEach(key => {
           if (key === 'userId' && req.user?.id) {
@@ -46,12 +46,12 @@ export const cacheMiddleware = (options: CacheOptions) => {
           }
         });
       }
-      
+
       const cacheKey = keyParts.join(':');
 
       // Try to get cached data
       const cachedData = await redis.get(cacheKey);
-      
+
       if (cachedData) {
         res.setHeader('X-Cache', 'HIT');
         return res.json(JSON.parse(cachedData));
@@ -59,9 +59,9 @@ export const cacheMiddleware = (options: CacheOptions) => {
 
       // Store original json method
       const originalJson = res.json;
-      
+
       // Override json method to cache response
-      res.json = function(data: any) {
+      res.json = function (data: any) {
         // Cache the response
         redis.setex(cacheKey, options.ttl, JSON.stringify(data));
         res.setHeader('X-Cache', 'MISS');
@@ -69,7 +69,7 @@ export const cacheMiddleware = (options: CacheOptions) => {
       };
 
       next();
-    } catch (error : any) {
+    } catch (error: any) {
       console.error('Cache middleware error:', error);
       next(); // Continue without caching on error
     }

@@ -146,17 +146,17 @@ const updateExperienceSchema = Joi.object({
         .trim()
         .message('Description cannot be empty')
         .optional(),
-        // .custom((value, helpers) => {
-        //     // const wordCount = value.trim().split(/\s+/).length;
-        //     // if (wordCount < 15 || wordCount > 100) {
-        //     //     return helpers.error('any.invalid');
-        //     // }
-        //     return value;
-        // })
-        // .messages({
-        //     // 'any.invalid': 'Description must be 15-100 words',
-        // }),
-       
+    // .custom((value, helpers) => {
+    //     // const wordCount = value.trim().split(/\s+/).length;
+    //     // if (wordCount < 15 || wordCount > 100) {
+    //     //     return helpers.error('any.invalid');
+    //     // }
+    //     return value;
+    // })
+    // .messages({
+    //     // 'any.invalid': 'Description must be 15-100 words',
+    // }),
+
 
     startDate: Joi.date()
         .iso()
@@ -245,7 +245,7 @@ router.post(
             logger.info('CREATE EXPERIENCE ROUTE HIT');
             await ExperienceController.createExperience(req as any, res);
             logger.info('✅ CREATE EXPERIENCE ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ CREATE EXPERIENCE ROUTE ERROR:', error);
             next(error);
         }
@@ -267,7 +267,7 @@ router.get(
             logger.info('GET ALL EXPERIENCES ROUTE HIT');
             await ExperienceController.getAllExperiences(req as any, res);
             logger.info('✅ GET ALL EXPERIENCES ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ GET ALL EXPERIENCES ROUTE ERROR:', error);
             next(error);
         }
@@ -290,7 +290,7 @@ router.get(
             });
             await ExperienceController.getExperienceById(req as any, res);
             logger.info('✅ GET EXPERIENCE BY ID ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ GET EXPERIENCE BY ID ROUTE ERROR:', error);
             next(error);
         }
@@ -314,7 +314,7 @@ router.put(
             });
             await ExperienceController.updateExperience(req as any, res);
             logger.info('✅ UPDATE EXPERIENCE ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ UPDATE EXPERIENCE ROUTE ERROR:', error);
             next(error);
         }
@@ -339,7 +339,7 @@ router.delete(
             });
             await ExperienceController.deleteExperience(req as any, res);
             logger.info('✅ DELETE EXPERIENCE ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ DELETE EXPERIENCE ROUTE ERROR:', error);
             next(error);
         }
@@ -362,7 +362,7 @@ router.post(
             });
             await ExperienceController.archiveExperience(req as any, res);
             logger.info('✅ ARCHIVE EXPERIENCE ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ ARCHIVE EXPERIENCE ROUTE ERROR:', error);
             next(error);
         }
@@ -385,7 +385,7 @@ router.post(
             });
             await ExperienceController.restoreExperience(req as any, res);
             logger.info('✅ RESTORE EXPERIENCE ROUTE COMPLETED');
-        } catch (error : any) {
+        } catch (error: any) {
             console.error('❌ RESTORE EXPERIENCE ROUTE ERROR:', error);
             next(error);
         }

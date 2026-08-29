@@ -190,7 +190,7 @@ class AuthController {
      * @param {Response} res - Express response
      * @returns {Promise<void>}
      */
-    
+
     static async register(req: Request<{}, any, RegisterBody>, res: Response): Promise<void> {
         const startTime = Date.now();
         const correlationId = (req as any).correlationId || uuidv4();
