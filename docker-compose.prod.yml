@@ -1,0 +1,422 @@
+# ============================================================
+# docker-compose.prod.yml — PRODUCTION
+# Hetzner par ye file use karo, dev wala NAHI
+#
+# Deployment flow:
+#   Local:   docker build → docker push dockerhub
+#   Hetzner: docker compose -f docker-compose.prod.yml up -d
+# ============================================================
+
+services:
+  # ════════════════════════════════════════════════════════
+  # MONGODB REPLICA SET (3 nodes — 800-1000 users ke liye)
+  # ════════════════════════════════════════════════════════
+
+  mongo-1:
+    image: mongo:7.0
+    container_name: mongo-1
+    hostname: mongo-1
+    # ✅ Sirf localhost — public nahi
+    ports:
+      - "127.0.0.1:27017:27017"
+    command: mongod --replSet rs0 --bind_ip_all --keyFile /etc/mongo/keyfile
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME}
+    volumes:
+      - mongo-1-data:/data/db
+      - mongo-1-config:/data/configdb
+      - ./mongo/keyfile:/etc/mongo/keyfile:ro
+    healthcheck:
+      test:
+        ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.75"
+
+  mongo-2:
+    image: mongo:7.0
+    container_name: mongo-2
+    hostname: mongo-2
+    ports:
+      - "127.0.0.1:27018:27017"
+    command: mongod --replSet rs0 --bind_ip_all --keyFile /etc/mongo/keyfile
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    volumes:
+      - mongo-2-data:/data/db
+      - mongo-2-config:/data/configdb
+      - ./mongo/keyfile:/etc/mongo/keyfile:ro
+    healthcheck:
+      test:
+        ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.75"
+
+  mongo-3:
+    image: mongo:7.0
+    container_name: mongo-3
+    hostname: mongo-3
+    ports:
+      - "127.0.0.1:27019:27017"
+    command: mongod --replSet rs0 --bind_ip_all --keyFile /etc/mongo/keyfile
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    volumes:
+      - mongo-3-data:/data/db
+      - mongo-3-config:/data/configdb
+      - ./mongo/keyfile:/etc/mongo/keyfile:ro
+    healthcheck:
+      test:
+        ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.75"
+
+  # Replica set initialize karo (ek baar chalta hai)
+  mongo-init:
+    image: mongo:7.0
+    container_name: mongo-init
+    depends_on:
+      mongo-1:
+        condition: service_healthy
+      mongo-2:
+        condition: service_healthy
+      mongo-3:
+        condition: service_healthy
+    environment:
+      MONGO_ROOT_USER: ${MONGO_ROOT_USER}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_DB_NAME: ${MONGO_DB_NAME}
+      MONGO_APP_USER: ${MONGO_APP_USER}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD}
+    entrypoint: ["/bin/bash", "/scripts/mongo-init.sh"]
+    volumes:
+      - ./scripts/mongo-init.sh:/scripts/mongo-init.sh:ro
+    networks:
+      - app-network
+    restart: "no"
+
+  # ════════════════════════════════════════════════════════
+  # REDIS CLUSTER (3 nodes)
+  # ════════════════════════════════════════════════════════
+
+  redis-node-1:
+    image: redis:7.2-alpine
+    container_name: redis-node-1
+    hostname: redis-node-1
+    # ✅ FIX: 127.0.0.1 — Redis ports kabhi public nahi honge
+    ports:
+      - "127.0.0.1:7001:7001"
+      - "127.0.0.1:17001:17001"
+    command: >
+      redis-server --port 7001
+      --cluster-enabled yes
+      --cluster-config-file /data/nodes-7001.conf
+      --cluster-node-timeout 5000
+      --cluster-announce-ip redis-node-1
+      --cluster-announce-port 7001
+      --cluster-announce-bus-port 17001
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode no
+      --bind 0.0.0.0
+      --loglevel notice
+      --save ""
+    volumes:
+      - redis-1-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7001", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    networks:
+      app-network:
+        aliases:
+          - redis-node-1
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 600M
+          cpus: "0.3"
+
+  redis-node-2:
+    image: redis:7.2-alpine
+    container_name: redis-node-2
+    hostname: redis-node-2
+    ports:
+      - "127.0.0.1:7002:7002"
+      - "127.0.0.1:17002:17002"
+    command: >
+      redis-server --port 7002
+      --cluster-enabled yes
+      --cluster-config-file /data/nodes-7002.conf
+      --cluster-node-timeout 5000
+      --cluster-announce-ip redis-node-2
+      --cluster-announce-port 7002
+      --cluster-announce-bus-port 17002
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode no
+      --bind 0.0.0.0
+      --loglevel notice
+      --save ""
+    volumes:
+      - redis-2-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7002", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    networks:
+      app-network:
+        aliases:
+          - redis-node-2
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 600M
+          cpus: "0.3"
+
+  redis-node-3:
+    image: redis:7.2-alpine
+    container_name: redis-node-3
+    hostname: redis-node-3
+    ports:
+      - "127.0.0.1:7003:7003"
+      - "127.0.0.1:17003:17003"
+    command: >
+      redis-server --port 7003
+      --cluster-enabled yes
+      --cluster-config-file /data/nodes-7003.conf
+      --cluster-node-timeout 5000
+      --cluster-announce-ip redis-node-3
+      --cluster-announce-port 7003
+      --cluster-announce-bus-port 17003
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode no
+      --bind 0.0.0.0
+      --loglevel notice
+      --save ""
+    volumes:
+      - redis-3-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7003", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    networks:
+      app-network:
+        aliases:
+          - redis-node-3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 600M
+          cpus: "0.3"
+
+  redis-cluster-init:
+    image: redis:7.2-alpine
+    container_name: redis-cluster-init
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        echo "Waiting for Redis nodes..."
+        sleep 10
+        for i in 1 2 3 4 5; do
+          if redis-cli -h redis-node-1 -p 7001 ping && \
+             redis-cli -h redis-node-2 -p 7002 ping && \
+             redis-cli -h redis-node-3 -p 7003 ping; then
+            echo "All Redis nodes ready"
+            break
+          fi
+          echo "Attempt $i - waiting..."
+          sleep 5
+        done
+
+        if redis-cli -h redis-node-1 -p 7001 cluster info 2>/dev/null | grep -q "cluster_state:ok"; then
+          echo "Cluster already exists and healthy"
+          exit 0
+        fi
+
+        redis-cli --cluster create \
+          redis-node-1:7001 \
+          redis-node-2:7002 \
+          redis-node-3:7003 \
+          --cluster-replicas 0 \
+          --cluster-yes
+
+        if [ $? -eq 0 ]; then
+          echo "Redis cluster created successfully"
+          redis-cli -h redis-node-1 -p 7001 cluster info
+        else
+          echo "Cluster creation failed!"
+          exit 1
+        fi
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+      redis-node-2:
+        condition: service_healthy
+      redis-node-3:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: "no"
+
+  # ════════════════════════════════════════════════════════
+  # THRONET SERVER
+  # ════════════════════════════════════════════════════════
+
+  thronet-server:
+    # ✅ Docker Hub se image — local build nahi
+    image: ${DOCKER_IMAGE:-yourdockerhub/thronet-server}:${IMAGE_TAG:-latest}
+    container_name: thronet-server
+    # ✅ FIX: Sirf internal — Nginx ke through access hoga
+    ports:
+      - "127.0.0.1:4000:4000"
+    env_file:
+      - .env.production
+    depends_on:
+      redis-cluster-init:
+        condition: service_completed_successfully
+      mongo-init:
+        condition: service_completed_successfully
+    volumes:
+      # ✅ FIX: Sirf logs mount — source code NAHI
+      - ./logs:/app/logs
+    # ✅ FIX: command: nahi — Dockerfile CMD chalega (npm run start nahi, nodemon NAHI)
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:4000/api/v1/health || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    networks:
+      - app-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: "1.5"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ════════════════════════════════════════════════════════
+  # NGINX — SSL termination + reverse proxy
+  # ════════════════════════════════════════════════════════
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: nginx-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # ✅ Let's Encrypt certs (Hetzner par certbot se milenge)
+      - /etc/letsencrypt:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      thronet-server:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# ════════════════════════════════════════════════════════
+# NETWORKS & VOLUMES
+# ════════════════════════════════════════════════════════
+
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  mongo-1-data:
+    driver: local
+  mongo-2-data:
+    driver: local
+  mongo-3-data:
+    driver: local
+  mongo-1-config:
+    driver: local
+  mongo-2-config:
+    driver: local
+  mongo-3-config:
+    driver: local
+  redis-1-data:
+    driver: local
+  redis-2-data:
+    driver: local
+  redis-3-data:
+    driver: local

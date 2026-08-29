@@ -1,0 +1,97 @@
+{{!-- // src/templates/email/annual-identity-recheck.hbs --}}
+<html>
+  <head>
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <title>Annual Identity Verification Required</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f4f4f4;
+        margin: 0;
+        padding: 20px;
+      }
+      .container {
+        max-width: 600px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+      }
+      .header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 30px;
+        text-align: center;
+        color: white;
+      }
+      .content {
+        padding: 40px;
+      }
+      .otp-box {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px 40px;
+        border-radius: 10px;
+        display: inline-block;
+        font-size: 36px;
+        letter-spacing: 8px;
+        font-family: 'Courier New', monospace;
+        font-weight: bold;
+        margin: 20px 0;
+      }
+      .warning {
+        background: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 15px;
+        color: #856404;
+        border-radius: 4px;
+        margin: 20px 0;
+      }
+      .footer {
+        padding: 20px;
+        text-align: center;
+        color: #999;
+        font-size: 12px;
+        border-top: 1px solid #eee;
+        margin-top: 40px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class='container'>
+      <div class='header'>
+        <h1>Annual Identity Verification Required</h1>
+      </div>
+      <div class='content'>
+        <p style='font-size: 16px; color: #333;'>Hello {{userName}},</p>
+        <p style='font-size: 16px; color: #333; line-height: 1.6;'>
+          As part of our security and compliance policy, we require you to
+          re-verify your
+          <strong>{{verificationType}}</strong>
+          once every year.
+        </p>
+
+        <div style='text-align: center; margin: 40px 0;'>
+          <div class='otp-box'>{{otp}}</div>
+        </div>
+
+        <div class='warning'>
+          <p style='margin: 0; font-size: 14px;'>
+            This code expires in
+            <strong>{{expiryMinutes}} minutes</strong>
+          </p>
+        </div>
+
+        <p style='color: #666; font-size: 14px;'>
+          This is a routine security check to keep your account safe and
+          compliant.
+        </p>
+      </div>
+      <div class='footer'>
+        <p>This is an automated message. Please do not reply.</p>
+        <p>© 2025 Auth Service. All rights reserved.</p>
+      </div>
+    </div>
+  </body>
+</html>

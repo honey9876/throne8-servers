@@ -1,0 +1,36 @@
+
+{
+    
+    "compilerOptions": {
+        "ignoreDeprecations": "5.0",
+        "target": "ES2022",
+        "module": "CommonJS",
+        "lib": ["ES2022", "DOM"],
+        "moduleResolution": "node",
+        "types": ["node"],
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+        "resolveJsonModule": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "outDir": "./dist",
+        "rootDir": ".",
+        "baseUrl": ".",
+        "paths": {
+            "@/*": ["src/*"]
+        },
+        "declaration": false,
+        "declarationMap": false,
+        "sourceMap": true,
+        "forceConsistentCasingInFileNames": true,
+        "allowJs": true
+    },
+    "include": [
+        "src/**/*",
+        "server.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
+}

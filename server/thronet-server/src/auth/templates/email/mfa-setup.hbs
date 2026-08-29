@@ -1,0 +1,65 @@
+{{!-- // src/templates/email/mfa-setup.hbs --}}
+<html>
+  <head>
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <title>MFA Setup Verification</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      @media only screen and (max-width: 600px) {
+        .container {
+          width: 100% !important;
+        }
+      }
+    </style>
+  </head>
+  <body
+    style='font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f4f4f4;'
+  >
+    <div
+      style='background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;'
+    >
+      <h1 style='color: #333; margin: 0; font-size: 28px;'>🔐 MFA Setup</h1>
+    </div>
+
+    <div
+      style='background: white; padding: 40px; border-radius: 0 0 10px 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+    >
+      <p style='font-size: 16px; margin-bottom: 20px;'>Hello,</p>
+
+      <p style='font-size: 16px; margin-bottom: 30px;'>
+        Your Multi-Factor Authentication verification code is:
+      </p>
+
+      <div style='text-align: center; margin: 40px 0;'>
+        <div
+          style='background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); padding: 20px 40px; border-radius: 10px; display: inline-block;'
+        >
+          <span
+            style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #333; font-family: 'Courier New', monospace;"
+          >{{code}}</span>
+        </div>
+      </div>
+
+      <div
+        style='background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 30px 0; border-radius: 4px;'
+      >
+        <p style='margin: 0; color: #856404; font-size: 14px;'>
+          ⏱️
+          <strong>This code expires in {{expiryMinutes}} minutes</strong>
+        </p>
+      </div>
+
+      <div
+        style='margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee;'
+      >
+        <p style='font-size: 12px; color: #999; text-align: center; margin: 0;'>
+          © 2024 Auth Service. All rights reserved.
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
