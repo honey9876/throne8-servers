@@ -11,7 +11,6 @@ import {
     createQuerySchema, 
     validateRequest 
 } from '@/shared/middlewares/connections/validations.middleware';
-import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 
 const router: Router = Router();
 
@@ -19,12 +18,6 @@ const router: Router = Router();
 router.use(loggerMiddleware);
 router.use(securityMiddleware);
 router.use(metricsMiddleware);
-
-// Auth was never wired up on this router (every controller method calls
-// getUserId(req), which reads req.user.id — but nothing upstream sets
-// req.user, so every call 401'd regardless of token). Matches the pattern
-// used in follow.routes.ts.
-router.use(AuthMiddleware.authenticate as any);
 
 // Enhanced RATE_LIMITS configuration with all required properties
 const RATE_LIMITS = {
@@ -72,14 +65,9 @@ const mongoObjectId = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid MongoDB Obj
 // ==================== ZOD SCHEMAS ====================
 // Define Zod schemas for type-safe validation (recommended for new endpoints)
 
-// Schema for recording profile views.
-// NOTE: previously required viewedUserId to match a 24-char Mongo ObjectId,
-// but profileView.service.ts looks the target up via
-// User.findOne({ userId: data.viewedUserId }) — and User.userId is a uuidv4()
-// string, not a Mongo ObjectId. That mismatch meant this endpoint could never
-// succeed for a real user. Fixed to validate as a UUID instead.
+// Schema for recording profile views - FIXED for MongoDB ObjectIds
 const recordProfileViewSchema = z.object({
-    viewedUserId: z.string().uuid('viewedUserId must be a valid user UUID'),
+    viewedUserId: mongoObjectId,
     metadata: z.object({
         source: z.enum(['profile', 'search', 'suggestion', 'connection']).optional(),
         deviceType: z.enum(['mobile', 'desktop', 'tablet']).optional(),

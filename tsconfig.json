@@ -1,0 +1,39 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "lib": [
+            "ES2022"
+        ],
+        "moduleResolution": "bundler",
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+        "resolveJsonModule": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "outDir": "./dist",
+        "rootDir": "./src",
+        "baseUrl": ".",
+        "paths": {
+            "@/*": [
+                "src/*"
+            ]
+        },
+        "declaration": true,
+        "declarationMap": true,
+        "sourceMap": true,
+        "forceConsistentCasingInFileNames": true,
+        "allowJs": true
+    },
+    "ts-node": { // 🔥 YE ADD KARO (crucial for ESM)
+        "esm": true,
+        "experimentalSpecifierResolution": "node"
+    },
+    "include": [
+        "src/**/*"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
+}
