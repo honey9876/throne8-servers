@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Honor Model - User Honors & Awards Management
  * Stores awards, recognitions, achievements with verification
  * 
@@ -148,6 +148,7 @@ const VerificationSchema = new Schema<IVerification>({
     isVerified: {
         type: Boolean,
         default: false,
+        index: true,
     },
     verifiedBy: {
         type: String,
@@ -188,11 +189,13 @@ const HonorSchema = new Schema<IHonor, IHonorModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
@@ -206,6 +209,7 @@ const HonorSchema = new Schema<IHonor, IHonorModel>(
             trim: true,
             minlength: [3, 'Title must be at least 3 characters'],
             maxlength: [200, 'Title cannot exceed 200 characters'],
+            index: true,
         },
         issuer: {
             type: String,
@@ -244,6 +248,7 @@ const HonorSchema = new Schema<IHonor, IHonorModel>(
             required: [true, 'Category is required'],
             enum: ['academic', 'professional', 'sports', 'community_service', 'cultural', 'research', 'leadership', 'other'],
             lowercase: true,
+            index: true,
         },
 
         // ==================== ASSOCIATION ====================
@@ -294,6 +299,7 @@ const HonorSchema = new Schema<IHonor, IHonorModel>(
         isPinned: {
             type: Boolean,
             default: false,
+            index: true,
         },
         pinnedOrder: {
             type: Number,
@@ -318,18 +324,21 @@ const HonorSchema = new Schema<IHonor, IHonorModel>(
             type: String,
             enum: ['public', 'connections'],
             default: 'public',
+            index: true,
         },
 
         // ==================== DISPLAY ORDER ====================
         displayOrder: {
             type: Number,
             default: 0,
+            index: true,
         },
 
         // ==================== SOFT DELETE / ARCHIVE ====================
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: {
             type: Date,
@@ -338,6 +347,7 @@ const HonorSchema = new Schema<IHonor, IHonorModel>(
         isArchived: {
             type: Boolean,
             default: false,
+            index: true,
         },
         archivedAt: {
             type: Date,

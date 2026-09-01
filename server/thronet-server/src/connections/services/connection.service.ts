@@ -60,7 +60,7 @@ import logger, { LogCategory, LogCategoryType } from '@/shared/logger.util';
 import { ErrorResponse } from '@/shared/response.util';
 import environmentConfig from '@/config/environment/environment';
 import redisService from '@/services/redis.service';
-import { Connection, User, Follow } from '@/shared/models/index.models';
+import { Connection, User } from '@/shared/models/index.models';
 import { IConnection, IConnectionStats } from '@/connections/models/Connection';
 
 /**
@@ -381,22 +381,6 @@ class connectionService {
                 logger.warn('Failed to publish connection removal event', {
                     category: LogCategory.CONNECTION,
                     data: { error: kafkaError instanceof Error ? kafkaError.message : 'Unknown error' },
-                    responseTimeMs: 0
-                } as LogMetadata);
-            }
-
-            // ✅ Clean up follow records between the two users
-            try {
-                await Follow.deleteMany({
-                    $or: [
-                        { followerId: connection.fromUserId.toString(), followingId: connection.toUserId.toString() },
-                        { followerId: connection.toUserId.toString(), followingId: connection.fromUserId.toString() }
-                    ]
-                });
-            } catch (followErr) {
-                logger.warn('Failed to clean up follow on connection delete (non-critical)', {
-                    category: LogCategory.CONNECTION,
-                    data: { connectionId, error: followErr instanceof Error ? followErr.message : 'Unknown' },
                     responseTimeMs: 0
                 } as LogMetadata);
             }
@@ -1143,31 +1127,6 @@ class connectionService {
             responseTimeMs: 0
         } as LogMetadata);
         return result.data;
-    }
-
-    /**
-     * ✅ Synchronizes existing active connections into Follow collection (directional: fromUserId follows toUserId)
-     */
-    static async syncExistingConnectionsToFollows(): Promise<{ total: number; synced: number }> {
-        const activeConnections = await Connection.find({ status: 'active', isArchived: false }).lean();
-        let synced = 0;
-        for (const conn of activeConnections) {
-            const fromUserId = conn.fromUserId.toString();
-            const toUserId = conn.toUserId.toString();
-            const exists = await Follow.findOne({ followerId: fromUserId, followingId: toUserId });
-            if (!exists) {
-                await Follow.create({
-                    followerId: fromUserId,
-                    followingId: toUserId,
-                    status: 'active',
-                    notificationEnabled: true,
-                    isBlocked: false,
-                    createdAt: (conn as any).createdAt || new Date(),
-                });
-                synced++;
-            }
-        }
-        return { total: activeConnections.length, synced };
     }
 }
 

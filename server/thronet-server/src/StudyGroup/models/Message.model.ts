@@ -1,4 +1,4 @@
-﻿/**
+/**
  * src/StudyGroup/models/Message.model.ts
  * ====================================
  * MESSAGE MODEL (PRODUCTION READY)
@@ -16,19 +16,20 @@ const messageSchema = new Schema<IMessage>(
       type: String,
       ref: 'StudyGroup_Group',
       required: [true, 'Group ID is required'],
-      // ✅ REMOVED: 
+      // ✅ REMOVED: index: true
     },
     // groupId ke baad add karo
     messageId: {
       type: String,
       required: true,
       unique: true,
+      index: true,
     },
     sender: {
       type: String,
       ref: 'User',
       required: [true, 'Sender is required'],
-      // ✅ REMOVED: 
+      // ✅ REMOVED: index: true
     },
     content: {
       type: String,
@@ -75,7 +76,7 @@ const messageSchema = new Schema<IMessage>(
     isPinned: {
       type: Boolean,
       default: false,
-      // ✅ REMOVED: 
+      // ✅ REMOVED: index: true
     },
     isEdited: {
       type: Boolean,
@@ -96,7 +97,7 @@ const messageSchema = new Schema<IMessage>(
     isDeleted: {
       type: Boolean,
       default: false,
-      // ✅ REMOVED: 
+      // ✅ REMOVED: index: true
     },
     deletedAt: {
       type: Date,

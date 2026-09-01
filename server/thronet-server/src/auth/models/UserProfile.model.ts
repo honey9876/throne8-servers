@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import validator from 'validator';
 import sharp from 'sharp';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
@@ -95,6 +95,7 @@ export interface IUserProfile extends Document {
     metadata: IMetadata;
     createdAt: Date;
     updatedAt: Date;
+
     publicProfile: any;
     uploadAvatar(imageBuffer: Buffer, mimetype: string): Promise<IAvatar>;
     updateStats(field: string, increment?: number): Promise<boolean>;
@@ -115,19 +116,19 @@ const userProfileSchema = new Schema<IUserProfile, IUserProfileModel>(
         userId: {
             type: String,
             required: true,
-            unique: true
+            unique: true,
+            // index: true,
         },
         username: {
             type: String,
             required: true,
             unique: true,
-            // ✅ FIX:  HATAYA
-            // unique: true apne aap index banata hai — dono saath DUPLICATE tha
             lowercase: true,
             trim: true,
             minlength: 3,
             maxlength: 30,
             match: [/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores'],
+            index: true,
         },
         displayName: {
             type: String,
@@ -192,7 +193,7 @@ const userProfileSchema = new Schema<IUserProfile, IUserProfileModel>(
             posts: { type: Number, default: 0, min: 0 },
         },
         flags: {
-            isActive: { type: Boolean, default: true },
+            isActive: { type: Boolean, default: true, index: true },
             isSuspended: { type: Boolean, default: false },
         },
         metadata: {
@@ -210,13 +211,10 @@ const userProfileSchema = new Schema<IUserProfile, IUserProfileModel>(
     }
 );
 
-// ==================== INDEXES ====================
-// ✅ Sirf compound indexes yahan — single field indexes upar unique:true se handle hain
 userProfileSchema.index({ username: 1, 'flags.isActive': 1 });
 userProfileSchema.index({ 'metadata.searchableText': 'text' });
 userProfileSchema.index({ 'stats.followers': -1, 'flags.isActive': 1 });
 
-// ==================== VIRTUALS ====================
 userProfileSchema.virtual('publicProfile').get(function (this: IUserProfile) {
     const profile: any = {
         userId: this.userId,
@@ -232,30 +230,45 @@ userProfileSchema.virtual('publicProfile').get(function (this: IUserProfile) {
     return profile;
 });
 
-// ==================== STATIC METHODS ====================
 userProfileSchema.statics.findByUserIdCached = async function (userId: string): Promise<IUserProfile | null> {
     if (!userId) return null;
+
     try {
         const cacheKey = `user_profile_${userId}`;
         const cachedProfile = userProfileCache.get<IUserProfile>(cacheKey);
-        if (cachedProfile) return cachedProfile;
+        if (cachedProfile) {
+            logger.debug('User profile cache hit', { userId });
+            return cachedProfile;
+        }
 
+        logger.debug('User profile cache miss', { userId });
         const userProfile = await this.findOne({ userId }).select('-__v').lean();
-        if (userProfile) userProfileCache.set(cacheKey, userProfile);
+
+        if (userProfile) {
+            userProfileCache.set(cacheKey, userProfile);
+            logger.debug('User profile cached', { userId });
+        }
+
         return userProfile as IUserProfile | null;
-    } catch (error: any) {
-        logger.error('Error fetching user profile', { userId, error: (error as Error).message });
+    } catch(error : any) {
+        logger.error('Error fetching user profile', {
+            userId,
+            error: (error as Error).message,
+        });
         return null;
     }
 };
 
 userProfileSchema.statics.clearUserCache = function (userId: string): void {
     if (!userId) return;
-    userProfileCache.del(`user_profile_${userId}`);
+    const cacheKey = `user_profile_${userId}`;
+    userProfileCache.del(cacheKey);
+    logger.debug('User profile cache cleared', { userId });
 };
 
 userProfileSchema.statics.clearAllCache = function (): void {
     userProfileCache.flushAll();
+    logger.info('All user profile cache cleared');
 };
 
 userProfileSchema.statics.createProfile = async function (data: Partial<IUserProfile>): Promise<IUserProfile> {
@@ -268,12 +281,97 @@ userProfileSchema.statics.createProfile = async function (data: Partial<IUserPro
             profileCompleteness: this.calculateCompleteness(data),
             searchableText: this.generateSearchableText(data),
         };
+
         const profile = new this(data);
         await profile.save();
-        userEmitter.emit('profile:created', { userId: profile.userId, username: profile.username });
+
+        userEmitter.emit('profile:created', {
+            userId: profile.userId,
+            username: profile.username,
+        });
+
         return profile;
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Profile creation failed', { error: (error as Error).message });
+        throw error;
+    }
+};
+
+userProfileSchema.methods.uploadAvatar = async function (imageBuffer: Buffer, mimetype: string): Promise<IAvatar> {
+    try {
+        const userId = this.userId;
+        const timestamp = Date.now();
+        const bucket = process.env['AWS_S3_BUCKET'] || 'default-bucket';
+        const cdnDomain = process.env['AWS_CDN_DOMAIN'] || 's3.amazonaws.com';
+        const sizes = [
+            { name: 'small', width: 64 },
+            { name: 'medium', width: 128 },
+            { name: 'large', width: 256 },
+            { name: 'original', width: 512 },
+        ];
+
+        const uploads = await Promise.all(
+            sizes.map(async ({ name, width }) => {
+                const processed = await sharp(imageBuffer).resize(width, width, { fit: 'cover' }).jpeg({ quality: 85 }).toBuffer();
+
+                const key = `avatars/${userId}/${timestamp}_${name}.jpg`;
+                await s3Client.send(
+                    new PutObjectCommand({
+                        Bucket: bucket,
+                        Key: key,
+                        Body: processed,
+                        ContentType: 'image/jpeg',
+                        CacheControl: 'max-age=31536000',
+                        Metadata: { userId, uploadedAt: new Date().toISOString() },
+                    })
+                );
+
+                return { name, url: `https://${cdnDomain}/${key}` };
+            })
+        );
+
+        this.avatar = {
+            url: uploads.find((u) => u.name === 'original')?.url,
+            thumbnails: {
+                small: uploads.find((u) => u.name === 'small')?.url,
+                medium: uploads.find((u) => u.name === 'medium')?.url,
+                large: uploads.find((u) => u.name === 'large')?.url,
+            },
+            uploadedAt: new Date(),
+            size: imageBuffer.length,
+            format: 'jpeg',
+        };
+
+        await this.save();
+        (this.constructor as IUserProfileModel).clearUserCache(userId);
+
+        userEmitter.emit('profile:avatar_updated', {
+            userId,
+            avatarUrl: this.avatar.url,
+        });
+
+        return this.avatar;
+    } catch(error : any) {
+        logger.error('Avatar upload failed', { error: (error as Error).message });
+        throw error;
+    }
+};
+
+userProfileSchema.methods.updateStats = async function (field: string, increment: number = 1): Promise<boolean> {
+    try {
+        await (this.constructor as IUserProfileModel).updateOne({ _id: this._id }, { $inc: { [`stats.${field}`]: increment } });
+
+        (this.constructor as IUserProfileModel).clearUserCache(this.userId);
+
+        userEmitter.emit('profile:stats_updated', {
+            userId: this.userId,
+            field,
+            value: increment,
+        });
+
+        return true;
+    } catch(error : any) {
+        logger.error('Stats update failed', { error: (error as Error).message });
         throw error;
     }
 };
@@ -300,6 +398,7 @@ userProfileSchema.statics.generateUniqueUsername = async function (base: string)
     const cleanBase = base.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 20);
     let username = cleanBase;
     let suffix = 0;
+
     while (await this.exists({ username })) {
         username = `${cleanBase}${suffix || Math.floor(Math.random() * 10000)}`;
         suffix++;
@@ -307,79 +406,6 @@ userProfileSchema.statics.generateUniqueUsername = async function (base: string)
     return username;
 };
 
-// ==================== INSTANCE METHODS ====================
-userProfileSchema.methods.uploadAvatar = async function (imageBuffer: Buffer, mimetype: string): Promise<IAvatar> {
-    try {
-        const userId = this.userId;
-        const timestamp = Date.now();
-        const bucket = process.env['AWS_S3_BUCKET'] || 'default-bucket';
-        const cdnDomain = process.env['AWS_CDN_DOMAIN'] || 's3.amazonaws.com';
-        const sizes = [
-            { name: 'small', width: 64 },
-            { name: 'medium', width: 128 },
-            { name: 'large', width: 256 },
-            { name: 'original', width: 512 },
-        ];
-
-        const uploads = await Promise.all(
-            sizes.map(async ({ name, width }) => {
-                const processed = await sharp(imageBuffer)
-                    .resize(width, width, { fit: 'cover' })
-                    .jpeg({ quality: 85 })
-                    .toBuffer();
-                const key = `avatars/${userId}/${timestamp}_${name}.jpg`;
-                await s3Client.send(
-                    new PutObjectCommand({
-                        Bucket: bucket,
-                        Key: key,
-                        Body: processed,
-                        ContentType: 'image/jpeg',
-                        CacheControl: 'max-age=31536000',
-                        Metadata: { userId, uploadedAt: new Date().toISOString() },
-                    })
-                );
-                return { name, url: `https://${cdnDomain}/${key}` };
-            })
-        );
-
-        this.avatar = {
-            url: uploads.find((u) => u.name === 'original')?.url,
-            thumbnails: {
-                small: uploads.find((u) => u.name === 'small')?.url,
-                medium: uploads.find((u) => u.name === 'medium')?.url,
-                large: uploads.find((u) => u.name === 'large')?.url,
-            },
-            uploadedAt: new Date(),
-            size: imageBuffer.length,
-            format: 'jpeg',
-        };
-
-        await this.save();
-        (this.constructor as IUserProfileModel).clearUserCache(userId);
-        userEmitter.emit('profile:avatar_updated', { userId, avatarUrl: this.avatar.url });
-        return this.avatar;
-    } catch (error: any) {
-        logger.error('Avatar upload failed', { error: (error as Error).message });
-        throw error;
-    }
-};
-
-userProfileSchema.methods.updateStats = async function (field: string, increment: number = 1): Promise<boolean> {
-    try {
-        await (this.constructor as IUserProfileModel).updateOne(
-            { _id: this._id },
-            { $inc: { [`stats.${field}`]: increment } }
-        );
-        (this.constructor as IUserProfileModel).clearUserCache(this.userId);
-        userEmitter.emit('profile:stats_updated', { userId: this.userId, field, value: increment });
-        return true;
-    } catch (error: any) {
-        logger.error('Stats update failed', { error: (error as Error).message });
-        throw error;
-    }
-};
-
-// ==================== PRE-SAVE HOOK ====================
 userProfileSchema.pre('save', async function (next) {
     if (this.isModified()) {
         this.metadata.lastProfileUpdate = new Date();
@@ -390,6 +416,5 @@ userProfileSchema.pre('save', async function (next) {
     next();
 });
 
-// ==================== EXPORT ====================
 const UserProfile = mongoose.model<IUserProfile, IUserProfileModel>('UserProfile', userProfileSchema);
 export default UserProfile;

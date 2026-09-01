@@ -1,4 +1,4 @@
-// src/connections/models/Follow.ts
+// src/models/mongodb/Follow.ts
 
 import { Schema, model, Document, Types } from 'mongoose';
 // import { FollowStatus } from '../../types/follow.type';
@@ -20,9 +20,10 @@ const followSchema = new Schema<IFollow>({
     type: String, 
     required: true,
     validate: {
-      // validator: (v: string) => Types.ObjectId.isValid(v),
-      validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
-
+      validator: (v: string) => {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        return Types.ObjectId.isValid(v) || uuidRegex.test(v);
+      },
       message: 'Invalid follower ID'
     }
   },
@@ -30,9 +31,10 @@ const followSchema = new Schema<IFollow>({
     type: String, 
     required: true,
     validate: {
-      // validator: (v: string) => Types.ObjectId.isValid(v),
-      validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
-
+      validator: (v: string) => {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        return Types.ObjectId.isValid(v) || uuidRegex.test(v);
+      },
       message: 'Invalid following ID'
     }
   },
@@ -71,22 +73,22 @@ const followSchema = new Schema<IFollow>({
 // Primary compound index - prevents duplicates and optimizes lookups
 followSchema.index({ followerId: 1, followingId: 1 }, { 
   unique: true,
-    
+  background: true 
 });
 
 // Core performance indexes
-followSchema.index({ followerId: 1, status: 1, createdAt: -1 }, {   });
-followSchema.index({ followingId: 1, status: 1, createdAt: -1 }, {   });
+followSchema.index({ followerId: 1, status: 1, createdAt: -1 }, { background: true });
+followSchema.index({ followingId: 1, status: 1, createdAt: -1 }, { background: true });
 
 // Status-based queries (most common)
-followSchema.index({ status: 1, createdAt: -1 }, {   });
+followSchema.index({ status: 1, createdAt: -1 }, { background: true });
 
 // Block functionality
-followSchema.index({ followerId: 1, isBlocked: 1 }, {   });
-followSchema.index({ followingId: 1, isBlocked: 1 }, {   });
+followSchema.index({ followerId: 1, isBlocked: 1 }, { background: true });
+followSchema.index({ followingId: 1, isBlocked: 1 }, { background: true });
 
 // Notification queries
-followSchema.index({ followingId: 1, notificationEnabled: 1, status: 1 }, {   });
+followSchema.index({ followingId: 1, notificationEnabled: 1, status: 1 }, { background: true });
 
 // PERFORMANCE-OPTIMIZED MIDDLEWARE
 followSchema.pre('save', function(next) {

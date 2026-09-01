@@ -1,7 +1,29 @@
-﻿import headlineEmitter from '@/shared/events/emitters/headline.emitter';
+/**
+ * Headline.model.ts
+ * Production-Level Headline Model for 1M+ Users
+ * Supports multiple headline types with validation
+ * 
+ * Features:
+ * - Multiple headline types (login_success, dashboard, notification, etc.)
+ * - User-specific and global headlines
+ * - Priority levels (LOW, MEDIUM, HIGH, CRITICAL)
+ * - Status tracking (ACTIVE, INACTIVE, SCHEDULED, EXPIRED)
+ * - Scheduled publishing with timezone support
+ * - Expiry management
+ * - Audience targeting
+ * - Comprehensive validation
+ * - Sharding support
+ * 
+ * @module models/Headline.model
+ * @version 1.0.0
+ */
+
+import headlineEmitter from '@/shared/events/emitters/headline.emitter';
 import { LoggerUtil } from '@/shared/logger.util';
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
+// import { LoggerUtil } from '../utils/logger.util';
+// import headlineEmitter from '../events/emitters/headline.emitter';
 
 const logger = LoggerUtil;
 
@@ -12,14 +34,20 @@ export interface IHeadline extends Document {
     type: 'login_success' | 'dashboard' | 'notification' | 'alert' | 'announcement' | 'welcome';
     title: string;
     message: string;
+
+    // Display settings
     priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
     status: 'ACTIVE' | 'INACTIVE' | 'SCHEDULED' | 'EXPIRED';
+
+    // Targeting
     audience: {
         type: 'ALL' | 'PRIVATE' | 'SPECIFIC_USERS' | 'ROLE_BASED' | 'LOCATION_BASED';
         userIds?: string[];
         roles?: string[];
         locations?: string[];
     };
+
+    // Scheduling
     scheduling: {
         publishAt?: Date;
         expiresAt?: Date;
@@ -27,6 +55,8 @@ export interface IHeadline extends Document {
         isRecurring: boolean;
         recurringPattern?: 'DAILY' | 'WEEKLY' | 'MONTHLY';
     };
+
+    // Styling
     styling: {
         backgroundColor?: string;
         textColor?: string;
@@ -35,12 +65,16 @@ export interface IHeadline extends Document {
         borderColor?: string;
         fontWeight?: 'normal' | 'bold' | 'semibold';
     };
+
+    // Actions
     actions?: {
         label: string;
         type: 'LINK' | 'BUTTON' | 'DISMISS';
         url?: string;
         action?: string;
     }[];
+
+    // Metadata
     metadata: {
         createdBy: string;
         createdByName: string;
@@ -51,6 +85,8 @@ export interface IHeadline extends Document {
         clickCount: number;
         dismissCount: number;
     };
+
+    // Analytics
     analytics: {
         impressions: number;
         clicks: number;
@@ -58,6 +94,8 @@ export interface IHeadline extends Document {
         averageViewTime: number;
         lastViewedAt?: Date;
     };
+
+    // Flags
     flags: {
         isDismissible: boolean;
         isSticky: boolean;
@@ -66,11 +104,16 @@ export interface IHeadline extends Document {
         deletedAt?: Date;
         deletedBy?: string;
     };
+
     createdAt: Date;
     updatedAt: Date;
+
+    // Virtuals
     isActive: boolean;
     isExpired: boolean;
     isScheduled: boolean;
+
+    // Methods
     softDelete(deletedBy: string): Promise<IHeadline>;
     incrementView(): Promise<void>;
     incrementClick(): Promise<void>;
@@ -79,6 +122,7 @@ export interface IHeadline extends Document {
     expire(): Promise<IHeadline>;
 }
 
+// Static methods interface
 export interface IHeadlineModel extends Model<IHeadline> {
     findActiveHeadlines(filters?: {
         type?: string;
@@ -105,7 +149,9 @@ const HeadlineSchema = new Schema<IHeadline, IHeadlineModel>(
         },
         type: {
             type: String,
+            // required: true,
             enum: ['login_success', 'dashboard', 'notification', 'alert', 'announcement', 'welcome'],
+            index: true,
         },
         title: {
             type: String,
@@ -125,11 +171,13 @@ const HeadlineSchema = new Schema<IHeadline, IHeadlineModel>(
             type: String,
             enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
             default: 'MEDIUM',
+            index: true,
         },
         status: {
             type: String,
             enum: ['ACTIVE', 'INACTIVE', 'SCHEDULED', 'EXPIRED'],
             default: 'ACTIVE',
+            index: true,
         },
         audience: {
             type: {
@@ -140,22 +188,27 @@ const HeadlineSchema = new Schema<IHeadline, IHeadlineModel>(
             userIds: {
                 type: [String],
                 default: [],
+                index: true,
             },
             roles: {
                 type: [String],
                 default: [],
+                index: true,
             },
             locations: {
                 type: [String],
                 default: [],
+                index: true,
             },
         },
         scheduling: {
             publishAt: {
                 type: Date,
+                index: true,
             },
             expiresAt: {
                 type: Date,
+                index: true,
             },
             timezone: {
                 type: String,
@@ -212,6 +265,7 @@ const HeadlineSchema = new Schema<IHeadline, IHeadlineModel>(
             createdBy: {
                 type: String,
                 required: true,
+                index: true,
             },
             createdByName: {
                 type: String,
@@ -237,17 +291,42 @@ const HeadlineSchema = new Schema<IHeadline, IHeadlineModel>(
             },
         },
         analytics: {
-            impressions: { type: Number, default: 0 },
-            clicks: { type: Number, default: 0 },
-            dismissals: { type: Number, default: 0 },
-            averageViewTime: { type: Number, default: 0 },
+            impressions: {
+                type: Number,
+                default: 0,
+            },
+            clicks: {
+                type: Number,
+                default: 0,
+            },
+            dismissals: {
+                type: Number,
+                default: 0,
+            },
+            averageViewTime: {
+                type: Number,
+                default: 0,
+            },
             lastViewedAt: Date,
         },
         flags: {
-            isDismissible: { type: Boolean, default: true },
-            isSticky: { type: Boolean, default: false },
-            requiresAction: { type: Boolean, default: false },
-            isDeleted: { type: Boolean, default: false },
+            isDismissible: {
+                type: Boolean,
+                default: true,
+            },
+            isSticky: {
+                type: Boolean,
+                default: false,
+            },
+            requiresAction: {
+                type: Boolean,
+                default: false,
+            },
+            isDeleted: {
+                type: Boolean,
+                default: false,
+                index: true,
+            },
             deletedAt: Date,
             deletedBy: String,
         },
@@ -263,15 +342,20 @@ const HeadlineSchema = new Schema<IHeadline, IHeadlineModel>(
                 return ret;
             },
         },
-        toObject: { virtuals: true },
+        toObject: {
+            virtuals: true,
+        },
     }
 );
 
 // ==================== INDEXES ====================
+
+// Removed duplicate index: HeadlineSchema.index({ headlineId: 1 });
 HeadlineSchema.index({ 'audience.type': 1 });
 HeadlineSchema.index({ createdAt: -1 });
 HeadlineSchema.index({ 'metadata.createdBy': 1, createdAt: -1 });
 
+// Compound indexes for common queries
 HeadlineSchema.index({
     type: 1,
     status: 1,
@@ -305,17 +389,22 @@ HeadlineSchema.virtual('isScheduled').get(function (this: IHeadline) {
 
 HeadlineSchema.pre('save', async function (next) {
     try {
+        // Auto-update status based on scheduling
         if (this.scheduling.publishAt && new Date() < this.scheduling.publishAt) {
             this.status = 'SCHEDULED';
         }
+
         if (this.scheduling.expiresAt && new Date() > this.scheduling.expiresAt) {
             this.status = 'EXPIRED';
         }
+
+        // Increment version on update
         if (this.isModified() && !this.isNew) {
             this.metadata.version += 1;
         }
+
         next();
-    } catch (error: any) {
+    } catch (error : any) {
         next(error as Error);
     }
 });
@@ -342,20 +431,39 @@ HeadlineSchema.statics.findActiveHeadlines = async function (filters = {}): Prom
         ],
     };
 
-    if (type) query.type = type;
+    // Type filter
+    if (type) {
+        query.type = type;
+    }
 
+    // Audience targeting
     if (userId || userRole || userLocation) {
-        query.$or = [{ 'audience.type': 'ALL' }];
-        if (userId) query.$or.push({ 'audience.userIds': userId });
-        if (userRole) query.$or.push({ 'audience.roles': userRole });
-        if (userLocation) query.$or.push({ 'audience.locations': userLocation });
+        query.$or = [
+            { 'audience.type': 'ALL' },
+        ];
+
+        if (userId) {
+            query.$or.push({ 'audience.userIds': userId });
+        }
+
+        if (userRole) {
+            query.$or.push({ 'audience.roles': userRole });
+        }
+
+        if (userLocation) {
+            query.$or.push({ 'audience.locations': userLocation });
+        }
     }
 
     const headlines = await this.find(query)
         .sort({ priority: -1, createdAt: -1 })
         .lean() as unknown as IHeadline[];
 
-    logger.debug('Active headlines fetched', { count: headlines.length, filters });
+    logger.debug('Active headlines fetched', {
+        count: headlines.length,
+        filters,
+    });
+
     return headlines;
 };
 
@@ -364,21 +472,39 @@ HeadlineSchema.statics.findByHeadlineId = async function (headlineId: string): P
 };
 
 HeadlineSchema.statics.getHeadlinesByType = async function (type: string): Promise<IHeadline[]> {
-    return this.find({ type, status: 'ACTIVE', 'flags.isDeleted': false }).sort({ priority: -1, createdAt: -1 });
+    return this.find({
+        type,
+        status: 'ACTIVE',
+        'flags.isDeleted': false,
+    }).sort({ priority: -1, createdAt: -1 });
 };
 
 HeadlineSchema.statics.expireOldHeadlines = async function (): Promise<number> {
     const result = await this.updateMany(
-        { status: 'ACTIVE', 'scheduling.expiresAt': { $lte: new Date() }, 'flags.isDeleted': false },
-        { $set: { status: 'EXPIRED' } }
+        {
+            status: 'ACTIVE',
+            'scheduling.expiresAt': { $lte: new Date() },
+            'flags.isDeleted': false,
+        },
+        {
+            $set: { status: 'EXPIRED' },
+        }
     );
-    logger.info('Old headlines expired', { count: result.modifiedCount });
+
+    logger.info('Old headlines expired', {
+        count: result.modifiedCount,
+    });
+
     return result.modifiedCount;
 };
 
 HeadlineSchema.statics.getAnalytics = async function (headlineId: string): Promise<any> {
     const headline = await this.findOne({ headlineId });
-    if (!headline) throw new Error('Headline not found');
+
+    if (!headline) {
+        throw new Error('Headline not found');
+    }
+
     return {
         headlineId: headline.headlineId,
         type: headline.type,
@@ -407,9 +533,20 @@ HeadlineSchema.methods.softDelete = async function (this: IHeadline, deletedBy: 
     this.flags.deletedAt = new Date();
     this.flags.deletedBy = deletedBy;
     this.status = 'INACTIVE';
+
     await this.save();
-    headlineEmitter.emit('headline:deleted', { headlineId: this.headlineId, deletedBy, timestamp: new Date() });
-    logger.info('Headline soft deleted', { headlineId: this.headlineId, deletedBy });
+
+    headlineEmitter.emit('headline:deleted', {
+        headlineId: this.headlineId,
+        deletedBy,
+        timestamp: new Date(),
+    });
+
+    logger.info('Headline soft deleted', {
+        headlineId: this.headlineId,
+        deletedBy,
+    });
+
     return this;
 };
 
@@ -417,36 +554,57 @@ HeadlineSchema.methods.incrementView = async function (this: IHeadline): Promise
     this.metadata.viewCount += 1;
     this.analytics.impressions += 1;
     this.analytics.lastViewedAt = new Date();
+
     await this.save();
 };
 
 HeadlineSchema.methods.incrementClick = async function (this: IHeadline): Promise<void> {
     this.metadata.clickCount += 1;
     this.analytics.clicks += 1;
+
     await this.save();
 };
 
 HeadlineSchema.methods.incrementDismiss = async function (this: IHeadline): Promise<void> {
     this.metadata.dismissCount += 1;
     this.analytics.dismissals += 1;
+
     await this.save();
 };
 
 HeadlineSchema.methods.publish = async function (this: IHeadline): Promise<IHeadline> {
     this.status = 'ACTIVE';
     this.scheduling.publishAt = new Date();
+
     await this.save();
-    headlineEmitter.emit('headline:published', { headlineId: this.headlineId, timestamp: new Date() });
-    logger.info('Headline published', { headlineId: this.headlineId });
+
+    headlineEmitter.emit('headline:published', {
+        headlineId: this.headlineId,
+        timestamp: new Date(),
+    });
+
+    logger.info('Headline published', {
+        headlineId: this.headlineId,
+    });
+
     return this;
 };
 
 HeadlineSchema.methods.expire = async function (this: IHeadline): Promise<IHeadline> {
     this.status = 'EXPIRED';
     this.scheduling.expiresAt = new Date();
+
     await this.save();
-    headlineEmitter.emit('headline:expired', { headlineId: this.headlineId, timestamp: new Date() });
-    logger.info('Headline expired', { headlineId: this.headlineId });
+
+    headlineEmitter.emit('headline:expired', {
+        headlineId: this.headlineId,
+        timestamp: new Date(),
+    });
+
+    logger.info('Headline expired', {
+        headlineId: this.headlineId,
+    });
+
     return this;
 };
 

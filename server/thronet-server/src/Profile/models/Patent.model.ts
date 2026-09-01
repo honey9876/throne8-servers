@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Patent Model - User Patents Management
  * Stores patent information, inventors, status tracking
  * 
@@ -148,11 +148,13 @@ const PatentSchema = new Schema<IPatent, IPatentModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
@@ -166,6 +168,7 @@ const PatentSchema = new Schema<IPatent, IPatentModel>(
             trim: true,
             minlength: [5, 'Title must be at least 5 characters'],
             maxlength: [500, 'Title cannot exceed 500 characters'],
+            index: true,
         },
         patentNumber: {
             type: String,
@@ -174,6 +177,7 @@ const PatentSchema = new Schema<IPatent, IPatentModel>(
             uppercase: true,
             minlength: [3, 'Patent number must be at least 3 characters'],
             maxlength: [50, 'Patent number cannot exceed 50 characters'],
+            index: true,
         },
         patentOffice: {
             type: String,
@@ -226,6 +230,7 @@ const PatentSchema = new Schema<IPatent, IPatentModel>(
             enum: ['pending', 'granted', 'expired', 'abandoned'],
             lowercase: true,
             default: 'pending',
+            index: true,
         },
 
         // ==================== DESCRIPTION ====================
@@ -264,12 +269,14 @@ const PatentSchema = new Schema<IPatent, IPatentModel>(
         displayOrder: {
             type: Number,
             default: 0,
+            index: true,
         },
 
         // ==================== SOFT DELETE / ARCHIVE ====================
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: {
             type: Date,
@@ -278,6 +285,7 @@ const PatentSchema = new Schema<IPatent, IPatentModel>(
         isArchived: {
             type: Boolean,
             default: false,
+            index: true,
         },
         archivedAt: {
             type: Date,

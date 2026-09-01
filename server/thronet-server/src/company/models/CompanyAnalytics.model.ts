@@ -1,4 +1,4 @@
-﻿import mongoose, { Model, Schema, Document } from 'mongoose';
+import mongoose, { Model, Schema, Document } from 'mongoose';
 
 const CompanyAnalyticsSchema = new Schema(
   {
@@ -6,10 +6,12 @@ const CompanyAnalyticsSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'Company',
       required: true,
+      index: true,
     },
     date: {
       type: Date,
       required: true,
+      index: true,
     },
     metrics: {
       pageViews: {
@@ -149,7 +151,7 @@ export interface ICompanyAnalyticsDocument extends Document {
   }>;
   createdAt: Date;
   updatedAt: Date;
-
+  
   // Instance methods
   incrementMetric(metricPath: string, value?: number): Promise<ICompanyAnalyticsDocument>;
   getTotalEngagement(): number;
@@ -194,18 +196,18 @@ CompanyAnalyticsSchema.methods.incrementMetric = async function (
   const updateQuery: Record<string, number> = {};
   updateQuery[metricPath] = value;
 
-  await (mongoose.models['CompanyAnalytics'] as IAnalyticsModel).updateOne(
+  await mongoose.model('Analytics').updateOne(
     { _id: this._id },
     { $inc: updateQuery }
   );
 
   // ✅ FIXED: Proper type handling without eslint error
   const pathParts = metricPath.split('.');
-
+  
   interface NestedObject {
     [key: string]: NestedObject | number;
   }
-
+  
   let currentObj: NestedObject = this as unknown as NestedObject;
   for (let i = 0; i < pathParts.length - 1; i++) {
     currentObj = currentObj[pathParts[i]] as NestedObject;
@@ -794,10 +796,9 @@ CompanyAnalyticsSchema.set('toObject', { virtuals: true });
 // =====================================================
 // CREATE AND EXPORT MODEL
 // =====================================================
-const CompanyAnalytics = (mongoose.models['CompanyAnalytics'] as IAnalyticsModel) ||
-  mongoose.model<ICompanyAnalyticsDocument, IAnalyticsModel>(
-    'CompanyAnalytics',
-    CompanyAnalyticsSchema
-  );
-  
+const CompanyAnalytics = mongoose.model<ICompanyAnalyticsDocument, IAnalyticsModel>(
+  'CompanyAnalytics',
+  CompanyAnalyticsSchema
+);
+
 export default CompanyAnalytics;

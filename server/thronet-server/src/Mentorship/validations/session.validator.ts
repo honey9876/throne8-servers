@@ -38,7 +38,7 @@ class SessionValidator {
     duration: Joi.number().min(5).max(480).required(), // minutes
 
     // Schedule — mentor kis time available hai
-    scheduledAt: Joi.date().iso().greater('now').required(),
+    scheduledAt: Joi.date().iso().required(),
     timezone: Joi.string().required(),
 
     // Follow-up settings
@@ -51,9 +51,9 @@ class SessionValidator {
   });
 
   bookSession = Joi.object({
-    sessionId: Joi.string().required(),          // ✅ NEW — kis session ko book karna hai
+    sessionId: Joi.string().required(),
     mentorId: Joi.string().required(),
-    availabilityId: Joi.string().required(),
+    availabilityId: Joi.string().allow('').optional(),  // empty for fixed-schedule services
     slotTime: Joi.string().required(),
     scheduledAt: Joi.date().iso().required(),
     timezone: Joi.string().required(),
@@ -69,52 +69,31 @@ class SessionValidator {
   /**
    * Validate session update
    */
-
-  /**
- * Validation Update
- *
- * Replaced the previous permissive `.unknown(true)` approach with an explicit
- * optional schema for all supported update fields.
- *
- * Benefits:
- * - Maintains strict input validation.
- * - Prevents unexpected or arbitrary payload properties.
- * - Preserves backward compatibility for partial updates.
- * - Supports both JSON and multipart/form-data requests (provided
- *   parseFormDataFields executes before validation).
- *
- * Note:
- * Any new updatable field must be explicitly added here to keep the
- * validation layer secure and predictable.
- */
-
   updateSession = Joi.object({
-    sessionType: Joi.string().valid(...Object.values(SessionType)).optional(),
-    title: Joi.string().min(5).max(200).optional().messages({
-      'string.min': 'Title must be at least 5 characters',
-      'string.max': 'Title cannot exceed 200 characters',
-    }),
-    description: Joi.string().max(1000).optional().allow('').messages({
-      'string.max': 'Description cannot exceed 1000 characters',
-    }),
-    pricing: Joi.object({
-      basePrice: Joi.number().min(0).required(),
-      platformFee: Joi.number().min(0).default(0),
-      totalAmount: Joi.number().min(0).required(),
-      currency: Joi.string().default('INR'),
-    }).optional(),
-    paymentMethod: Joi.string().valid(...Object.values(PaymentMethod)).optional(),
-    duration: Joi.number().min(5).max(480).optional(),
-    scheduledAt: Joi.date().iso().optional(),
-    timezone: Joi.string().optional(),
-    followUp: Joi.object({
-      allowed: Joi.boolean().default(false),
-      periodDays: Joi.number().min(0).max(30).default(0),
-    }).optional(),
-    bufferTimeMinutes: Joi.number().min(0).max(60).optional(),
-    notes: Joi.string().max(2000).optional().allow('').messages({
-      'string.max': 'Notes cannot exceed 2000 characters',
-    }),
+    title: Joi.string()
+      .min(5)
+      .max(200)
+      .optional()
+      .messages({
+        'string.min': 'Title must be at least 5 characters',
+        'string.max': 'Title cannot exceed 200 characters',
+      }),
+
+    description: Joi.string()
+      .max(1000)
+      .optional()
+      .allow('')
+      .messages({
+        'string.max': 'Description cannot exceed 1000 characters',
+      }),
+
+    notes: Joi.string()
+      .max(2000)
+      .optional()
+      .allow('')
+      .messages({
+        'string.max': 'Notes cannot exceed 2000 characters',
+      }),
   });
 
   /**
@@ -159,9 +138,6 @@ class SessionValidator {
         'string.max': 'Reason cannot exceed 500 characters',
         'any.required': 'Cancellation reason is required',
       }),
-    bookingId: Joi.string().required().messages({
-      'any.required': 'bookingId is required to cancel a booking',
-    }),
   });
 
   /**
@@ -170,27 +146,21 @@ class SessionValidator {
   rescheduleSession = Joi.object({
     newScheduledAt: Joi.date()
       .iso()
-      .greater('now')
       .required()
       .messages({
         'date.base': 'Invalid scheduled date',
-        'date.greater': 'New scheduled time must be in the future',
         'any.required': 'New scheduled time is required',
       }),
 
     reason: Joi.string()
-      .min(3)
+      .min(10)
       .max(500)
       .optional()
       .allow('')
       .messages({
-        'string.min': 'Reason must be at least 3 characters',
+        'string.min': 'Reason must be at least 10 characters',
         'string.max': 'Reason cannot exceed 500 characters',
       }),
-      
-    bookingId: Joi.string().required().messages({
-      'any.required': 'bookingId is required to reschedule a booking',
-    }),
   });
 
   /**

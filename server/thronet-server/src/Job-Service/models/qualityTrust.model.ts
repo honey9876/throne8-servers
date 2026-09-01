@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { schemaOperationLatency, schemaOperationErrors } from '@/shared/metrics';
 // import { constants.CACHE_TTLS '../constants/cache';
@@ -138,6 +138,7 @@ const qualityTrustSchema = new Schema<IQualityTrust>(
         message: 'Invalid verification type',
       },
       required: [true, 'Verification type is required'],
+      index: true,
     },
     companyId: {
       type: String,
@@ -292,6 +293,7 @@ const qualityTrustSchema = new Schema<IQualityTrust>(
         message: 'Invalid status',
       },
       default: VerificationStatus.PENDING,
+      index: true,
     },
     verifiedAt: {
       type: Date,
@@ -312,6 +314,7 @@ const qualityTrustSchema = new Schema<IQualityTrust>(
     schemaVersion: {
       type: Number,
       default: 2,
+      index: true,
     },
     metadata: {
       source: { type: String, maxlength: 50 },

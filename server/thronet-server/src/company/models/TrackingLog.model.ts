@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITrackingLog extends Document {
     companyId: mongoose.Types.ObjectId;
@@ -15,15 +15,18 @@ const TrackingLogSchema = new Schema({
         type: Schema.Types.ObjectId,
         ref: 'Company',
         required: true,
+        index: true
     },
     userId: {
         type: String,
         required: true,
+        index: true
     },
     eventType: {
         type: String,
         enum: ['search_appearance', 'page_view', 'post_impression', 'follower_gained', 'follower_lost'],
         required: true,
+        index: true
     },
     postId: {
         type: Schema.Types.ObjectId,

@@ -6,11 +6,11 @@
  */
 
 import { NextFunction, Router } from 'express';
+import { memberController } from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 import { isLeaderOrAdmin, isMember, isNotMember } from '../middleware/groupAccess.middleware';
 import { checkGroupCapacity } from '../middleware/permission.middleware';
 import { logger } from '@/shared/logger.util';
-import memberController from '../controllers/member.controller';
 // import {
 //   isLeaderOrAdmin,
 //   checkGroupCapacity,

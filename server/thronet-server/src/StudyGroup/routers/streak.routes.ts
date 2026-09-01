@@ -7,7 +7,7 @@
 
 import { Router } from 'express';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
-import streakController  from '../controllers/streak.controller';
+import {streakController } from '../controllers';
 
 const router = Router();
 

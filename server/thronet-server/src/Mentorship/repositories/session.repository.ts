@@ -96,24 +96,6 @@ class SessionRepository {
         },
         { $unwind: { path: '$mentee', preserveNullAndEmptyArrays: true } },
         {
-          $lookup: {
-            from: 'mentors',
-            localField: 'mentorId',
-            foreignField: 'mentorId',
-            as: 'mentorDetails',
-          },
-        },
-        { $unwind: { path: '$mentorDetails', preserveNullAndEmptyArrays: true } },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'mentorDetails.userId',
-            foreignField: 'userId',
-            as: 'mentorUser',
-          },
-        },
-        { $unwind: { path: '$mentorUser', preserveNullAndEmptyArrays: true } },
-        {
           $addFields: {
             bookedMenteeName: {
               $let: {
@@ -135,59 +117,9 @@ class SessionRepository {
                 },
               },
             },
-            menteeName: {
-              $let: {
-                vars: {
-                  fullName: {
-                    $trim: {
-                      input: {
-                        $concat: [
-                          { $ifNull: ['$mentee.firstName', ''] },
-                          ' ',
-                          { $ifNull: ['$mentee.lastName', ''] },
-                        ],
-                      },
-                    },
-                  },
-                },
-                in: {
-                  $cond: { if: { $eq: ['$$fullName', ''] }, then: null, else: '$$fullName' },
-                },
-              },
-            },
-            menteeProfilePhoto: '$mentee.profilePhotoId',
-            mentorName: {
-              $let: {
-                vars: {
-                  userFullName: {
-                    $trim: {
-                      input: {
-                        $concat: [
-                          { $ifNull: ['$mentorUser.firstName', ''] },
-                          ' ',
-                          { $ifNull: ['$mentorUser.lastName', ''] },
-                        ],
-                      },
-                    },
-                  },
-                },
-                in: {
-                  $ifNull: [
-                    '$mentorDetails.title',
-                    { $cond: { if: { $eq: ['$$userFullName', ''] }, then: null, else: '$$userFullName' } }
-                  ]
-                },
-              },
-            },
-            mentorProfilePhoto: {
-              $ifNull: ['$mentorDetails.profilePic', '$mentorUser.profilePhotoId']
-            },
-            mentorTitle: '$mentorDetails.experience.currentRole',
-            mentorRating: '$mentorDetails.stats.averageRating',
-            mentorTotalReviews: '$mentorDetails.stats.totalReviews'
           },
         },
-        { $project: { mentee: 0, lookupId: 0, mentorDetails: 0, mentorUser: 0 } },
+        { $project: { mentee: 0, lookupId: 0 } },
       ]),
       SessionMentor.countDocuments(query),
     ]);
@@ -212,7 +144,11 @@ class SessionRepository {
       [role === 'mentor' ? 'mentorId' : 'menteeId']: userId,
     };
 
-    return await this.findAll(query, 0, limit).then(res => res.data);
+    return await SessionMentor.find(query)
+      .select('sessionId title sessionType scheduledAt duration status meeting pricing')
+      .sort({ scheduledAt: 1 })
+      .limit(limit)
+      .lean();
   }
 
   /**
@@ -225,7 +161,11 @@ class SessionRepository {
       [role === 'mentor' ? 'mentorId' : 'menteeId']: userId,
     };
 
-    return await this.findAll(query, 0, limit).then(res => res.data);
+    return await SessionMentor.find(query)
+      .select('sessionId title sessionType scheduledAt duration status pricing')
+      .sort({ scheduledAt: -1 })
+      .limit(limit)
+      .lean();
   }
 
   /**

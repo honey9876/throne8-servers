@@ -16,23 +16,6 @@
  * 
  * @module controllers/auth.controller
  * @version 3.0.0
- *
- * ✅ PERFORMANCE FIX (this version) — login():
- *    - Removed the separate AuthService.checkAccountLocked() call.
- *      AuthService.login() now does IP-check + user-fetch +
- *      rate-limit-check + account-status-check all in a single pass,
- *      so calling checkAccountLocked() first was doing a redundant
- *      user fetch + redundant rate-limit query before login() even ran.
- *    - Removed the User.findOne({ userId }) re-fetch that used to run
- *      AFTER a successful login just to build the response.
- *      AuthService.login() now returns the full user fields
- *      (email, role, firstName, lastName, profilePhotoId, headlineId)
- *      directly, so the controller never needs to touch the DB again.
- *    - The 3 CacheUtil.set() calls (session, user, access token) now
- *      run in parallel via Promise.all instead of sequentially.
- *    - The success audit log write is now fire-and-forget
- *      (setImmediate) instead of blocking the response, matching the
- *      pattern already used everywhere else in this file.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -46,7 +29,6 @@ import AuditProducer from '@/shared/kafka/producers/audit.producer';
 import { User, AuditLog, Session } from '@/shared/models/index.models';
 import { AuthService } from '@/shared/services/index.service';
 import TokenBlacklistUtil from '@/shared/utils/tokenBlacklist.util';
-import { GetAllUsersParams } from '../interfaces/auth.interfaces';
 
 // ==================== INTERFACES ====================
 
@@ -76,14 +58,6 @@ interface RegisterBody {
     lastName?: string;
     location: string;               // ✅ NEW: Required city name
     phoneNumber?: string;
-
-    // ✅ FIX: these were destructured from req.body in register() but
-    // never declared on this interface — TypeScript now correctly
-    // flags that. Adding them here matches what the code already uses.
-    currentPosition?: string;
-    company?: string;
-    education?: string;
-    pronouns?: string;
 
     // Onboarding fields
     userType: 'working' | 'student' | 'fresher';  // ✅ NEW: Required
@@ -129,10 +103,6 @@ interface UpdateProfileBody {
     firstName?: string;
     lastName?: string;
     location?: string;
-    currentPosition?: string;
-    company?: string;
-    education?: string;
-    pronouns?: string;
     onboarding?: {
         userType?: 'working' | 'student' | 'fresher';
         workingProfile?: {
@@ -180,10 +150,6 @@ interface ValidationResult {
         firstName: string;
         lastName?: string;
         location: string;
-        currentPosition?: string;
-        company?: string;
-        education?: string;
-        pronouns?: string;
         phoneNumber?: string;
         userType: 'working' | 'student' | 'fresher';
 
@@ -224,7 +190,7 @@ class AuthController {
      * @param {Response} res - Express response
      * @returns {Promise<void>}
      */
-    
+
     static async register(req: Request<{}, any, RegisterBody>, res: Response): Promise<void> {
         const startTime = Date.now();
         const correlationId = (req as any).correlationId || uuidv4();
@@ -241,10 +207,6 @@ class AuthController {
                 location,                  // ✅ NEW
                 phoneNumber,
                 userType,                  // ✅ NEW
-                currentPosition,           // ✅ NEW
-                company,                   // ✅ NEW
-                education,                 // ✅ NEW
-                pronouns,                  // ✅ NEW
 
                 // Working fields
                 jobTitle,
@@ -548,6 +510,22 @@ class AuthController {
 
             return;
 
+            // ResponseUtil.created(res, {
+            //     user: {
+            //         userId: result.userId,
+            //         email: validation.data!.email,
+            //         firstName: validation.data!.firstName,
+            //         lastName: validation.data!.lastName,
+            //         role: result.role || 'user',
+            //     },
+            //     tokens: {
+            //         accessToken: accessToken,
+            //         refreshToken: refreshToken,
+            //         expiresIn: Constants.TOKEN_EXPIRY?.ACCESS_TOKEN || '15m',
+            //     },
+            // }, 'Registration successful');
+            // return;
+
         } catch (error: any) {
             const duration = Date.now() - startTime;
 
@@ -601,20 +579,6 @@ class AuthController {
     /**
     * Authenticate user and create session
     * POST /api/v1/auth/login
-    *
-    * ✅ OPTIMIZED: previously this handler called
-    * AuthService.checkAccountLocked() (which fetched the user + ran a
-    * rate-limit query), then called AuthService.login() which fetched
-    * the SAME user again and ran the SAME rate-limit query again, and
-    * THEN — after a successful login — fetched the user a THIRD time
-    * via User.findOne() just to build the response. That's 3 user
-    * fetches + 2 rate-limit queries for a single login request.
-    *
-    * Now: a single call to AuthService.login() does everything (IP
-    * check, user fetch, account-status checks, rate-limit check,
-    * password verification) and returns the full user fields needed
-    * for the response — so this handler never touches the User
-    * collection directly.
     * 
     * @param {Request} req - Express request
     * @param {Response} res - Express response
@@ -668,18 +632,32 @@ class AuthController {
                 return;
             }
 
-            // ✅ Step 2 (removed): AuthService.checkAccountLocked() no
-            // longer called separately here — AuthService.login() below
-            // now handles the IP-block check, account-status checks,
-            // and rate-limit check internally in a single pass, using
-            // ONE user fetch instead of the two (checkAccountLocked +
-            // login) this used to require.
+            // Step 2: Check if account is locked
+            const isBlocked = await AuthService.checkAccountLocked(
+                validation.data!.email,
+                ipAddress
+            );
 
-            // Step 3: Authenticate user via AuthService — this single
-            // call now does everything: IP check, user fetch, account
-            // status checks, rate-limit check, password verification,
-            // device registration, session creation, and returns the
-            // full user data needed for the response.
+            if (isBlocked) {
+                await AuditLog.logAction({
+                    userId: String(null),
+                    userEmail: validation.data!.email,
+                    action: 'LOGIN_ATTEMPT_BLOCKED',
+                    ipAddress,
+                    userAgent,
+                    status: 'FAILURE' as const,
+                    severity: 'HIGH' as const,
+                    metadata: new Map<string, any>(Object.entries({ reason: '3_failed_attempts', correlationId })),
+                });
+                ResponseUtil.tooManyRequests(
+                    res,
+                    'Account locked after 3 failed attempts',
+                    { retryAfter: 900 }
+                );
+                return;
+            }
+
+            // Step 3: Authenticate user via AuthService
             LoggerUtil.debug('Calling AuthService.login', { email, correlationId });
 
             const result = await AuthService.login(
@@ -696,16 +674,64 @@ class AuthController {
                 correlationId
             });
 
-            // ✅ Step 4 (removed): the old User.findOne({ userId })
-            // re-fetch is gone. `result` from AuthService.login() now
-            // already contains email, role, firstName, lastName,
-            // profilePhotoId, headlineId — everything this handler
-            // needs to build the response and cache payload.
+            // Step 4: Fetch user data
+            let user: any;
+            try {
+                LoggerUtil.debug('Fetching user data', {
+                    userId: result.userId,
+                    correlationId
+                });
 
-            // Step 5: Generate JWT tokens
+                user = await User.findOne({ userId: result.userId })
+                    .select('userId email firstName lastName profilePhotoId headlineId role status')
+                    .lean()
+                    .exec();
+
+                LoggerUtil.debug('User query result', {
+                    found: !!user,
+                    userId: result.userId,
+                    userKeys: user ? Object.keys(user) : null,
+                    correlationId
+                });
+
+                if (!user) {
+                    LoggerUtil.error('User not found in database after successful login', {
+                        userId: result.userId,
+                        correlationId
+                    });
+                    throw new Error('User data not found after authentication');
+                }
+
+                if (user.status === 'deleted' || user.status === 'suspended') {
+                    LoggerUtil.warn('User has invalid status', {
+                        userId: result.userId,
+                        status: user.status,
+                        correlationId
+                    });
+                    throw new Error('Account is not active');
+                }
+
+                LoggerUtil.debug('User fetched successfully', {
+                    userId: user.userId,
+                    email: user.email,
+                    role: user.role,
+                    correlationId
+                });
+
+            } catch (userError: any) {
+                LoggerUtil.error('User fetch failed after successful login', {
+                    error: userError.message,
+                    stack: userError.stack,
+                    userId: result.userId,
+                    correlationId
+                });
+                throw new Error('Login successful but unable to retrieve user data');
+            }
+
+            // Step 5: ✅ Generate JWT tokens (SAME AS REGISTER)
             const payload: UserPayload = {
                 userId: result.userId,
-                role: result.role || 'user',
+                role: user.role || 'user',
                 sessionId: result.sessionId,
                 deviceId: result.deviceId
             };
@@ -722,46 +748,37 @@ class AuthController {
                 correlationId
             });
 
-            // Step 6: ✅ Cache session and user data — the 3 independent
-            // cache writes now run in PARALLEL instead of sequentially.
+            // Step 6: Cache session and user data
             try {
                 const sessionTTL = rememberMe
                     ? Constants.CACHE_TTLS.SESSION_LONG
                     : Constants.CACHE_TTLS.SESSION;
 
-                await Promise.all([
-                    CacheUtil.set(
-                        `${Constants.CACHE_PREFIXES.SESSION}${result.sessionId}`,
-                        {
-                            userId: result.userId,
-                            sessionId: result.sessionId,
-                            ipAddress
-                        },
-                        sessionTTL
-                    ),
-                    CacheUtil.set(
-                        `${Constants.CACHE_PREFIXES.USER}${result.userId}`,
-                        {
-                            userId: result.userId,
-                            email: result.email,
-                            firstName: result.firstName,
-                            lastName: result.lastName,
-                            profilePhotoId: result.profilePhotoId,
-                            headlineId: result.headlineId,
-                            role: result.role || 'user',
-                        },
-                        Constants.CACHE_TTLS.USER
-                    ),
-                    CacheUtil.set(
-                        `access_token:${accessToken}`,
-                        {
-                            ...payload,
-                            ipAddress,
-                            userAgent
-                        },
-                        900
-                    ),
-                ]);
+                await CacheUtil.set(
+                    `${Constants.CACHE_PREFIXES.SESSION}${result.sessionId}`,
+                    {
+                        userId: result.userId,
+                        sessionId: result.sessionId,
+                        ipAddress
+                    },
+                    sessionTTL
+                );
+
+                await CacheUtil.set(
+                    `${Constants.CACHE_PREFIXES.USER}${result.userId}`,
+                    user,
+                    Constants.CACHE_TTLS.USER
+                );
+
+                await CacheUtil.set(
+                    `access_token:${accessToken}`,
+                    {
+                        ...payload,
+                        ipAddress,
+                        userAgent
+                    },
+                    900
+                );
 
                 LoggerUtil.debug('Cache updated successfully', {
                     userId: result.userId,
@@ -776,31 +793,22 @@ class AuthController {
                 });
             }
 
-            // Step 7: ✅ Log successful login audit — now fire-and-forget
-            // (setImmediate) instead of blocking the response, matching
-            // the pattern used everywhere else in this file.
-            setImmediate(() => {
-                AuditLog.logAction({
-                    userId: result.userId,
-                    userEmail: result.email,
-                    action: 'LOGIN_SUCCESS',
-                    ipAddress,
-                    userAgent,
-                    sessionId: result.sessionId,
-                    status: 'SUCCESS',
-                    severity: 'LOW',
-                    metadata: new Map<string, any>(Object.entries({
-                        rememberMe: !!rememberMe,
-                        tokenType: 'JWT',
-                        correlationId,
-                        duration: Date.now() - startTime
-                    })),
-                }).catch((err: any) =>
-                    LoggerUtil.error('Login success audit log failed (non-critical)', {
-                        error: err.message,
-                        userId: result.userId,
-                    })
-                );
+            // Step 7: Log successful login audit
+            await AuditLog.logAction({
+                userId: result.userId,
+                userEmail: user.email,
+                action: 'LOGIN_SUCCESS',
+                ipAddress,
+                userAgent,
+                sessionId: result.sessionId,
+                status: 'SUCCESS',
+                severity: 'LOW',
+                metadata: new Map<string, any>(Object.entries({
+                    rememberMe: !!rememberMe,
+                    tokenType: 'JWT',
+                    correlationId,
+                    duration: Date.now() - startTime
+                })),
             });
 
             // Step 8: Log performance metrics
@@ -812,13 +820,16 @@ class AuthController {
 
             LoggerUtil.info('User logged in successfully', {
                 userId: result.userId,
-                email: result.email,
+                email: user.email,
                 duration,
                 correlationId
             });
 
             // Step 9: ✅ Return success response
             const accessTokenExpiresIn = 15 * 60; // 15 minutes
+            // const refreshTokenExpiresIn = rememberMe
+            //     ? 30 * 24 * 60 * 60  // 30 days if remember me
+            //     : 7 * 24 * 60 * 60;  // 7 days default
             const refreshTokenExpiresIn = rememberMe
                 ? 90 * 24 * 60 * 60  // 90 days (remember me)
                 : 30 * 24 * 60 * 60; // 30 days default (persistent login)
@@ -826,8 +837,8 @@ class AuthController {
             ResponseUtil.success(res, {
                 user: {
                     userId: result.userId,
-                    email: result.email,
-                    role: result.role || 'user'
+                    email: user.email,
+                    role: user.role || 'user'
                 },
                 tokens: {
                     accessToken: accessToken,
@@ -840,6 +851,19 @@ class AuthController {
                 },
             }, 'Welcome To Throne8', 200);
             return;
+            // ResponseUtil.success(res, {
+            //     user: {
+            //         userId: result.userId,
+            //         email: user.email,
+            //         role: user.role || 'user'
+            //     },
+            //     tokens: {
+            //         accessToken: accessToken,      // ✅ JWT TOKEN
+            //         refreshToken: refreshToken,    // ✅ JWT TOKEN
+            //         expiresIn: Constants.TOKEN_EXPIRY?.ACCESS_TOKEN || '15m',
+            //     },
+            // }, 'Welcome To Throne8', 200);
+            // return;
 
         } catch (error: any) {
             const duration = Date.now() - startTime;
@@ -870,8 +894,7 @@ class AuthController {
             // Return appropriate error responses
             if (error.message.includes('Account locked') ||
                 error.message.includes('failed attempts') ||
-                error.message.includes('too many attempts') ||
-                error.message.includes('Too many attempts')) {
+                error.message.includes('too many attempts')) {
                 ResponseUtil.tooManyRequests(
                     res,
                     'Account temporarily locked due to multiple failed login attempts',
@@ -900,6 +923,16 @@ class AuthController {
                 );
                 return;
             }
+
+            // if (error.message && error.message.startsWith('{') && error.message.includes('compliance')) {
+            //   try {
+            //     const complianceData = JSON.parse(error.message);
+            //     return ResponseUtil.success(res, complianceData, complianceData.message || 'Additional verification required', 200);
+            //     // Note: 200 OK because login was technically successful, just blocked by policy
+            //   } catch (parseError) {
+            //     // fallback
+            //   }
+            // }
 
             ResponseUtil.unauthorized(res, 'Invalid email or password');
             return;
@@ -966,14 +999,15 @@ class AuthController {
                 return;
             }
 
-            // Step 4: Validate session still exists
-            const session = await Session.findById(decoded.sessionId);
-            if (!session || !session.isActive) {
-                LoggerUtil.warn('Session not found or inactive', {
-                    sessionId: decoded.sessionId,
-                });
-                ResponseUtil.unauthorized(res, 'Session has been terminated');
-                return;
+            // Step 4: Validate session if sessionId exists in decoded payload
+            let session: any = null;
+            if (decoded.sessionId) {
+                session = await Session.findById(decoded.sessionId);
+                if (session && !session.isActive) {
+                    LoggerUtil.warn('Session is inactive', { sessionId: decoded.sessionId });
+                    ResponseUtil.unauthorized(res, 'Session has been terminated');
+                    return;
+                }
             }
 
             // Step 5: ✅ BLACKLIST OLD REFRESH TOKEN (Token Rotation)
@@ -984,20 +1018,19 @@ class AuthController {
             );
 
             // Step 6: ✅ GENERATE NEW TOKENS
-            const newPayload = {
+            const newPayload: any = {
                 userId: user.userId,
                 role: user.role,
-                sessionId: session._id,
-                deviceId: decoded.deviceId,
             };
+            if (session?._id) newPayload.sessionId = session._id;
+            if (decoded.deviceId) newPayload.deviceId = decoded.deviceId;
 
             const newAccessToken = User.generateAccessToken(newPayload);
             const newRefreshToken = User.generateRefreshToken(newPayload);
 
             // Step 7: Cache new tokens
             const accessTokenExpiresIn = 15 * 60; // 15 minutes
-            const refreshTokenExpiresIn = 7 * 24 * 60 * 60; // 7 days
-
+            const refreshTokenExpiresIn = 30 * 24 * 60 * 60; // 30 days 
             await CacheUtil.set(
                 `access_token:${newAccessToken}`,
                 {
@@ -1008,10 +1041,12 @@ class AuthController {
                 accessTokenExpiresIn
             );
 
-            // Step 8: Update session refresh token
-            session.refreshToken = newRefreshToken;
-            session.lastActivity = new Date();
-            await session.save();
+            // Step 8: Update session refresh token if session exists
+            if (session) {
+                session.refreshToken = newRefreshToken;
+                session.lastActivity = new Date();
+                await session.save();
+            }
 
             // Step 9: Audit log
             await AuditLog.logAction({
@@ -1023,7 +1058,7 @@ class AuthController {
                 status: 'SUCCESS',
                 severity: 'LOW',
                 metadata: new Map([
-                    ['sessionId', session._id],
+                    ['sessionId', session?._id || 'none'],
                     ['correlationId', correlationId],
                 ]),
             });
@@ -1039,6 +1074,11 @@ class AuthController {
             ResponseUtil.success(
                 res,
                 {
+                    user: {
+                        userId: user.userId,
+                        email: user.email,
+                        role: user.role || 'user',
+                    },
                     tokens: {
                         accessToken: newAccessToken,
                         refreshToken: newRefreshToken,
@@ -1246,38 +1286,6 @@ class AuthController {
         }
     }
 
-
-    static async getUsersBulk(req: Request, res: Response): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
-        const { userIds } = req.body;
-        try {
-            LoggerUtil.info('Get users bulk request', { count: userIds?.length, correlationId });
-            if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
-                ResponseUtil.badRequest(res, 'userIds must be a non-empty array');
-                return;
-            }
-            if (userIds.length > 100) {
-                ResponseUtil.badRequest(res, 'Cannot request more than 100 userIds at once');
-                return;
-            }
-            const users = await AuthService.getUsersByIds(userIds);
-            setImmediate(() => {
-                AuditProducer.sendAuditEvent({
-                    eventId: uuidv4(), userId: null, action: 'USERS_VIEWED_BULK',
-                    ipAddress: req.ip || 'unknown', status: 'SUCCESS', severity: 'LOW',
-                    timestamp: new Date().toISOString(),
-                    metadata: { requested: userIds.length, found: users.length, correlationId },
-                }).catch((err: any) => LoggerUtil.error('Audit log failed', { error: err.message }));
-            });
-            ResponseUtil.success(res, { users }, 'Users fetched successfully');
-            return;
-        } catch (error: any) {
-            LoggerUtil.error('Get users bulk failed', { error: error.message, stack: error.stack, correlationId });
-            ResponseUtil.error(res, error.message || 'Failed to fetch users', 500);
-            return;
-        }
-    }
-
     /**
      * ==================== GET ALL USERS (ADMIN ONLY) ====================
      * 
@@ -1319,12 +1327,7 @@ class AuthController {
                 search: req.query.search as string,
             };
 
-            // ✅ FIX: GetAllUsersParams.sortBy expects a specific union
-            // type ('newest' | 'oldest' | 'name' | 'email'), not a
-            // generic string — cast against the interface's own field
-            // type instead of hardcoding the union here, so it stays in
-            // sync if that type ever changes.
-            const sortBy = (req.query.sortBy as GetAllUsersParams['sortBy']) || 'newest';
+            const sortBy = (req.query.sortBy as string) || 'newest';
 
             LoggerUtil.info('Admin fetching all users', {
                 userId,
@@ -1460,20 +1463,16 @@ class AuthController {
                 firstName,
                 lastName,
                 location,
-                currentPosition,
-                company,
-                education,
-                pronouns,
                 onboarding,
                 preferences
             } = req.body;
 
             // ✅ Validate at least one field is provided
             if (!email && !password && !phoneNumber && !firstName && !lastName &&
-                !location && !currentPosition && !company && !education && !pronouns && !onboarding && !preferences) {
+                !location && !onboarding && !preferences) {
                 ResponseUtil.validationError(
                     res,
-                    ['At least one field (email, password, phoneNumber, firstName, lastName, location, currentPosition, company, education, pronouns, onboarding, preferences) is required'],
+                    ['At least one field (email, password, phoneNumber, firstName, lastName, location, onboarding, preferences) is required'],
                     'No fields provided'
                 );
                 return;
@@ -1494,10 +1493,6 @@ class AuthController {
             if (firstName !== undefined) updates.firstName = firstName;
             if (lastName !== undefined) updates.lastName = lastName;
             if (location !== undefined) updates.location = location;
-            if (currentPosition !== undefined) updates.currentPosition = currentPosition;
-            if (company !== undefined) updates.company = company;
-            if (education !== undefined) updates.education = education;
-            if (pronouns !== undefined) updates.pronouns = pronouns;
             if (onboarding !== undefined) updates.onboarding = onboarding;
             if (preferences !== undefined) updates.preferences = preferences;
 

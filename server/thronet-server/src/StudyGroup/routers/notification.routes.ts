@@ -1,5 +1,5 @@
 import express from 'express';
-import notificationController from '../controllers/notification.controller'; // ✅ Default import (not named)
+import {notificationController} from '../controllers'; // ✅ Default import (not named)
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 
 const router = express.Router();

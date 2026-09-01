@@ -1,28 +1,47 @@
-﻿import { LoggerUtil } from '@/shared/logger.util';
+/**
+ * ProfilePhoto Model - User Profile Picture Management
+ * Stores profile photos with Cloudinary integration
+ * 
+ * @module models/ProfilePhoto.model
+ * @version 1.0.0
+ */
+
+import { LoggerUtil } from '@/shared/logger.util';
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
+// import { LoggerUtil } from '../utils/logger.util';
 
 // ==================== INTERFACES ====================
 
 export interface IProfilePhoto extends Document {
     photoId: string;
     userId: string;
-    cloudinaryPublicId: string;
-    cloudinaryUrl: string;
-    cloudinarySecureUrl: string;
-    cloudinaryFolder: string;
-    originalName: string;
-    mimeType: string;
-    fileSize: number;
-    width: number;
-    height: number;
-    format: string;
-    isActive: boolean;
+
+    // Cloudinary Info
+    cloudinaryPublicId: string;     // Cloudinary public_id
+    cloudinaryUrl: string;          // Original URL
+    cloudinarySecureUrl: string;    // HTTPS URL
+    cloudinaryFolder: string;       // Cloudinary folder path
+
+    // Photo Metadata
+    originalName: string;           // Original filename
+    mimeType: string;               // image/jpeg, image/png, etc.
+    fileSize: number;               // Size in bytes
+    width: number;                  // Image width
+    height: number;                 // Image height
+    format: string;                 // jpg, png, webp, etc.
+
+    // Photo Status
+    isActive: boolean;              // Is this the current profile photo?
     status: 'active' | 'archived' | 'deleted';
+
+    // Soft Delete / Archive
     isDeleted: boolean;
     deletedAt?: Date;
     isArchived: boolean;
     archivedAt?: Date;
+
+    // Metadata
     uploadedAt: Date;
     createdAt: Date;
     updatedAt: Date;
@@ -44,13 +63,13 @@ const ProfilePhotoSchema = new Schema<IProfilePhoto, IProfilePhotoModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
-            // ✅ CORRECT: unique:true apne aap index banata hai
-            //  nahi rakha - duplicate avoid karne ke liye
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
@@ -61,8 +80,6 @@ const ProfilePhotoSchema = new Schema<IProfilePhoto, IProfilePhotoModel>(
         cloudinaryPublicId: {
             type: String,
             required: [true, 'Cloudinary public ID is required'],
-            // ✅ FIX:  hataya field se
-            // Neeche ProfilePhotoSchema.index({ cloudinaryPublicId: 1 }) already tha - DUPLICATE tha
         },
         cloudinaryUrl: {
             type: String,
@@ -115,17 +132,20 @@ const ProfilePhotoSchema = new Schema<IProfilePhoto, IProfilePhotoModel>(
         isActive: {
             type: Boolean,
             default: false,
+            index: true,
         },
         status: {
             type: String,
             enum: ['active', 'archived', 'deleted'],
             default: 'active',
+            index: true,
         },
 
         // ==================== SOFT DELETE / ARCHIVE ====================
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: {
             type: Date,
@@ -134,6 +154,7 @@ const ProfilePhotoSchema = new Schema<IProfilePhoto, IProfilePhotoModel>(
         isArchived: {
             type: Boolean,
             default: false,
+            index: true,
         },
         archivedAt: {
             type: Date,
@@ -156,20 +177,24 @@ const ProfilePhotoSchema = new Schema<IProfilePhoto, IProfilePhotoModel>(
                 return ret;
             },
         },
-        toObject: { virtuals: true },
+        toObject: {
+            virtuals: true,
+        },
     }
 );
 
 // ==================== INDEXES ====================
-// ✅ Sirf compound aur specific indexes yahan
-ProfilePhotoSchema.index({ userId: 1, isActive: 1 });
-ProfilePhotoSchema.index({ userId: 1, isDeleted: 1, isArchived: 1 });
-// ✅ FIX: cloudinaryPublicId field se  hataya - sirf yahan ek baar index hai
-ProfilePhotoSchema.index({ cloudinaryPublicId: 1 });
-ProfilePhotoSchema.index({ createdAt: -1 });
+
+ProfilePhotoSchema.index({ userId: 1, isActive: 1 });              // Active photo
+ProfilePhotoSchema.index({ userId: 1, isDeleted: 1, isArchived: 1 }); // Soft delete and archive
+ProfilePhotoSchema.index({ cloudinaryPublicId: 1 });                // Cloudinary lookup
+ProfilePhotoSchema.index({ createdAt: -1 });                        // Recent photos
 
 // ==================== MIDDLEWARE ====================
 
+/**
+ * Pre-save: Update status based on flags
+ */
 ProfilePhotoSchema.pre('save', function (next) {
     if (this.isDeleted) {
         this.status = 'deleted';
@@ -185,47 +210,92 @@ ProfilePhotoSchema.pre('save', function (next) {
 
 // ==================== STATIC METHODS ====================
 
+/**
+ * Find all photos by userId (excluding deleted)
+ */
 ProfilePhotoSchema.statics.findByUserId = async function (userId: string, includeArchived: boolean = false): Promise<IProfilePhoto[]> {
     try {
         const query: any = { userId, isDeleted: false };
-        if (!includeArchived) query.isArchived = false;
-        return await this.find(query).sort({ createdAt: -1 }).exec();
-    } catch (error: any) {
-        LoggerUtil.error('Find photos by userId failed', { error: (error as Error).message, userId });
+
+        if (!includeArchived) {
+            query.isArchived = false;
+        }
+
+        return await this.find(query)
+            .sort({ createdAt: -1 })
+            .exec();
+    } catch (error : any) {
+        LoggerUtil.error('Find photos by userId failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+/**
+ * Find active profile photo
+ */
 ProfilePhotoSchema.statics.findActivePhoto = async function (userId: string): Promise<IProfilePhoto | null> {
     try {
-        return await this.findOne({ userId, isActive: true, isDeleted: false }).exec();
-    } catch (error: any) {
-        LoggerUtil.error('Find active photo failed', { error: (error as Error).message, userId });
+        return await this.findOne({
+            userId,
+            isActive: true,
+            isDeleted: false,
+        }).exec();
+    } catch (error : any) {
+        LoggerUtil.error('Find active photo failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+/**
+ * Get total photo count for user (excluding deleted)
+ */
 ProfilePhotoSchema.statics.getUserPhotoCount = async function (userId: string): Promise<number> {
     try {
         return await this.countDocuments({ userId, isDeleted: false });
-    } catch (error: any) {
-        LoggerUtil.error('Get photo count failed', { error: (error as Error).message, userId });
+    } catch (error : any) {
+        LoggerUtil.error('Get photo count failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+/**
+ * Set photo as active (deactivate all others)
+ */
 ProfilePhotoSchema.statics.setActivePhoto = async function (photoId: string, userId: string): Promise<IProfilePhoto> {
     try {
-        await this.updateMany({ userId }, { $set: { isActive: false } });
+        // Deactivate all photos for user
+        await this.updateMany(
+            { userId },
+            { $set: { isActive: false } }
+        );
+
+        // Activate the selected photo
         const photo = await this.findOneAndUpdate(
             { photoId, userId, isDeleted: false },
             { $set: { isActive: true } },
             { new: true }
         );
-        if (!photo) throw new Error('Photo not found');
+
+        if (!photo) {
+            throw new Error('Photo not found');
+        }
+
         return photo;
-    } catch (error: any) {
-        LoggerUtil.error('Set active photo failed', { error: (error as Error).message, photoId, userId });
+    } catch (error : any) {
+        LoggerUtil.error('Set active photo failed', {
+            error: (error as Error).message,
+            photoId,
+            userId,
+        });
         throw error;
     }
 };

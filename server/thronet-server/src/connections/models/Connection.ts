@@ -1,4 +1,4 @@
-﻿// src/models/mongodb/Connection.ts
+// src/models/mongodb/Connection.ts
 
 import { Schema, model, Document, Model, Types, Query } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -10,6 +10,18 @@ import environmentConfig from '@/config/environment/environment';
  * Connection Model - Optimized for 1M+ Users
  * Represents established connections between users in the Connection Service.
  * Enhanced with advanced indexing, sharding support, and performance optimizations.
+ * 
+ * Key Optimizations for Scale:
+ * 1. Sharding-ready design with proper shard key
+ * 2. Read replicas support for analytics
+ * 3. Connection pooling optimization
+ * 4. Advanced caching strategies
+ * 5. Batch processing capabilities
+ * 6. Memory-efficient aggregations
+ * 7. Real-time analytics support
+ * 8. Auto-archiving for data lifecycle
+ * 9. Connection strength algorithms
+ * 10. Geographic distribution support
  */
 
 interface IConnection extends Document {
@@ -36,6 +48,8 @@ interface IConnection extends Document {
     isMutual?: boolean;
     strengthCategory?: string;
 }
+
+
 
 export interface IPaginationResult<T> {
     data: T[];
@@ -93,7 +107,6 @@ interface IConnectionModel extends Model<IConnection> {
     getSystemStats(region?: string): Promise<any>;
     archiveOldConnections(daysOld?: number, batchSize?: number): Promise<number>;
     findMutualConnections(userId1: string, userId2: string, limit?: number): Promise<IConnection[]>;
-    countMutualConnections(userId1: string, userId2: string): Promise<number>;
     getConnectionRecommendations(userId: string, limit?: number): Promise<string[]>;
     calculateConnectionStrength(connectionId: string): Promise<number>;
     updateConnectionStrengthBatch(batchSize?: number): Promise<number>;
@@ -111,16 +124,18 @@ const ConnectionSchema: Schema<IConnection, IConnectionModel> = new Schema<IConn
             type: String,
             required: [true, 'Connection ID is required'],
             unique: true,
+            index: true,
             default: () => uuidv4(),
         },
         fromUserId: {
             type: String,
             ref: 'User',
             required: [true, 'From user ID is required'],
+            index: true,
             validate: {
-                validator: async function (value: string): Promise<boolean> {
+                validator: async function (value: string): Promise<boolean> {  // ✅ String
                     if (this.isModified('fromUserId') && !this.$locals?.skipValidation) {
-                        const user = await User.findOne({ userId: value }).lean().select('userId');
+                        const user = await User.findOne({ userId: value }).lean().select('userId');  // ✅
                         return !!user;
                     }
                     return true;
@@ -132,6 +147,7 @@ const ConnectionSchema: Schema<IConnection, IConnectionModel> = new Schema<IConn
             type: String,
             ref: 'User',
             required: [true, 'To user ID is required'],
+            index: true,
             validate: {
                 validator: async function (value: string): Promise<boolean> {
                     if (this.isModified('toUserId') && !this.$locals?.skipValidation) {
@@ -151,6 +167,7 @@ const ConnectionSchema: Schema<IConnection, IConnectionModel> = new Schema<IConn
             },
             required: [true, 'Connection type is required'],
             default: 'professional',
+            index: true,
         },
         status: {
             type: String,
@@ -160,12 +177,14 @@ const ConnectionSchema: Schema<IConnection, IConnectionModel> = new Schema<IConn
             },
             required: [true, 'Status is required'],
             default: 'active',
+            index: true,
         },
         strength: {
             type: Number,
             min: [0, 'Connection strength cannot be less than 0'],
             max: [100, 'Connection strength cannot be more than 100'],
             default: 0,
+            index: true,
         },
         priority: {
             type: String,
@@ -174,6 +193,7 @@ const ConnectionSchema: Schema<IConnection, IConnectionModel> = new Schema<IConn
                 message: '{VALUE} is not a valid priority',
             },
             default: 'medium',
+            index: true,
         },
         tags: {
             type: [String],
@@ -182,6 +202,7 @@ const ConnectionSchema: Schema<IConnection, IConnectionModel> = new Schema<IConn
                 validator: (tags: string[]) => tags.length <= 20 && tags.every((tag) => typeof tag === 'string' && tag.length <= 50),
                 message: 'Maximum 20 tags allowed, each with max length 50',
             },
+            index: true,
         },
         notes: {
             type: String,
@@ -196,13 +217,16 @@ const ConnectionSchema: Schema<IConnection, IConnectionModel> = new Schema<IConn
                 message: '{VALUE} is not a valid visibility',
             },
             default: environmentConfig.DEFAULT_PROFILE_VISIBILITY as 'public' | 'connections' | 'private',
+            index: true,
         },
         isArchived: {
             type: Boolean,
             default: false,
+            index: true,
         },
         lastInteraction: {
             type: Date,
+            index: true,
             default: Date.now,
         },
         metadata: {
@@ -212,16 +236,19 @@ const ConnectionSchema: Schema<IConnection, IConnectionModel> = new Schema<IConn
         region: {
             type: String,
             default: 'global',
+            index: true,
             maxlength: [50, 'Region cannot exceed 50 characters'],
         },
         interactionCount: {
             type: Number,
             default: 0,
             min: [0, 'Interaction count cannot be negative'],
+            index: true,
         },
         shardKey: {
             type: String,
             required: true,
+            index: true,
             default: function () {
                 const userIds = [this.fromUserId?.toString(), this.toUserId?.toString()].sort();
                 return `${userIds[0]}_${userIds[1]}_${this.region || 'global'}`;
@@ -230,6 +257,7 @@ const ConnectionSchema: Schema<IConnection, IConnectionModel> = new Schema<IConn
         cacheVersion: {
             type: Number,
             default: 1,
+            index: true,
         },
         searchVector: {
             type: [Number],
@@ -277,9 +305,9 @@ ConnectionSchema.pre(/^find/, function (this: Query<any, any>) {
         if (!this.getOptions().hint) {
             const filter = this.getQuery();
             if (filter.fromUserId || filter.toUserId) {
-                // hint logic placeholder
+                // this// /* .hint(...) */;
             } else if (filter.shardKey) {
-                // hint logic placeholder
+                // this// /* .hint(...) */;
             }
         }
     }
@@ -319,7 +347,7 @@ ConnectionSchema.pre('validate', function (next) {
         return;
     }
     if (!this.shardKey && this.fromUserId && this.toUserId) {
-        const userIds = [this.fromUserId, this.toUserId].sort();
+        const userIds = [this.fromUserId, this.toUserId].sort();  // ✅ No .toString()
         this.shardKey = `${userIds[0]}_${userIds[1]}_${this.region || 'global'}`;
     }
     next();
@@ -346,12 +374,11 @@ ConnectionSchema.statics.findByConnectionId = async function (
     connectionId: string,
     projection: string = ''
 ): Promise<IConnection | null> {
-    const query = this.findOne({ connectionId }).lean();
+    const query = this.findOne({ connectionId })// /* .hint(...) */.lean();
     if (projection) {
         query.select(projection);
     }
-    const result = await query.exec();
-    return result as IConnection | null;
+    return query.exec();
 };
 
 ConnectionSchema.statics.checkConnectionExists = async function (
@@ -365,7 +392,7 @@ ConnectionSchema.statics.checkConnectionExists = async function (
             { fromUserId: toUserId, toUserId: fromUserId, status: { $ne: 'removed' } },
         ],
         shardKey: { $regex: `^${userIds[0]}_${userIds[1]}` }
-    });
+    })// /* .hint(...) */;
     return count > 0;
 };
 
@@ -415,16 +442,16 @@ ConnectionSchema.statics.findUserConnectionsPaginated = async function (
         tag,
         projection,
         useEstimatedCount = false,
-        region = 'global'
+        region
     } = options;
     let filter: any = {
         $or: [{ fromUserId: userId }, { toUserId: userId }],
         isArchived: false,
-        region,
     };
+    if (region) filter.region = region;
     if (status) filter.status = status;
     if (tag) filter.tags = tag;
-    let query = this.find(filter).sort({ createdAt: -1 });
+    let query = this.find(filter).sort({ createdAt: -1 })// /* .hint(...) */;
     if (projection) {
         query = query.select(projection);
     }
@@ -507,8 +534,12 @@ ConnectionSchema.statics.getUserConnectionStats = async function (
         {
             $match: {
                 $or: [
-                    { fromUserId: userId },
-                    { toUserId: userId }
+                    {
+                        fromUserId: userId
+                    },
+                    {
+                        toUserId: userId
+                    }
                 ],
                 isArchived: false
             }
@@ -624,8 +655,14 @@ ConnectionSchema.statics.findMutualConnections = async function (
                                 $and: [
                                     {
                                         $or: [
-                                            { $eq: ['$fromUserId', userId2] },
-                                            { $eq: ['$toUserId', userId2] }
+                                            {
+                                                $eq: ['$fromUserId', userId2
+                                                ]
+                                            },
+                                            {
+                                                $eq: ['$toUserId', userId2
+                                                ]
+                                            }
                                         ]
                                     },
                                     {
@@ -652,72 +689,6 @@ ConnectionSchema.statics.findMutualConnections = async function (
         }
     ];
     return this.aggregate(pipeline);
-};
-
-// ✅ NEW — Efficient count-only version (no full documents pulled back)
-ConnectionSchema.statics.countMutualConnections = async function (
-    userId1: string,
-    userId2: string
-): Promise<number> {
-    const pipeline = [
-        {
-            $match: {
-                $or: [
-                    { fromUserId: userId1 },
-                    { toUserId: userId1 }
-                ],
-                status: 'active',
-                isArchived: false
-            }
-        },
-        {
-            $lookup: {
-                from: 'connections',
-                let: {
-                    connectedUserId: {
-                        $cond: [
-                            { $eq: ['$fromUserId', userId1] },
-                            '$toUserId',
-                            '$fromUserId'
-                        ]
-                    }
-                },
-                pipeline: [
-                    {
-                        $match: {
-                            $expr: {
-                                $and: [
-                                    {
-                                        $or: [
-                                            { $eq: ['$fromUserId', userId2] },
-                                            { $eq: ['$toUserId', userId2] }
-                                        ]
-                                    },
-                                    {
-                                        $or: [
-                                            { $eq: ['$fromUserId', '$$connectedUserId'] },
-                                            { $eq: ['$toUserId', '$$connectedUserId'] }
-                                        ]
-                                    }
-                                ]
-                            },
-                            status: 'active',
-                            isArchived: false
-                        }
-                    },
-                    { $limit: 1 },
-                    { $project: { _id: 1 } }
-                ],
-                as: 'mutualConnection'
-            }
-        },
-        {
-            $match: { 'mutualConnection.0': { $exists: true } }
-        },
-        { $count: 'total' }
-    ];
-    const result = await this.aggregate(pipeline);
-    return result[0]?.total || 0;
 };
 
 ConnectionSchema.statics.calculateConnectionStrength = async function (
@@ -889,8 +860,12 @@ ConnectionSchema.statics.getConnectionRecommendations = async function (
         {
             $match: {
                 $or: [
-                    { fromUserId: userId },
-                    { toUserId: userId }
+                    {
+                        fromUserId: userId
+                    },
+                    {
+                        toUserId: userId
+                    }
                 ],
                 status: 'active',
                 strength: { $gte: 50 }
@@ -903,7 +878,10 @@ ConnectionSchema.statics.getConnectionRecommendations = async function (
             $project: {
                 recommendedUserId: {
                     $cond: [
-                        { $eq: ['$fromUserId', userId] },
+                        {
+                            $eq: ['$fromUserId', userId
+                            ]
+                        },
                         '$toUserId',
                         '$fromUserId'
                     ]
@@ -1007,7 +985,7 @@ ConnectionSchema.statics.migrateToRegion = async function (
             data: { modifiedCount: result.modifiedCount, newRegion }
         } as unknown as PublicLogMetadata);
         return result.modifiedCount > 0;
-    } catch (error: any) {
+    } catch (error : any) {
         logger.error(`Failed to migrate user ${userId} to region ${newRegion}`, {
             category: LogCategory.CONNECTION,
             userId,

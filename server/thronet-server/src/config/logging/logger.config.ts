@@ -3,13 +3,18 @@
  * Winston Logger Configuration
  * Production-grade logging with file rotation and formatting
  * 
- * @version 3.1.0 - Added transport error listeners to prevent process crash
- * on file-stream I/O errors (e.g. Windows bind-mount EIO issues).
+ * @version 3.0.0
  */
 
 import winston from 'winston';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import * as fs from 'fs';
+
+// ==================== DIRECTORY SETUP ====================
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ==================== CONFIGURATION ====================
 
@@ -24,143 +29,129 @@ if (logFileEnabled && !fs.existsSync(logDir)) {
     try {
         fs.mkdirSync(logDir, { recursive: true });
         console.log(`✅ Log directory created: ${logDir}`);
-    } catch (error: any) {
+    } catch(error : any) {
         console.error(`❌ Failed to create log directory: ${logDir}`, error);
     }
 }
 
 // ==================== LOG FORMATS ====================
 
+/**
+ * Development format - Colorized and human-readable
+ */
 const developmentFormat = winston.format.combine(
     winston.format.colorize(),
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.printf(({ timestamp, level, message, ...metadata }) => {
         let log = `${timestamp} [${level}]: ${message}`;
+
+        // Add metadata if present
         if (Object.keys(metadata).length > 0) {
             log += `\n${JSON.stringify(metadata, null, 2)}`;
         }
+
         return log;
     })
 );
 
+/**
+ * Production format - JSON structured logging
+ */
 const productionFormat = winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-    winston.format.errors({ stack: true }),
+    winston.format.errors({ stack: true }), // Include stack traces
     winston.format.json()
 );
 
+/**
+ * File format - No colors, structured
+ */
 const fileFormat = winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.printf(({ timestamp, level, message, ...metadata }) => {
         let log = `${timestamp} [${level.toUpperCase()}]: ${message}`;
+
+        // Add metadata if present
         if (Object.keys(metadata).length > 0) {
             log += ` | ${JSON.stringify(metadata)}`;
         }
+
         return log;
     })
 );
 
-// ==================== HELPER: SAFE TRANSPORT WRAPPER ====================
-/**
- * Attaches a non-fatal error listener to a transport.
- * Without this, a raw stream 'error' event (e.g. EIO on a Windows
- * bind-mounted volume) has no listener and crashes the whole process
- * with "Unhandled 'error' event".
- */
-function withErrorGuard<T extends winston.transport>(transport: T, label: string): T {
-    transport.on('error', (err: Error) => {
-        // eslint-disable-next-line no-console
-        console.error(`⚠️ [Logger] Transport error ignored (${label}):`, err.message);
-    });
-    return transport;
-}
-
 // ==================== TRANSPORTS ====================
 
 const transports: winston.transport[] = [
-    withErrorGuard(
-        new winston.transports.Console({
-            format: environment === 'production' ? productionFormat : developmentFormat,
-        }),
-        'console'
-    ),
+    // Console transport
+    new winston.transports.Console({
+        format: environment === 'production' ? productionFormat : developmentFormat,
+    }),
 ];
 
+// File transports (if enabled)
 if (logFileEnabled) {
+    // Combined logs (all levels)
     transports.push(
-        withErrorGuard(
-            new winston.transports.File({
-                filename: path.join(logDir, 'app.log'),
-                maxsize: 10 * 1024 * 1024, // 10MB
-                maxFiles: 3,
-                format: fileFormat,
-            }),
-            'app.log'
-        )
+        new winston.transports.File({
+            filename: path.join(logDir, 'app.log'),
+            maxsize: 10 * 1024 * 1024, // 10MB
+            maxFiles: 3,
+            format: fileFormat,
+        })
     );
 
+    // Error logs (error level only)
     transports.push(
-        withErrorGuard(
-            new winston.transports.File({
-                filename: path.join(logDir, 'error.log'),
-                level: 'error',
-                maxsize: 10 * 1024 * 1024, // 10MB
-                maxFiles: 5,
-                format: fileFormat,
-            }),
-            'error.log'
-        )
+        new winston.transports.File({
+            filename: path.join(logDir, 'error.log'),
+            level: 'error',
+            maxsize: 10 * 1024 * 1024, // 10MB
+            maxFiles: 5,
+            format: fileFormat,
+        })
     );
 
+    // Warn logs (warn level and above)
     transports.push(
-        withErrorGuard(
-            new winston.transports.File({
-                filename: path.join(logDir, 'warn.log'),
-                level: 'warn',
-                maxsize: 5 * 1024 * 1024, // 5MB
-                maxFiles: 3,
-                format: fileFormat,
-            }),
-            'warn.log'
-        )
+        new winston.transports.File({
+            filename: path.join(logDir, 'warn.log'),
+            level: 'warn',
+            maxsize: 5 * 1024 * 1024, // 5MB
+            maxFiles: 3,
+            format: fileFormat,
+        })
     );
 }
-
-// ==================== EXCEPTION / REJECTION HANDLERS ====================
-
-const exceptionHandlers: winston.transport[] = logFileEnabled
-    ? [
-        withErrorGuard(
-            new winston.transports.File({
-                filename: path.join(logDir, 'exceptions.log'),
-                maxsize: 5 * 1024 * 1024,
-                maxFiles: 3,
-            }),
-            'exceptions.log'
-        ),
-    ]
-    : [];
-
-const rejectionHandlers: winston.transport[] = logFileEnabled
-    ? [
-        withErrorGuard(
-            new winston.transports.File({
-                filename: path.join(logDir, 'rejections.log'),
-                maxsize: 5 * 1024 * 1024,
-                maxFiles: 3,
-            }),
-            'rejections.log'
-        ),
-    ]
-    : [];
 
 // ==================== LOGGER INSTANCE ====================
 
 const logger: winston.Logger = winston.createLogger({
     level: logLevel,
     transports,
-    exceptionHandlers,
-    rejectionHandlers,
+
+    // Handle exceptions and rejections
+    exceptionHandlers: logFileEnabled
+        ? [
+            new winston.transports.File({
+                filename: path.join(logDir, 'exceptions.log'),
+                maxsize: 5 * 1024 * 1024,
+                maxFiles: 3,
+            }),
+        ]
+        : [],
+
+    rejectionHandlers: logFileEnabled
+        ? [
+            new winston.transports.File({
+                filename: path.join(logDir, 'rejections.log'),
+                maxsize: 5 * 1024 * 1024,
+                maxFiles: 3,
+            }),
+        ]
+        : [],
+
+    // Exit on error
     exitOnError: false,
 });
 

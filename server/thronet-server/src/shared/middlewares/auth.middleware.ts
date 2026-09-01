@@ -1,8 +1,19 @@
-// src/shared/middlewares/auth.middleware.ts
+// src/middleware/auth.middleware.ts
 /**
  * JWT Auth Middleware - Production-Ready for 1M+ Users
  * Verifies access token, checks blacklist, attaches user to req.user
  * Integrates device/session limits (2 active devices max)
+ * 
+ * @module middleware/auth.middleware
+ * @version 1.0.0
+ */
+
+/** 
+ * auth.middleware.ts - FIXED VERSION
+ * ✅ Complete error handling
+ * ✅ Token verification checks
+ * ✅ Detailed error messages
+ * ✅ User validation
  * 
  * @module middleware/auth.middleware
  * @version 2.0.0
@@ -23,25 +34,20 @@ interface DecodedToken {
     deviceId?: string;
 }
 
-// ✅ ReqUser rakha hai kyunki kuch jagah reference ho sakta hai,
-// lekin ab AuthRequest ismein use nahi karta — global Express.User
-// (shared/types/express/index.d.ts) hi source of truth hai.
 export interface ReqUser {
-    id: string;
-    userId: string;
+    id: string;                  // ✅ Primary ID (matches global type)
+    userId: string;              // ✅ Alias for backward compatibility
     _id: string;
-    isAdmin: boolean;
-    region?: string;
-    role: 'user' | 'admin';
+    isAdmin: boolean;            // ✅ Required by global type
+    region?: string;             // ✅ Optional region
+    role: 'user' | 'admin';      // ✅ Strict type instead of string
     email: string;
     deviceId: string | null;
     sessionId: string | null;
 }
 
-// ✅ SINGLE declaration — duplicate wali dusri jagah hata di gayi hai.
-// user field yahan NAHI hai — global Express.Request.user
-// (shared/types/express/index.d.ts se) automatically milta hai.
 export interface AuthRequest extends Request {
+    user?: ReqUser;
     correlationId?: string;
 }
 
@@ -76,10 +82,39 @@ const enforceDeviceLimit = async (userId: string, deviceId: string) => {
  */
 class AuthMiddleware {
 
+    // shared/middlewares/auth.middleware.ts mein ADD karo
+
     /**
      * Optional authentication — token hai to decode karo, nahi hai to skip karo
      * Public leaderboards ke liye — logged in users ko currentUser entry milti hai
      */
+    // static optionalAuthenticate = (req: Request, res: Response, next: NextFunction) => {
+    //     try {
+    //         const authHeader = req.headers.authorization;
+
+    //         if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    //             // Token nahi — anonymous user, continue karo
+    //             return next();
+    //         }
+
+    //         const token = authHeader.split(' ')[1];
+    //         const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+
+    //         (req as AuthRequest).user = {
+    //             id: decoded.userId,
+    //             email: decoded.email,
+    //             role: decoded.role,
+    //         };
+
+    //         return next();
+    //     } catch {
+    //         // Invalid token — anonymous user treat karo, error mat do
+    //         return next();
+    //     }
+    // };
+
+
+    // In auth.middleware.ts — ADD this method
     static async authenticateOptional(req: Request, res: Response, next: NextFunction) {
         try {
             const authHeader = req.headers.authorization;
@@ -225,6 +260,16 @@ class AuthMiddleware {
                     return ResponseUtil.unauthorized(res, 'User not found. Please login again.');
                 }
 
+                console.log('═══════════════════════════════════════════════');
+                console.log('🔍 AUTHENTICATED USER DATA:');
+                console.log('═══════════════════════════════════════════════');
+                console.log('MongoDB _id:', user._id.toString());  // ✅ Object ID milega
+                console.log('User ID:', user.userId);
+                console.log('Email:', user.email);
+                console.log('Role:', user.role);
+                console.log('Status:', user.status);
+                console.log('═══════════════════════════════════════════════\n');
+
                 logger.debug('User fetched from database', {
                     userId: user.userId,
                     email: user.email,
@@ -355,6 +400,12 @@ class AuthMiddleware {
                 correlationId
             });
 
+            console.log('✅ User authenticated:', {
+                userId: req.user.userId,
+                email: req.user.email,
+                role: req.user.role
+            });
+
             // Continue to next middleware
             next();
 
@@ -400,6 +451,8 @@ class AuthMiddleware {
         };
     }
 }
+
+// middleware/auth.middleware.ts
 
 /**
  * Check if user is authenticated
@@ -448,8 +501,5 @@ export const getAuthToken = (req: Request): string | null => {
 
     return token;
 };
-
-// ✅ Named alias so routes can do: import { authenticateJWT } from '@/shared/middlewares/auth.middleware'
-export const authenticateJWT = AuthMiddleware.authenticate;
 
 export default AuthMiddleware;

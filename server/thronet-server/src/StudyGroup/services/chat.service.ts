@@ -12,6 +12,7 @@
 import messageRepository from '../repositories/message.repository';
 import groupRepository from '../repositories/group.repository';
 import groupMemberRepository from '../repositories/groupMember.repository';
+import ProfilePhoto from '@/Profile/models/ProfilePhoto.model';
 import { LoggerUtil } from '@/shared/logger.util';
 import { MessageType } from '../enums/MessageType.enum';
 import { AuthorizationError, BadRequestError, NotFoundError } from '@/shared/errors/app.error';
@@ -73,10 +74,21 @@ export const sendMessage = async (
       .catch((err) => LoggerUtil.error('Failed to update group lastActivityAt:', err));
 
     const populatedMessage = await messageRepository.findRawById(message._id.toString());
-    await populatedMessage?.populate('sender', 'fullName username avatar');
+    await populatedMessage?.populate('sender', 'fullName username profilePhotoId firstName lastName');
+
+    let responseMessage: any = populatedMessage;
+    if (populatedMessage && populatedMessage.sender && (populatedMessage.sender as any).profilePhotoId) {
+      try {
+        const photo = await ProfilePhoto.findById((populatedMessage.sender as any).profilePhotoId).lean().exec();
+        if (photo) {
+          responseMessage = populatedMessage.toJSON();
+          responseMessage.sender.profileImage = photo.cloudinarySecureUrl;
+        }
+      } catch (e) {}
+    }
 
     LoggerUtil.info(`✅ Message sent in group ${groupId} by user ${senderId}`);
-    return populatedMessage;
+    return responseMessage;
   } catch (error: any) {
     LoggerUtil.error('❌ Send message error:', error.message);
     throw error;

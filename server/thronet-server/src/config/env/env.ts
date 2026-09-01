@@ -14,10 +14,9 @@
  *   can stub process.env before validation runs
  */
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-require('dotenv').config({
-    path: require('path').join(__dirname, '../../../../../.env'),
-});
+// NOTE: do NOT call dotenv.config() here.
+// Entry points (app.ts, worker.ts) call `import 'dotenv/config'` before anything else.
+// Calling it again here is a no-op at best and confusing at worst.
 
 interface EnvConfig {
     // ── Core ──────────────────────────────────────────────────────────────

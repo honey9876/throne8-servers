@@ -1,7 +1,8 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import validator from 'validator';
 import { LoggerUtil } from '@/shared/logger.util';
 import UserProfile from './UserProfile.model';
+// import userEmitter from '../events/emitters/user.emitter';
 
 const logger = LoggerUtil;
 
@@ -39,8 +40,8 @@ export interface IAuditLog extends Document {
 
 export interface IAuditLogModel extends Model<IAuditLog> {
     logAction(data: Partial<IAuditLog>): Promise<IAuditLog>;
-    getRecentActivity(userId: string, options?: { limit?: number }): Promise<any[]>;
-    getSuspiciousActivity(options?: { timeframeHours?: number; limit?: number }): Promise<any[]>;
+    getRecentActivity(userId: string, options?: { limit?: number }): Promise<IAuditLog[]>;
+    getSuspiciousActivity(options?: { timeframeHours?: number; limit?: number }): Promise<IAuditLog[]>;
 }
 
 const auditLogSchema = new Schema<IAuditLog, IAuditLogModel>(
@@ -48,6 +49,7 @@ const auditLogSchema = new Schema<IAuditLog, IAuditLogModel>(
         userId: {
             type: String,
             required: false,
+            index: true,
         },
         userEmail: String,
         userName: String,
@@ -100,6 +102,7 @@ const auditLogSchema = new Schema<IAuditLog, IAuditLogModel>(
                 'REFRESH_TOKEN_REVOKED',
                 'ALL_REFRESH_TOKENS_REVOKED',
             ],
+            index: true,
         },
         resourceType: {
             type: String,
@@ -131,6 +134,7 @@ const auditLogSchema = new Schema<IAuditLog, IAuditLogModel>(
             type: String,
             enum: ['LOW', 'MEDIUM', 'HIGH'],
             default: 'LOW',
+            index: true,
         },
         suspicious: {
             type: Boolean,
@@ -198,11 +202,27 @@ auditLogSchema.statics.logAction = async function (data: Partial<IAuditLog>): Pr
                 log.suspicious = true;
                 log.severity = 'HIGH';
                 await log.save();
+
+                // userEmitter.emit('audit:suspicious', {
+                //     userId: data.userId,
+                //     action: data.action,
+                //     logId: log._id,
+                //     timestamp: new Date(),
+                // });
             }
         }
 
+        if (log.severity === 'HIGH') {
+            // userEmitter.emit('audit:high_severity', {
+            //     logId: log._id,
+            //     userId: data.userId,
+            //     action: data.action,
+            //     timestamp: new Date(),
+            // });
+        }
+
         return log;
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Audit log creation failed', {
             error: (error as Error).message,
             stack: (error as Error).stack,
@@ -213,37 +233,38 @@ auditLogSchema.statics.logAction = async function (data: Partial<IAuditLog>): Pr
     }
 };
 
-auditLogSchema.statics.getRecentActivity = async function (
-    userId: string,
-    { limit = 50 }: { limit?: number } = {}
-): Promise<any[]> {
-    try {
-        return await this.find({ userId }).sort({ timestamp: -1 }).limit(limit).lean();
-    } catch (error: any) {
-        logger.error('Recent activity retrieval failed', { error: (error as Error).message });
-        throw error;
-    }
-};
+// auditLogSchema.statics.getRecentActivity = async function (userId: string, { limit = 50 }: { limit?: number } = {}): Promise<IAuditLog[]> {
+//     try {
+//         const logs = await this.find({ userId }).sort({ timestamp: -1 }).limit(limit).lean();
+//         return logs;
+//     } catch(error : any) {
+//         logger.error('Recent activity retrieval failed', { error: (error as Error).message });
+//         throw error;
+//     }
+// };
 
-auditLogSchema.statics.getSuspiciousActivity = async function ({
-    timeframeHours = 24,
-    limit = 100,
-}: { timeframeHours?: number; limit?: number } = {}): Promise<any[]> {
-    try {
-        const since = new Date(Date.now() - timeframeHours * 60 * 60 * 1000);
-        return await this.find({
-            $or: [{ suspicious: true }, { severity: 'HIGH' }],
-            timestamp: { $gte: since },
-        })
-            .sort({ timestamp: -1 })
-            .limit(limit)
-            .lean();
-    } catch (error: any) {
-        logger.error('Suspicious activity retrieval failed', { error: (error as Error).message });
-        throw error;
-    }
-};
-
+// auditLogSchema.statics.getSuspiciousActivity = async function ({
+//     timeframeHours = 24,
+//     limit = 100,
+// }: {
+//     timeframeHours?: number;
+//     limit?: number;
+// } = {}): Promise<IAuditLog[]> {
+//     try {
+//         const since = new Date(Date.now() - timeframeHours * 60 * 60 * 1000);
+//         await this.find({
+//             $or: [{ suspicious: true }, { severity: 'HIGH' }],
+//             timestamp: { $gte: since },
+//         })
+//             .sort({ timestamp: -1 })
+//             .limit(limit)
+//             .lean();
+        
+//     } catch(error : any) {
+//         logger.error('Suspicious activity retrieval failed', { error: (error as Error).message });
+//         throw error;
+//     }
+// };
 
 const AuditLog = mongoose.model<IAuditLog, IAuditLogModel>('AuditLog', auditLogSchema);
 export default AuditLog;

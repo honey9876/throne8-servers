@@ -6,7 +6,8 @@
  */
 
 import { Router } from 'express';
-import goalController  from '../controllers/goal.controller';
+import {
+  goalController } from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 import { validateParamsJoi, validateQueryJoi, validation } from '@/shared/middlewares/validation.middleware';
 import {

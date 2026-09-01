@@ -1,4 +1,4 @@
-﻿import mongoose, { Document, Model, Schema } from "mongoose";
+import mongoose, { Document, Model, Schema } from "mongoose";
 import { v4 as uuidv4, validate as uuidValidate } from "uuid";
 import { createHash } from "crypto";
 import logger from "@/shared/logger.util";
@@ -229,6 +229,7 @@ const searchSchema = new Schema<ISearchDocument>(
       type: String,
       required: true,
       unique: true,
+      // index: true,
       validate: {
         validator: (v: string) => validUUIDRegex.test(v),
         message: "Invalid userId UUID",

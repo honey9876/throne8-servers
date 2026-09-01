@@ -1,9 +1,19 @@
+/**
+ * Analytics Model - User Analytics & Insights
+ * Tracks profile views, post impressions, search appearances
+ * 
+ * @module models/Analytics.model
+ * @version 1.0.0
+ */
+
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { LoggerUtil } from '@/shared/logger.util';
 
+// ==================== INTERFACES ====================
+
 export interface IProfileView {
-    viewerId?: string;
+    viewerId?: string;              // null for anonymous
     viewerName?: string;
     viewerHeadline?: string;
     viewerPhotoUrl?: string;
@@ -13,50 +23,47 @@ export interface IProfileView {
     userAgent?: string;
 }
 
-export interface ITimeBasedCount {
-    date: string;
-    count: number;
-    firstViewAt: Date;
-    lastViewAt: Date;
-}
-
 export interface IPostImpression {
     postId: string;
-    source: 'feed' | 'profile' | 'search' | 'hashtag' | 'repost' | 'direct';
+    source: 'feed' | 'profile' | 'search' | 'hashtag' | 'direct';
     viewerId?: string;
     viewedAt: Date;
     engagementType?: 'like' | 'comment' | 'share' | 'save' | 'view_only' | 'impression';
-    engagementTypes?: ('like' | 'comment' | 'share' | 'save')[];   // ← NEW LINE
-    deviceType?: 'mobile' | 'desktop' | 'tablet';
-    sessionId?: string;
-    scrollDepth?: number;
-    viewDuration?: number;
-    lastViewedAt?: Date;
-    viewCount?: number;
-    deviceFingerprint?: string;
-    timeBasedCounts?: ITimeBasedCount[];
-}
 
+    lastViewedAt: Date,           // Track when user last viewed this post
+    viewCount: number,              // How many times this post was viewed by this viewer
+    sessionId: String,             // Browser session ID
+    deviceFingerprint: String,     // Device identification
+    timeBasedCounts?: Array<{  // ✅ Add ? for optional
+        date: string;
+        count: number;
+        firstViewAt: Date;
+        lastViewAt: Date;
+    }>;
+}
 export interface ISearchAppearance {
     searchQuery: string;
     searcherId?: string;
-    searcherName?: string;        // ✅ NEW
-    searcherPhotoUrl?: string;    // ✅ NEW
     appearedAt: Date;
     wasClicked: boolean;
-    position?: number;
+    position?: number;              // Position in search results
 }
 
-export interface IAnalyticsSummary {
-    profileViews: { total: number; inRange: number };
-    postImpressions: { total: number; inRange: number };
-    searchAppearances: { total: number; inRange: number };
+export interface IViewerDemographic {
+    location?: string;
+    jobTitle?: string;
+    industry?: string;
+    experienceLevel?: string;
 }
 
 export interface IAnalytics extends Document {
     analyticsId: string;
     userId: string;
-    isPrivate: boolean;
+
+    // Privacy Settings
+    isPrivate: boolean;             // Private to you toggle
+
+    // Profile Views
     profileViews: {
         total: number;
         last7Days: number;
@@ -64,17 +71,22 @@ export interface IAnalytics extends Document {
         last90Days: number;
         views: IProfileView[];
     };
+
+    // Post Impressions
     postImpressions: {
         total: number;
         last7Days: number;
         last30Days: number;
         impressions: IPostImpression[];
-        sessionId?: string;
-        lastViewedAt?: Date;
-        viewCount: number;
+
+        sessionId?: string;           // Track unique sessions
+        lastViewedAt?: Date;          // For cooldown check
+        viewCount: number;            // How many times this viewer saw this post
         deviceType?: 'mobile' | 'desktop' | 'tablet';
         scrollDepth?: number;
     };
+
+    // Search Appearances
     searchAppearances: {
         total: number;
         last7Days: number;
@@ -82,14 +94,16 @@ export interface IAnalytics extends Document {
         appearances: ISearchAppearance[];
         topKeywords: Array<{ keyword: string; count: number }>;
     };
+
+    // Clicks
     clicks: {
         total: number;
         last7Days: number;
         last30Days: number;
         clicks: Array<{
             clickId: string;
-            clickType: 'profile_link' | 'external_link' | 'post_link' | 'image' | 'video' | 'document'| 'document_download';
-            targetUrl?: string;
+            clickType: 'profile_link' | 'external_link' | 'post_link' | 'image' | 'video' | 'document';
+            targetUrl: string;
             postId?: string;
             clickedAt: Date;
             clickerId?: string;
@@ -97,6 +111,8 @@ export interface IAnalytics extends Document {
             userAgent?: string;
         }>;
     };
+
+    // Shares
     shares: {
         total: number;
         last7Days: number;
@@ -109,6 +125,8 @@ export interface IAnalytics extends Document {
             sharerId?: string;
         }>;
     };
+
+    // Unique Visitors
     uniqueVisitors: {
         total: number;
         last7Days: number;
@@ -123,16 +141,24 @@ export interface IAnalytics extends Document {
                 visitedAt: Date;
                 pageUrl?: string;
                 referrer?: string;
-                duration?: number;
+                duration?: number;  // in seconds
             }>;
         }>;
     };
+
+    // Viewer Demographics (Aggregated)
     demographics: {
         locations: Array<{ location: string; count: number }>;
         jobTitles: Array<{ title: string; count: number }>;
         industries: Array<{ industry: string; count: number }>;
         experienceLevels: Array<{ level: string; count: number }>;
     };
+
+    // Metadata
+    lastCalculatedAt: Date;
+    createdAt: Date;
+    updatedAt: Date;
+
     engagements: {
         total: number;
         last7Days: number;
@@ -147,10 +173,24 @@ export interface IAnalytics extends Document {
             insightful: number;
             funny: number;
         };
-        comments: { total: number; last7Days: number; last30Days: number };
-        shares: { total: number; last7Days: number; last30Days: number };
-        saves: { total: number; last7Days: number; last30Days: number };
+        comments: {
+            total: number;
+            last7Days: number;
+            last30Days: number;
+        };
+        shares: {
+            total: number;
+            last7Days: number;
+            last30Days: number;
+        };
+        saves: {
+            total: number;
+            last7Days: number;
+            last30Days: number;
+        };
     };
+
+    // ✅ NEW: Video Analytics
     videoViews: {
         total: number;
         last7Days: number;
@@ -159,26 +199,32 @@ export interface IAnalytics extends Document {
             videoId: string;
             viewerId?: string;
             viewedAt: Date;
-            watchDuration: number;
-            completionRate: number;
+            watchDuration: number; // seconds
+            completionRate: number; // 0-100%
             source: 'feed' | 'profile' | 'direct';
         }>;
     };
+
+    // ✅ NEW: Viewer Retention
     viewerRetention: {
         newViewers: {
             last7Days: number;
             last30Days: number;
-            viewers: Array<{ viewerId: string; firstViewAt: Date }>;
+            viewers: Array<{
+                viewerId: string;
+                firstViewAt: Date;
+            }>;
         };
         returningViewers: {
             last7Days: number;
             last30Days: number;
-            viewers: Array<{ viewerId: string; viewCount: number; lastViewAt: Date }>;
+            viewers: Array<{
+                viewerId: string;
+                viewCount: number;
+                lastViewAt: Date;
+            }>;
         };
     };
-    lastCalculatedAt: Date;
-    createdAt: Date;
-    updatedAt: Date;
 }
 
 export interface IAnalyticsModel extends Model<IAnalytics> {
@@ -186,8 +232,10 @@ export interface IAnalyticsModel extends Model<IAnalytics> {
     recordProfileView(userId: string, viewerData: Partial<IProfileView>): Promise<void>;
     recordPostImpression(userId: string, impressionData: IPostImpression): Promise<void>;
     recordSearchAppearance(userId: string, searchData: ISearchAppearance): Promise<void>;
-    getAnalyticsSummary(userId: string, dateRange: number): Promise<IAnalyticsSummary>;
+    getAnalyticsSummary(userId: string, dateRange: number): Promise<any>;
 }
+
+// ==================== SCHEMA ====================
 
 const AnalyticsSchema = new Schema<IAnalytics, IAnalyticsModel>(
     {
@@ -196,69 +244,75 @@ const AnalyticsSchema = new Schema<IAnalytics, IAnalyticsModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
             unique: true,
+            // index: true,
             validate: {
-                validator: (v: string) =>
-                    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
+                validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
             },
         },
-        isPrivate: { type: Boolean, default: false },
+
+        // ==================== PRIVACY SETTINGS ====================
+        isPrivate: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+
+        // ==================== PROFILE VIEWS ====================
         profileViews: {
             total: { type: Number, default: 0 },
             last7Days: { type: Number, default: 0 },
             last30Days: { type: Number, default: 0 },
             last90Days: { type: Number, default: 0 },
-            views: [{
-                viewerId: { type: String, default: null },
-                viewerName: String,
-                viewerHeadline: String,
-                viewerPhotoUrl: String,
-                viewedAt: { type: Date, default: Date.now },
-                isAnonymous: { type: Boolean, default: false },
-                ipAddress: String,
-                userAgent: String,
-            }],
+            views: [
+                {
+                    viewerId: { type: String, default: null },
+                    viewerName: { type: String },
+                    viewerHeadline: { type: String },
+                    viewerPhotoUrl: { type: String },
+                    viewedAt: { type: Date, default: Date.now },
+                    isAnonymous: { type: Boolean, default: false },
+                    ipAddress: { type: String },
+                    userAgent: { type: String },
+                }
+            ]
         },
+
+        // ==================== POST IMPRESSIONS ====================
         postImpressions: {
             total: { type: Number, default: 0 },
             last7Days: { type: Number, default: 0 },
             last30Days: { type: Number, default: 0 },
-            impressions: [{
-                postId: { type: String, required: true },
-                source: {
-                    type: String,
-                    enum: ['feed', 'profile', 'search', 'hashtag', 'repost', 'direct'],
-                    required: true,
-                },
-                viewerId: String,
-                viewedAt: { type: Date, default: Date.now },
-                engagementType: {
-                    type: String,
-                    enum: ['like', 'comment', 'share', 'save', 'view_only', 'impression'],
-                },
-                engagementTypes: [{ type: String, enum: ['like', 'comment', 'share', 'save'] }],   // ← NEW LINE
-                deviceType: { type: String, enum: ['mobile', 'desktop', 'tablet'] },
-                sessionId: String,
-                scrollDepth: Number,
-                viewDuration: Number,
-                lastViewedAt: { type: Date, default: Date.now },
-                viewCount: { type: Number, default: 1 },
-                deviceFingerprint: String,
-                timeBasedCounts: [{
-                    date: { type: String, required: true },
-                    count: { type: Number, default: 0 },
-                    firstViewAt: { type: Date, default: Date.now },
-                    lastViewAt: { type: Date, default: Date.now },
-                }],
-            }],
-            viewCount: { type: Number, default: 0 },
+            impressions: [
+                {
+                    postId: { type: String, required: true },
+                    source: {
+                        type: String,
+                        enum: ['feed', 'profile', 'search', 'hashtag', 'repost', 'direct'],  // ✅ ADD 'repost'
+                        required: true
+                    },
+                    viewerId: { type: String },
+                    viewedAt: { type: Date, default: Date.now },
+                    engagementType: {
+                        type: String,
+                        enum: ['like', 'comment', 'share', 'save', 'view_only', 'impression']  // ✅ ADD 'impression'
+                    },
+                    // ✅ ADD NEW FIELDS
+                    deviceType: { type: String, enum: ['mobile', 'desktop', 'tablet'] },
+                    sessionId: { type: String },  // Track unique sessions
+                    scrollDepth: { type: Number },  // How much of post was visible
+                    viewDuration: { type: Number }  // Time spent viewing (ms)
+                }
+            ]
         },
+
         engagements: {
             total: { type: Number, default: 0 },
             last7Days: { type: Number, default: 0 },
@@ -273,54 +327,91 @@ const AnalyticsSchema = new Schema<IAnalytics, IAnalyticsModel>(
                 insightful: { type: Number, default: 0 },
                 funny: { type: Number, default: 0 },
             },
-            comments: { total: { type: Number, default: 0 }, last7Days: { type: Number, default: 0 }, last30Days: { type: Number, default: 0 } },
-            shares: { total: { type: Number, default: 0 }, last7Days: { type: Number, default: 0 }, last30Days: { type: Number, default: 0 } },
-            saves: { total: { type: Number, default: 0 }, last7Days: { type: Number, default: 0 }, last30Days: { type: Number, default: 0 } },
+            comments: {
+                total: { type: Number, default: 0 },
+                last7Days: { type: Number, default: 0 },
+                last30Days: { type: Number, default: 0 },
+            },
+            shares: {
+                total: { type: Number, default: 0 },
+                last7Days: { type: Number, default: 0 },
+                last30Days: { type: Number, default: 0 },
+            },
+            saves: {
+                total: { type: Number, default: 0 },
+                last7Days: { type: Number, default: 0 },
+                last30Days: { type: Number, default: 0 },
+            },
         },
+
+        // ✅ NEW: Video Views
         videoViews: {
             total: { type: Number, default: 0 },
             last7Days: { type: Number, default: 0 },
             last30Days: { type: Number, default: 0 },
-            views: [{
-                videoId: { type: String, required: true },
-                viewerId: String,
-                viewedAt: { type: Date, default: Date.now },
-                watchDuration: { type: Number, default: 0 },
-                completionRate: { type: Number, default: 0 },
-                source: { type: String, enum: ['feed', 'profile', 'direct'], default: 'feed' },
-            }],
+            views: [
+                {
+                    videoId: { type: String, required: true },
+                    viewerId: { type: String },
+                    viewedAt: { type: Date, default: Date.now },
+                    watchDuration: { type: Number, default: 0 },
+                    completionRate: { type: Number, default: 0 },
+                    source: {
+                        type: String,
+                        enum: ['feed', 'profile', 'direct'],
+                        default: 'feed',
+                    },
+                }
+            ]
         },
+
+        // ✅ NEW: Viewer Retention
         viewerRetention: {
             newViewers: {
                 last7Days: { type: Number, default: 0 },
                 last30Days: { type: Number, default: 0 },
-                viewers: [{ viewerId: { type: String, required: true }, firstViewAt: { type: Date, default: Date.now } }],
+                viewers: [
+                    {
+                        viewerId: { type: String, required: true },
+                        firstViewAt: { type: Date, default: Date.now },
+                    }
+                ]
             },
             returningViewers: {
                 last7Days: { type: Number, default: 0 },
                 last30Days: { type: Number, default: 0 },
-                viewers: [{
-                    viewerId: { type: String, required: true },
-                    viewCount: { type: Number, default: 1 },
-                    lastViewAt: { type: Date, default: Date.now },
-                }],
-            },
+                viewers: [
+                    {
+                        viewerId: { type: String, required: true },
+                        viewCount: { type: Number, default: 1 },
+                        lastViewAt: { type: Date, default: Date.now },
+                    }
+                ]
+            }
         },
+
+        // ==================== SEARCH APPEARANCES ====================
         searchAppearances: {
             total: { type: Number, default: 0 },
             last7Days: { type: Number, default: 0 },
             last30Days: { type: Number, default: 0 },
-            appearances: [{
-                searchQuery: { type: String, required: true },
-                searcherId: String,
-                searcherName: String,        // ✅ NEW
-                searcherPhotoUrl: String,    // ✅ NEW
-                appearedAt: { type: Date, default: Date.now },
-                wasClicked: { type: Boolean, default: false },
-                position: Number,
-            }],
-            topKeywords: [{ keyword: String, count: { type: Number, default: 0 } }],
+            appearances: [
+                {
+                    searchQuery: { type: String, required: true },
+                    searcherId: { type: String },
+                    appearedAt: { type: Date, default: Date.now },
+                    wasClicked: { type: Boolean, default: false },
+                    position: { type: Number }
+                }
+            ],
+            topKeywords: [
+                {
+                    keyword: { type: String },
+                    count: { type: Number, default: 0 }
+                }
+            ]
         },
+
         clicks: {
             total: { type: Number, default: 0 },
             last7Days: { type: Number, default: 0 },
@@ -329,17 +420,18 @@ const AnalyticsSchema = new Schema<IAnalytics, IAnalyticsModel>(
                 clickId: { type: String, default: () => uuidv4() },
                 clickType: {
                     type: String,
-                    enum: ['profile_link', 'external_link', 'post_link', 'image', 'video', 'document','document_download'],
-                    required: true,
+                    enum: ['profile_link', 'external_link', 'post_link', 'image', 'video', 'document'],
+                    required: true
                 },
                 targetUrl: String,
                 postId: String,
                 clickedAt: { type: Date, default: Date.now },
                 clickerId: String,
                 referrer: String,
-                userAgent: String,
-            }],
+                userAgent: String
+            }]
         },
+
         shares: {
             total: { type: Number, default: 0 },
             last7Days: { type: Number, default: 0 },
@@ -350,12 +442,13 @@ const AnalyticsSchema = new Schema<IAnalytics, IAnalyticsModel>(
                 shareType: {
                     type: String,
                     enum: ['direct', 'linkedin', 'twitter', 'facebook', 'whatsapp', 'email', 'copy_link'],
-                    required: true,
+                    required: true
                 },
                 sharedAt: { type: Date, default: Date.now },
-                sharerId: String,
-            }],
+                sharerId: String
+            }]
         },
+
         uniqueVisitors: {
             total: { type: Number, default: 0 },
             last7Days: { type: Number, default: 0 },
@@ -370,157 +463,310 @@ const AnalyticsSchema = new Schema<IAnalytics, IAnalyticsModel>(
                     visitedAt: Date,
                     pageUrl: String,
                     referrer: String,
-                    duration: Number,
-                }],
-            }],
+                    duration: Number  // in seconds
+                }]
+            }]
         },
+
+        // ==================== DEMOGRAPHICS (AGGREGATED) ====================
         demographics: {
-            locations: [{ location: String, count: { type: Number, default: 0 } }],
-            jobTitles: [{ title: String, count: { type: Number, default: 0 } }],
-            industries: [{ industry: String, count: { type: Number, default: 0 } }],
-            experienceLevels: [{ level: String, count: { type: Number, default: 0 } }],
+            locations: [
+                {
+                    location: { type: String },
+                    count: { type: Number, default: 0 }
+                }
+            ],
+            jobTitles: [
+                {
+                    title: { type: String },
+                    count: { type: Number, default: 0 }
+                }
+            ],
+            industries: [
+                {
+                    industry: { type: String },
+                    count: { type: Number, default: 0 }
+                }
+            ],
+            experienceLevels: [
+                {
+                    level: { type: String },
+                    count: { type: Number, default: 0 }
+                }
+            ]
         },
-        lastCalculatedAt: { type: Date, default: Date.now },
+
+        // ==================== METADATA ====================
+        lastCalculatedAt: {
+            type: Date,
+            default: Date.now,
+        },
     },
     {
         timestamps: true,
         collection: 'analytics',
         toJSON: {
             virtuals: true,
-            transform: (_doc, ret: Record<string, unknown>) => {
+            transform: function (_doc, ret: any) {
                 delete ret.__v;
                 return ret;
             },
         },
-        toObject: { virtuals: true },
+        toObject: {
+            virtuals: true,
+        },
     }
 );
 
+// ==================== INDEXES ====================
 
+// AnalyticsSchema.index({ userId: 1 }, { unique: true });
 AnalyticsSchema.index({ 'profileViews.views.viewedAt': -1 });
 AnalyticsSchema.index({ 'postImpressions.impressions.viewedAt': -1 });
 AnalyticsSchema.index({ 'searchAppearances.appearances.appearedAt': -1 });
 AnalyticsSchema.index({ lastCalculatedAt: -1 });
+
 AnalyticsSchema.index({ 'engagements.total': -1 });
 AnalyticsSchema.index({ 'videoViews.total': -1 });
 AnalyticsSchema.index({ 'videoViews.views.viewedAt': -1 });
 AnalyticsSchema.index({ 'viewerRetention.newViewers.viewers.firstViewAt': -1 });
 
+// ==================== MIDDLEWARE ====================
+
+/**
+ * Pre-save: Calculate time-based aggregations
+ */
 AnalyticsSchema.pre('save', function (next) {
     const now = new Date();
-    const d7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const d30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const d90 = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const last30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const last90Days = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
-    this.profileViews.last7Days = this.profileViews.views.filter((v) => v.viewedAt >= d7).length;
-    this.profileViews.last30Days = this.profileViews.views.filter((v) => v.viewedAt >= d30).length;
-    this.profileViews.last90Days = this.profileViews.views.filter((v) => v.viewedAt >= d90).length;
-    this.postImpressions.last7Days = this.postImpressions.impressions.filter((i) => i.viewedAt >= d7).length;
-    this.postImpressions.last30Days = this.postImpressions.impressions.filter((i) => i.viewedAt >= d30).length;
-    this.searchAppearances.last7Days = this.searchAppearances.appearances.filter((a) => a.appearedAt >= d7).length;
-    this.searchAppearances.last30Days = this.searchAppearances.appearances.filter((a) => a.appearedAt >= d30).length;
-    // ✅ FIX: clicks/shares/uniqueVisitors ke last7/30Days bhi calculate karo
-    this.clicks.last7Days = this.clicks.clicks.filter((c) => c.clickedAt >= d7).length;
-    this.clicks.last30Days = this.clicks.clicks.filter((c) => c.clickedAt >= d30).length;
-    this.shares.last7Days = this.shares.shares.filter((s) => s.sharedAt >= d7).length;
-    this.shares.last30Days = this.shares.shares.filter((s) => s.sharedAt >= d30).length;
-    this.uniqueVisitors.last7Days = this.uniqueVisitors.visitors.filter((v) => v.lastVisit >= d7).length;
-    this.uniqueVisitors.last30Days = this.uniqueVisitors.visitors.filter((v) => v.lastVisit >= d30).length;
+    // Profile Views
+    this.profileViews.last7Days = this.profileViews.views.filter(
+        v => v.viewedAt >= last7Days
+    ).length;
+
+    this.profileViews.last30Days = this.profileViews.views.filter(
+        v => v.viewedAt >= last30Days
+    ).length;
+
+    this.profileViews.last90Days = this.profileViews.views.filter(
+        v => v.viewedAt >= last90Days
+    ).length;
+
+    // Post Impressions
+    this.postImpressions.last7Days = this.postImpressions.impressions.filter(
+        i => i.viewedAt >= last7Days
+    ).length;
+
+    this.postImpressions.last30Days = this.postImpressions.impressions.filter(
+        i => i.viewedAt >= last30Days
+    ).length;
+
+    // Search Appearances
+    this.searchAppearances.last7Days = this.searchAppearances.appearances.filter(
+        a => a.appearedAt >= last7Days
+    ).length;
+
+    this.searchAppearances.last30Days = this.searchAppearances.appearances.filter(
+        a => a.appearedAt >= last30Days
+    ).length;
 
     this.lastCalculatedAt = now;
+
     next();
 });
 
+// ==================== STATIC METHODS ====================
+
+/**
+ * Find analytics by userId
+ */
 AnalyticsSchema.statics.findByUserId = async function (userId: string): Promise<IAnalytics | null> {
     try {
         return await this.findOne({ userId }).exec();
-    } catch (error: unknown) {
-        LoggerUtil.error('Find analytics by userId failed', { error: (error as Error).message, userId });
+    } catch (error : any) {
+        LoggerUtil.error('Find analytics by userId failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+/**
+ * Record profile view
+ */
 AnalyticsSchema.statics.recordProfileView = async function (
     userId: string,
     viewerData: Partial<IProfileView>
 ): Promise<void> {
     try {
         let analytics = await this.findOne({ userId });
-        if (!analytics) analytics = new this({ analyticsId: uuidv4(), userId });
 
-        analytics.profileViews.views.push({
-            viewerId: viewerData.viewerId ?? null,
-            viewerName: viewerData.viewerName,
-            viewerHeadline: viewerData.viewerHeadline,
-            viewerPhotoUrl: viewerData.viewerPhotoUrl,
-            viewedAt: new Date(),
-            isAnonymous: !viewerData.viewerId,
-            ipAddress: viewerData.ipAddress,
-            userAgent: viewerData.userAgent,
-        } as IProfileView);
+        if (!analytics) {
+            analytics = new this({
+                analyticsId: uuidv4(),
+                userId,
+            });
+        }
 
-        analytics.profileViews.total++;
+        // LinkedIn-style: find existing entry for this viewer
+        const viewerId = viewerData.viewerId || null;
+        const existingIndex = viewerId
+            ? analytics.profileViews.views.findIndex((v: any) => v.viewerId === viewerId)
+            : -1;
+
+        if (existingIndex !== -1) {
+            // Update existing viewer entry (deduplicate — just refresh their info and timestamp)
+            analytics.profileViews.views[existingIndex].viewedAt = new Date();
+            if (viewerData.viewerName) analytics.profileViews.views[existingIndex].viewerName = viewerData.viewerName;
+            if (viewerData.viewerHeadline) analytics.profileViews.views[existingIndex].viewerHeadline = viewerData.viewerHeadline;
+            if (viewerData.viewerPhotoUrl) analytics.profileViews.views[existingIndex].viewerPhotoUrl = viewerData.viewerPhotoUrl;
+        } else {
+            // New viewer — push fresh entry and increment total
+            analytics.profileViews.views.push({
+                viewerId,
+                viewerName: viewerData.viewerName,
+                viewerHeadline: viewerData.viewerHeadline,
+                viewerPhotoUrl: viewerData.viewerPhotoUrl,
+                viewedAt: new Date(),
+                isAnonymous: !viewerData.viewerId,
+                ipAddress: viewerData.ipAddress,
+                userAgent: viewerData.userAgent,
+            } as IProfileView);
+            analytics.profileViews.total++;
+        }
+
         await analytics.save();
-    } catch (error: unknown) {
-        LoggerUtil.error('Record profile view failed', { error: (error as Error).message, userId });
+
+        LoggerUtil.info('Profile view recorded', {
+            userId,
+            viewerId: viewerData.viewerId,
+            deduplicated: existingIndex !== -1,
+        });
+    } catch (error : any) {
+        LoggerUtil.error('Record profile view failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+/**
+ * Record post impression
+ */
 AnalyticsSchema.statics.recordPostImpression = async function (
     userId: string,
     impressionData: IPostImpression
 ): Promise<void> {
     try {
         let analytics = await this.findOne({ userId });
-        if (!analytics) analytics = new this({ analyticsId: uuidv4(), userId });
 
-        analytics.postImpressions.impressions.push({ ...impressionData, viewedAt: new Date() });
+        if (!analytics) {
+            analytics = new this({
+                analyticsId: uuidv4(),
+                userId,
+            });
+        }
+
+        analytics.postImpressions.impressions.push({
+            ...impressionData,
+            viewedAt: new Date(),
+        });
+
         analytics.postImpressions.total++;
+
         await analytics.save();
-    } catch (error: unknown) {
-        LoggerUtil.error('Record post impression failed', { error: (error as Error).message, userId });
+
+        LoggerUtil.info('Post impression recorded', {
+            userId,
+            postId: impressionData.postId,
+            source: impressionData.source,
+        });
+    } catch (error : any) {
+        LoggerUtil.error('Record post impression failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+/**
+ * Record search appearance
+ */
 AnalyticsSchema.statics.recordSearchAppearance = async function (
     userId: string,
     searchData: ISearchAppearance
 ): Promise<void> {
     try {
         let analytics = await this.findOne({ userId });
-        if (!analytics) analytics = new this({ analyticsId: uuidv4(), userId });
 
-        analytics.searchAppearances.appearances.push({ ...searchData, appearedAt: new Date() });
-        analytics.searchAppearances.total++;
-
-        const keyword = searchData.searchQuery.toLowerCase();
-        const existing = analytics.searchAppearances.topKeywords.find((k) => k.keyword === keyword);
-        if (existing) {
-            existing.count++;
-        } else {
-            analytics.searchAppearances.topKeywords.push({ keyword, count: 1 });
+        if (!analytics) {
+            analytics = new this({
+                analyticsId: uuidv4(),
+                userId,
+            });
         }
 
+        analytics.searchAppearances.appearances.push({
+            ...searchData,
+            appearedAt: new Date(),
+        });
+
+        analytics.searchAppearances.total++;
+
+        // Update top keywords
+        const keyword = searchData.searchQuery.toLowerCase();
+        const existingKeyword = analytics.searchAppearances.topKeywords.find(
+            k => k.keyword === keyword
+        );
+
+        if (existingKeyword) {
+            existingKeyword.count++;
+        } else {
+            analytics.searchAppearances.topKeywords.push({
+                keyword,
+                count: 1,
+            });
+        }
+
+        // Sort by count descending
         analytics.searchAppearances.topKeywords.sort((a, b) => b.count - a.count);
+
+        // Keep only top 10
         if (analytics.searchAppearances.topKeywords.length > 10) {
             analytics.searchAppearances.topKeywords = analytics.searchAppearances.topKeywords.slice(0, 10);
         }
 
         await analytics.save();
-    } catch (error: unknown) {
-        LoggerUtil.error('Record search appearance failed', { error: (error as Error).message, userId });
+
+        LoggerUtil.info('Search appearance recorded', {
+            userId,
+            searchQuery: searchData.searchQuery,
+        });
+    } catch (error : any) {
+        LoggerUtil.error('Record search appearance failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+/**
+ * Get analytics summary for date range
+ */
 AnalyticsSchema.statics.getAnalyticsSummary = async function (
     userId: string,
-    dateRange = 7
-): Promise<IAnalyticsSummary> {
+    dateRange: number = 7
+): Promise<any> {
     try {
         const analytics = await this.findOne({ userId });
+
         if (!analytics) {
             return {
                 profileViews: { total: 0, inRange: 0 },
@@ -528,26 +774,73 @@ AnalyticsSchema.statics.getAnalyticsSummary = async function (
                 searchAppearances: { total: 0, inRange: 0 },
             };
         }
-        const cutoff = new Date(Date.now() - dateRange * 24 * 60 * 60 * 1000);
+
+        const cutoffDate = new Date(Date.now() - dateRange * 24 * 60 * 60 * 1000);
+
         return {
             profileViews: {
                 total: analytics.profileViews.total,
-                inRange: analytics.profileViews.views.filter((v) => v.viewedAt >= cutoff).length,
+                inRange: analytics.profileViews.views.filter(
+                    v => v.viewedAt >= cutoffDate
+                ).length,
             },
             postImpressions: {
                 total: analytics.postImpressions.total,
-                inRange: analytics.postImpressions.impressions.filter((i) => i.viewedAt >= cutoff).length,
+                inRange: analytics.postImpressions.impressions.filter(
+                    i => i.viewedAt >= cutoffDate
+                ).length,
             },
             searchAppearances: {
                 total: analytics.searchAppearances.total,
-                inRange: analytics.searchAppearances.appearances.filter((a) => a.appearedAt >= cutoff).length,
+                inRange: analytics.searchAppearances.appearances.filter(
+                    a => a.appearedAt >= cutoffDate
+                ).length,
             },
         };
-    } catch (error: unknown) {
-        LoggerUtil.error('Get analytics summary failed', { error: (error as Error).message, userId });
+    } catch (error : any) {
+        LoggerUtil.error('Get analytics summary failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+// ==================== EXPORT ====================
+
 const Analytics = mongoose.model<IAnalytics, IAnalyticsModel>('Analytics', AnalyticsSchema);
 export default Analytics;
+
+
+
+// 1. Core Analytics APIs
+
+// Privacy toggle (public/private)
+// Profile views count (total, 7d, 30d, 90d)
+// Profile views detail (with premium/free differentiation)
+// Post impressions count
+// Post impressions detail
+// Post impressions by timeframe
+// Search appearances count
+// Search appearances detail
+// All analytics summary endpoint
+// Analytics by custom date range
+// Export analytics (CSV/Excel)
+// Analytics graph data
+
+// 2. Recording Mechanisms
+
+// Record profile view (with viewer details)
+// Record post impression (with source tracking)
+// Record search appearance (with click tracking)
+
+// 3. Data Models
+
+// Analytics schema with all necessary fields
+// Profile views storage
+// Post impressions storage
+// Search appearances storage
+// Demographics aggregation
+// Engagement tracking structure
+// Video views structure
+// Viewer retention structure

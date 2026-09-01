@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { LoggerUtil } from '@/shared/logger.util';
 
@@ -41,11 +41,13 @@ const CompanyLogoSchema = new Schema<ICompanyLogo, ICompanyLogoModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         companyId: {
             type: String,
             required: [true, 'Company ID is required'],
+            index: true,
         },
         cloudinaryPublicId: {
             type: String,
@@ -98,15 +100,18 @@ const CompanyLogoSchema = new Schema<ICompanyLogo, ICompanyLogoModel>(
         isActive: {
             type: Boolean,
             default: false,
+            index: true,
         },
         status: {
             type: String,
             enum: ['active', 'archived', 'deleted'],
             default: 'active',
+            index: true,
         },
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: {
             type: Date,

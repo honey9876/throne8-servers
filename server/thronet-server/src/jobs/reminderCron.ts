@@ -1,4 +1,3 @@
-﻿console.log('TRACE_START reminderCron.ts');
 // src/jobs/reminderCron.ts
 import cron from 'node-cron';
 import { SessionMentor } from '@/Mentorship/models';
@@ -20,17 +19,17 @@ class ReminderCron {
     // Run every 15 minutes
     cron.schedule('*/15 * * * *', async () => {
       try {
-        logger.info('ðŸ”” Running session reminder cron job');
+        logger.info('🔔 Running session reminder cron job');
         await this.send24HourReminders();
         await this.send1HourReminders();
         await this.send15MinuteReminders();
-        logger.info('âœ… Session reminder cron job completed');
+        logger.info('✅ Session reminder cron job completed');
       } catch(error : any) {
-        logger.error('âŒ Error in reminder cron job:', error);
+        logger.error('❌ Error in reminder cron job:', error);
       }
     });
 
-    logger.info('ðŸ”” Reminder cron job initialized');
+    logger.info('🔔 Reminder cron job initialized');
   }
 
   /**
@@ -51,7 +50,7 @@ class ReminderCron {
         status: BookingStatus.CONFIRMED,
       });
 
-      logger.info(`ðŸ“§ Sending 24-hour reminders for ${sessions.length} sessions`);
+      logger.info(`📧 Sending 24-hour reminders for ${sessions.length} sessions`);
 
       for (const session of sessions) {
         try {
@@ -66,7 +65,7 @@ class ReminderCron {
           // Send email
           await emailService.sendEmail({
             to: user.email,
-            subject: 'ðŸ“… Session Reminder - Tomorrow',
+            subject: '📅 Session Reminder - Tomorrow',
             html: `
               <h2>Your session is tomorrow!</h2>
               <p>Hi ${user.fullName || user.email},</p>
@@ -83,7 +82,7 @@ class ReminderCron {
             `,
           });
 
-          logger.info(`âœ… 24-hour reminder sent for session: ${session._id}`);
+          logger.info(`✅ 24-hour reminder sent for session: ${session._id}`);
         } catch(error : any) {
           logger.error(`Failed to send 24-hour reminder for session ${session._id}:`, error);
         }
@@ -111,7 +110,7 @@ class ReminderCron {
         status: BookingStatus.CONFIRMED,
       });
 
-      logger.info(`ðŸ“§ Sending 1-hour reminders for ${sessions.length} sessions`);
+      logger.info(`📧 Sending 1-hour reminders for ${sessions.length} sessions`);
 
       for (const session of sessions) {
         try {
@@ -126,7 +125,7 @@ class ReminderCron {
           // Send email
           await emailService.sendEmail({
             to: user.email,
-            subject: 'â° Session Starting in 1 Hour!',
+            subject: '⏰ Session Starting in 1 Hour!',
             html: `
               <h2>Your session starts in 1 hour!</h2>
               <p>Hi ${user.fullName || user.email},</p>
@@ -138,7 +137,7 @@ class ReminderCron {
                 <li>Duration: ${session.duration} minutes</li>
               </ul>
               ${session.meeting?.meetingUrl ? `<p><strong>Join Meeting:</strong> <a href="${session.meeting.meetingUrl}">${session.meeting.meetingUrl}</a></p>` : ''}
-              <p>Get ready! ðŸš€</p>
+              <p>Get ready! 🚀</p>
             `,
           });
 
@@ -146,11 +145,11 @@ class ReminderCron {
           if (user.phoneNumber) {
             await smsService.sendSMS({
               to: user.phoneNumber,
-              message: `â° Your session with ${mentor.fullName || mentor.email} starts in 1 hour! ${session.meeting?.meetingUrl ? `Join: ${session.meeting.meetingUrl}` : ''}`,
+              message: `⏰ Your session with ${mentor.fullName || mentor.email} starts in 1 hour! ${session.meeting?.meetingUrl ? `Join: ${session.meeting.meetingUrl}` : ''}`,
             });
           }
 
-          logger.info(`âœ… 1-hour reminder sent for session: ${session._id}`);
+          logger.info(`✅ 1-hour reminder sent for session: ${session._id}`);
         } catch(error : any) {
           logger.error(`Failed to send 1-hour reminder for session ${session._id}:`, error);
         }
@@ -178,7 +177,7 @@ class ReminderCron {
         status: BookingStatus.CONFIRMED,
       });
 
-      logger.info(`ðŸ“§ Sending 15-minute reminders for ${sessions.length} sessions`);
+      logger.info(`📧 Sending 15-minute reminders for ${sessions.length} sessions`);
 
       for (const session of sessions) {
         try {
@@ -193,7 +192,7 @@ class ReminderCron {
           // Send email
           await emailService.sendEmail({
             to: user.email,
-            subject: 'ðŸš€ Session Starting Soon - Join Now!',
+            subject: '🚀 Session Starting Soon - Join Now!',
             html: `
               <h2>Your session is starting soon!</h2>
               <p>Hi ${user.fullName || user.email},</p>
@@ -205,7 +204,7 @@ class ReminderCron {
                   Join Meeting
                 </a>
               ` : ''}
-              <p>See you there! ðŸŽ¯</p>
+              <p>See you there! 🎯</p>
             `,
           });
 
@@ -213,11 +212,11 @@ class ReminderCron {
           if (user.phoneNumber) {
             await smsService.sendSMS({
               to: user.phoneNumber,
-              message: `ðŸš€ Your session starts in 15 minutes! ${session.meeting?.meetingUrl ? `Join now: ${session.meeting.meetingUrl}` : ''}`,
+              message: `🚀 Your session starts in 15 minutes! ${session.meeting?.meetingUrl ? `Join now: ${session.meeting.meetingUrl}` : ''}`,
             });
           }
 
-          logger.info(`âœ… 15-minute reminder sent for session: ${session._id}`);
+          logger.info(`✅ 15-minute reminder sent for session: ${session._id}`);
         } catch(error : any) {
           logger.error(`Failed to send 15-minute reminder for session ${session._id}:`, error);
         }
@@ -231,14 +230,12 @@ class ReminderCron {
    * Manual trigger for testing
    */
   static async triggerManually(): Promise<void> {
-    logger.info('ðŸ”” Manually triggering reminder cron job');
+    logger.info('🔔 Manually triggering reminder cron job');
     await this.send24HourReminders();
     await this.send1HourReminders();
     await this.send15MinuteReminders();
-    logger.info('âœ… Manual trigger completed');
+    logger.info('✅ Manual trigger completed');
   }
 }
 
 export default ReminderCron;
-console.log('TRACE_END reminderCron.ts');
-

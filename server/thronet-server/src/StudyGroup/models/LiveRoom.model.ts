@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ====================================
  * LIVE ROOM MODEL
  * ====================================
@@ -49,6 +49,7 @@ const liveRoomSchema = new Schema<ILiveRoomDocument>(
       type: Schema.Types.ObjectId,
       ref: 'StudyGroup_Group',
       required: [true, 'Group is required'],
+      index: true,
     },
     title: {
       type: String,
@@ -66,6 +67,7 @@ const liveRoomSchema = new Schema<ILiveRoomDocument>(
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: [true, 'Host is required'],
+      index: true,
     },
     participants: {
       type: [participantSchema],
@@ -80,6 +82,7 @@ const liveRoomSchema = new Schema<ILiveRoomDocument>(
     isActive: {
       type: Boolean,
       default: true,
+      index: true,
     },
     startedAt: {
       type: Date,

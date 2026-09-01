@@ -323,39 +323,14 @@ class AvailabilityService {
     try {
       logger.info(`Updating availability: ${availabilityId}`);
 
-      let finalUpdates = { ...updates };
-
       if (updates.slots) {
-        /**
-         * TEMP FIX:
-         * Preserve booked/blocked slots using the latest database state.
-         * Prevents stale frontend data from overwriting active bookings
-         * during availability updates.
-         */
-        // OLD IMPLEMENTATION: this.validateSlots(updates.slots);
-        
-        const existingDoc = await availabilityRepository.findByAvailabilityId(availabilityId);
-        if (!existingDoc) {
-          throw new NotFoundError('Availability not found');
-        }
-
-        const preservedSlots = existingDoc.slots.filter(
-          (s: any) => s.isBooked || s.isBlocked
-        );
-
-        const incomingSlots = updates.slots.filter(
-          (incoming: any) => !preservedSlots.some((ps: any) => ps.startTime === incoming.startTime)
-        );
-
-        finalUpdates.slots = [...incomingSlots, ...preservedSlots] as any;
-
-        // ✅ FIX: Overlap check runs on the final merged array
-        this.validateSlots(finalUpdates.slots);
+        // ✅ FIX: Overlap check runs on updates too
+        this.validateSlots(updates.slots);
       }
 
       const availability = await availabilityRepository.updateByAvailabilityId(
         availabilityId,
-        finalUpdates
+        updates
       );
 
       if (!availability) {

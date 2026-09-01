@@ -1,5 +1,7 @@
-﻿/**
+    /**
  * CoverPhoto Model - User Cover/Banner Picture Management
+ * Stores cover photos with Cloudinary integration
+ * 
  * @module models/CoverPhoto.model
  * @version 1.0.0
  */
@@ -8,25 +10,37 @@ import { LoggerUtil } from '@/shared/logger.util';
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 
+// ==================== INTERFACES ====================
+
 export interface ICoverPhoto extends Document {
     coverId: string;
     userId: string;
+
+    // Cloudinary Info
     cloudinaryPublicId: string;
     cloudinaryUrl: string;
     cloudinarySecureUrl: string;
     cloudinaryFolder: string;
+
+    // Photo Metadata
     originalName: string;
     mimeType: string;
     fileSize: number;
     width: number;
     height: number;
     format: string;
+
+    // Photo Status
     isActive: boolean;
     status: 'active' | 'archived' | 'deleted';
+
+    // Soft Delete / Archive
     isDeleted: boolean;
     deletedAt?: Date;
     isArchived: boolean;
     archivedAt?: Date;
+
+    // Metadata
     uploadedAt: Date;
     createdAt: Date;
     updatedAt: Date;
@@ -39,6 +53,8 @@ export interface ICoverPhotoModel extends Model<ICoverPhoto> {
     setActiveCover(coverId: string, userId: string): Promise<ICoverPhoto>;
 }
 
+// ==================== SCHEMA ====================
+
 const CoverPhotoSchema = new Schema<ICoverPhoto, ICoverPhotoModel>(
     {
         coverId: {
@@ -46,17 +62,20 @@ const CoverPhotoSchema = new Schema<ICoverPhoto, ICoverPhotoModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
-            // FIX:  hataya - unique:true apne aap index banata hai
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
             },
         },
+
+        // ==================== CLOUDINARY INFO ====================
         cloudinaryPublicId: {
             type: String,
             required: [true, 'Cloudinary public ID is required'],
@@ -73,6 +92,8 @@ const CoverPhotoSchema = new Schema<ICoverPhoto, ICoverPhotoModel>(
             type: String,
             default: 'cover-photos',
         },
+
+        // ==================== PHOTO METADATA ====================
         originalName: {
             type: String,
             required: [true, 'Original filename is required'],
@@ -105,17 +126,45 @@ const CoverPhotoSchema = new Schema<ICoverPhoto, ICoverPhotoModel>(
             required: [true, 'Image format is required'],
             enum: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
         },
-        isActive: { type: Boolean, default: false },
+
+        // ==================== PHOTO STATUS ====================
+        isActive: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
         status: {
             type: String,
             enum: ['active', 'archived', 'deleted'],
             default: 'active',
+            index: true,
         },
-        isDeleted: { type: Boolean, default: false },
-        deletedAt: { type: Date, default: null },
-        isArchived: { type: Boolean, default: false },
-        archivedAt: { type: Date, default: null },
-        uploadedAt: { type: Date, default: Date.now },
+
+        // ==================== SOFT DELETE / ARCHIVE ====================
+        isDeleted: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+        deletedAt: {
+            type: Date,
+            default: null,
+        },
+        isArchived: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+        archivedAt: {
+            type: Date,
+            default: null,
+        },
+
+        // ==================== METADATA ====================
+        uploadedAt: {
+            type: Date,
+            default: Date.now,
+        },
     },
     {
         timestamps: true,
@@ -127,19 +176,24 @@ const CoverPhotoSchema = new Schema<ICoverPhoto, ICoverPhotoModel>(
                 return ret;
             },
         },
-        toObject: { virtuals: true },
+        toObject: {
+            virtuals: true,
+        },
     }
 );
 
 // ==================== INDEXES ====================
+
 CoverPhotoSchema.index({ userId: 1, isActive: 1 });
 CoverPhotoSchema.index({ userId: 1, isDeleted: 1, isArchived: 1 });
-// FIX: cloudinaryPublicId field se  hataya - sirf yahan ek baar index hai
 CoverPhotoSchema.index({ cloudinaryPublicId: 1 });
 CoverPhotoSchema.index({ createdAt: -1 });
 
 // ==================== MIDDLEWARE ====================
 
+/**
+ * Pre-save: Update status based on flags
+ */
 CoverPhotoSchema.pre('save', function (next) {
     if (this.isDeleted) {
         this.status = 'deleted';
@@ -155,50 +209,97 @@ CoverPhotoSchema.pre('save', function (next) {
 
 // ==================== STATIC METHODS ====================
 
+/**
+ * Find all covers by userId (excluding deleted)
+ */
 CoverPhotoSchema.statics.findByUserId = async function (userId: string, includeArchived: boolean = false): Promise<ICoverPhoto[]> {
     try {
         const query: any = { userId, isDeleted: false };
-        if (!includeArchived) query.isArchived = false;
-        return await this.find(query).sort({ createdAt: -1 }).exec();
-    } catch (error: any) {
-        LoggerUtil.error('Find covers by userId failed', { error: (error as Error).message, userId });
+
+        if (!includeArchived) {
+            query.isArchived = false;
+        }
+
+        return await this.find(query)
+            .sort({ createdAt: -1 })
+            .exec();
+    } catch (error : any) {
+        LoggerUtil.error('Find covers by userId failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+/**
+ * Find active cover photo
+ */
 CoverPhotoSchema.statics.findActiveCover = async function (userId: string): Promise<ICoverPhoto | null> {
     try {
-        return await this.findOne({ userId, isActive: true, isDeleted: false }).exec();
-    } catch (error: any) {
-        LoggerUtil.error('Find active cover failed', { error: (error as Error).message, userId });
+        return await this.findOne({
+            userId,
+            isActive: true,
+            isDeleted: false,
+        }).exec();
+    } catch (error : any) {
+        LoggerUtil.error('Find active cover failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+/**
+ * Get total cover count for user (excluding deleted)
+ */
 CoverPhotoSchema.statics.getUserCoverCount = async function (userId: string): Promise<number> {
     try {
         return await this.countDocuments({ userId, isDeleted: false });
-    } catch (error: any) {
-        LoggerUtil.error('Get cover count failed', { error: (error as Error).message, userId });
+    } catch (error : any) {
+        LoggerUtil.error('Get cover count failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+/**
+ * Set cover as active (deactivate all others)
+ */
 CoverPhotoSchema.statics.setActiveCover = async function (coverId: string, userId: string): Promise<ICoverPhoto> {
     try {
-        await this.updateMany({ userId }, { $set: { isActive: false } });
+        // Deactivate all covers for user
+        await this.updateMany(
+            { userId },
+            { $set: { isActive: false } }
+        );
+
+        // Activate the selected cover
         const cover = await this.findOneAndUpdate(
             { coverId, userId, isDeleted: false },
             { $set: { isActive: true } },
             { new: true }
         );
-        if (!cover) throw new Error('Cover not found');
+
+        if (!cover) {
+            throw new Error('Cover not found');
+        }
+
         return cover;
-    } catch (error: any) {
-        LoggerUtil.error('Set active cover failed', { error: (error as Error).message, coverId, userId });
+    } catch (error : any) {
+        LoggerUtil.error('Set active cover failed', {
+            error: (error as Error).message,
+            coverId,
+            userId,
+        });
         throw error;
     }
 };
 
+// ==================== EXPORT ====================
+
 const CoverPhoto = mongoose.model<ICoverPhoto, ICoverPhotoModel>('CoverPhoto', CoverPhotoSchema);
-export default CoverPhoto;
+export default CoverPhoto;  

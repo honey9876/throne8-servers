@@ -13,7 +13,10 @@ class CompanyLogoController {
 
         try {
             // Auth check
-            const uploadedBy = req.user?.id || req.user?.userId || 'system';
+            if (!req.user?.userId) {
+                ResponseUtil.unauthorized(res, 'Authentication required');
+                return;
+            }
 
             // File check
             if (!req.file) {
@@ -22,6 +25,7 @@ class CompanyLogoController {
             }
 
             const companyId = req.params.id;
+            const uploadedBy = req.user.userId;
             const setAsActive = req.body.setAsActive !== 'false';
 
             LoggerUtil.info('Upload company logo request', {

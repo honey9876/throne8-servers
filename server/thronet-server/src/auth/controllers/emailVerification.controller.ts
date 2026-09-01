@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import EmailVerificationService from '../services/emailVerification.service';
-import ComplianceService from '../services/compliance.service';
+import ComplianceService from '../services/compliance.service.ts';
 import ResponseUtil from '@/shared/response.util';
 import ValidatorUtil from '@/shared/utils/validator.util';
 import { Device, User } from '../models';

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Test Score Model - User Test/Exam Scores
  * Stores standardized test scores with validity tracking
  * 
@@ -66,11 +66,13 @@ const TestScoreSchema = new Schema<ITestScore, ITestScoreModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
@@ -99,6 +101,7 @@ const TestScoreSchema = new Schema<ITestScore, ITestScoreModel>(
                 'Duolingo English Test',
                 'Other'
             ],
+            index: true,
         },
         score: {
             type: String,
@@ -121,6 +124,7 @@ const TestScoreSchema = new Schema<ITestScore, ITestScoreModel>(
                 },
                 message: 'Test date must be between 1970 and current year + 1',
             },
+            index: true,
         },
 
         // ==================== OPTIONAL DETAILS ====================
@@ -140,10 +144,12 @@ const TestScoreSchema = new Schema<ITestScore, ITestScoreModel>(
         // ==================== VALIDITY ====================
         expirationDate: {
             type: Date,
+            index: true,
         },
         isExpired: {
             type: Boolean,
             default: false,
+            index: true,
         },
         validityYears: {
             type: Number,
@@ -155,12 +161,14 @@ const TestScoreSchema = new Schema<ITestScore, ITestScoreModel>(
         displayOrder: {
             type: Number,
             default: 0,
+            index: true,
         },
 
         // ==================== SOFT DELETE / ARCHIVE ====================
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: {
             type: Date,
@@ -169,6 +177,7 @@ const TestScoreSchema = new Schema<ITestScore, ITestScoreModel>(
         isArchived: {
             type: Boolean,
             default: false,
+            index: true,
         },
         archivedAt: {
             type: Date,

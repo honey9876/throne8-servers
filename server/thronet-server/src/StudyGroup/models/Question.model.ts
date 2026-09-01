@@ -1,4 +1,4 @@
-﻿// src/models/Question.model.ts
+// src/models/Question.model.ts
 
 import mongoose, { Schema } from 'mongoose';
 import { IQuestion } from '../interfaces/IQuestion';
@@ -9,6 +9,7 @@ const QuestionSchema = new Schema<IQuestion>(
       type: Schema.Types.ObjectId, // ✅ This is correct
       ref: 'StudyGroup_Test',
       required: [true, 'Test reference is required'],
+      index: true,
     },
     questionText: {
       type: String,

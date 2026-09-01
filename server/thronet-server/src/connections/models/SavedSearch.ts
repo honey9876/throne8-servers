@@ -1,4 +1,4 @@
-﻿// src/models/mongodb/SavedSearch.ts
+// src/models/mongodb/SavedSearch.ts
 
 import { Schema, model, Document, Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -41,11 +41,13 @@ const SavedSearchSchema: Schema<ISavedSearch, ISavedSearchModel> = new Schema<IS
       required: true,
       unique: true,
       default: () => uuidv4(),
+      index: true,
     },
     userId: {
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: [true, 'User ID is required'],
+      index: true,
     },
     name: {
       type: String,
@@ -73,6 +75,7 @@ const SavedSearchSchema: Schema<ISavedSearch, ISavedSearchModel> = new Schema<IS
     notifications: {
       type: Boolean,
       default: false,
+      index: true,
     },
     frequency: {
       type: String,
@@ -81,13 +84,16 @@ const SavedSearchSchema: Schema<ISavedSearch, ISavedSearchModel> = new Schema<IS
         message: '{VALUE} is not a valid notification frequency',
       },
       default: NotificationFrequency.NEVER,
+      index: true,
     },
     isActive: {
       type: Boolean,
       default: true,
+      index: true,
     },
     lastExecuted: {
       type: Date,
+      index: true,
     },
     resultsCount: {
       type: Number,

@@ -22,7 +22,6 @@ import PaginationHelper from '@/Mentorship/utils/pagination';
 import { ICompany } from '@/Mentorship/interface/company.types';
 import mentorRepository from '../repositories/mentor.repository';
 import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
-import { TrustScoreEvents } from '../events/trustScore.events';
 
 class MentorService {
   /**
@@ -182,11 +181,9 @@ class MentorService {
    */
   async updateMentor(
     mentorId: string,
-    updates: UpdateMentorInput & { profilePic?: string; bannerImage?: string },
+    updates: UpdateMentorInput,
     userId: string,
-    authToken?: string,
-    profilePicFile?: Express.Multer.File,
-    bannerImageFile?: Express.Multer.File
+    authToken?: string
   ): Promise<MentorWithRelations> {
     try {
       logger.info(`Updating mentor: ${mentorId}`);
@@ -200,17 +197,6 @@ class MentorService {
         throw new ForbiddenError('Not authorized to update this profile');
       }
 
-      // Handle image uploads if present
-      if (profilePicFile) {
-        const profilePicUrl = await this.uploadImageToCloudinary(profilePicFile.buffer, userId);
-        updates.profilePic = profilePicUrl;
-      }
-
-      if (bannerImageFile) {
-        const bannerImageUrl = await this.uploadImageToCloudinary(bannerImageFile.buffer, userId);
-        updates.bannerImage = bannerImageUrl;
-      }
-
       if (updates.pricing) {
         const mergedPricing = { ...mentor.pricing, ...updates.pricing };
         this.validatePricing(mergedPricing);
@@ -221,18 +207,30 @@ class MentorService {
         this.validateAvailability({ ...mentor.availability, ...updates.availability });
       }
 
-      const updatedMentor = await mentorRepository.updateByMentorId(mentorId, updates);
+      const updateData: any = { ...updates };
+      delete updateData.profilePicFile;
+      delete updateData.coverImageFile;
+
+      if (updates.profilePicFile) {
+        updateData.profilePic = await this.uploadImageToCloudinary(
+          updates.profilePicFile.buffer,
+          mentor.userId
+        );
+      }
+
+      if (updates.coverImageFile) {
+        updateData.coverImage = await this.uploadImageToCloudinary(
+          updates.coverImageFile.buffer,
+          mentor.userId + '_cover'
+        );
+      }
+
+      const updatedMentor = await mentorRepository.updateByMentorId(mentorId, updateData);
       if (!updatedMentor) {
         throw new NotFoundError('MENTOR_NOT_FOUND');
       }
 
       logger.info(`Mentor updated: ${mentorId}`);
-
-      TrustScoreEvents.emit('ProfileUpdated', {
-        mentorId,
-        timestamp: new Date()
-      });
-
       return await this.enrichMentorWithRelations(updatedMentor, authToken);
     } catch (error: any) {
       logger.error(`Failed to update mentor ${mentorId}: ${error.message}`);
@@ -354,7 +352,7 @@ class MentorService {
           userId: mentorObj.userId,
           'flags.isDeleted': false,
         })
-          .select('userId email firstName lastName fullName profilePhotoId')
+          .select('userId email firstName lastName fullName profilePhotoId profileImage')
           .lean();
       } catch (error: any) {
         logger.error(`Failed to fetch user for mentor enrichment: ${error.message}`, {

@@ -37,7 +37,6 @@ export interface ISessionMentor extends TimeStamps {
   description?: string;
   notes?: string;
   attachments?: string[];
-  thumbnailImage?: string;
 
   // Pricing & Payment
   pricing: {

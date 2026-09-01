@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import crypto from 'crypto';
 import { LoggerUtil } from '@/shared/logger.util';
 import userEmitter from '@/shared/events/emitters/user.emitter';
@@ -36,12 +36,19 @@ export interface IRefreshToken extends Document {
     metadata?: IMetadata;
     createdAt: Date;
     updatedAt: Date;
+
     revoke(reason?: string, revokedBy?: string): Promise<IRefreshToken>;
 }
 
 export interface IRefreshTokenModel extends Model<IRefreshToken> {
     generateHashedToken(token: string): string;
-    createToken(userId: string, sessionId: string, deviceId: string, ipAddress: string, options?: any): Promise<{ rawToken: string; tokenId: string; expiresAt: Date }>;
+    createToken(
+        userId: string,
+        sessionId: string,
+        deviceId: string,
+        ipAddress: string,
+        options?: any
+    ): Promise<{ rawToken: string; tokenId: string; expiresAt: Date }>;
     validateToken(rawToken: string, ipAddress: string): Promise<IRefreshToken>;
     revokeAllUserTokens(userId: string, reason?: string, revokedBy?: string): Promise<{ revokedCount: number }>;
     cleanupOldTokens(userId: string, keepCount?: number): Promise<number>;
@@ -56,32 +63,57 @@ const RefreshTokenSchema = new Schema<IRefreshToken, IRefreshTokenModel>(
             required: [true, 'Token ID is required'],
             unique: true,
             default: () => crypto.randomBytes(32).toString('hex'),
-            // ✅ CORRECT: unique:true apne aap index banata hai
-            //  hataya - unique already ek index hai, duplicate nahi banana
+            index: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
         },
         hashedToken: {
             type: String,
             required: [true, 'Hashed token is required'],
             unique: true,
+            index: true,
         },
-        deviceId: { type: String },
-        sessionId: { type: String, required: true },
-        ipAddress: { type: String, required: true },
+        deviceId: {
+            type: String,
+            index: true,
+        },
+        sessionId: {
+            type: String,
+            required: true,
+            index: true,
+        },
+        ipAddress: {
+            type: String,
+            required: true,
+        },
         userAgent: String,
-        isActive: { type: Boolean, default: true },
-        // ✅ CORRECT: TTL index yahan field mein sahi hai
+        isActive: {
+            type: Boolean,
+            default: true,
+            index: true,
+        },
         expiresAt: {
             type: Date,
             required: true,
             index: { expireAfterSeconds: 0 },
         },
-        lastUsedAt: { type: Date, default: Date.now },
-        usageCount: { type: Number, default: 0, min: 0 },
-        maxUsageCount: { type: Number, default: 1, min: 1 },
+        lastUsedAt: {
+            type: Date,
+            default: Date.now,
+        },
+        usageCount: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        maxUsageCount: {
+            type: Number,
+            default: 1,
+            min: 1,
+        },
         revokedAt: Date,
         revokedBy: {
             type: String,
@@ -113,15 +145,16 @@ const RefreshTokenSchema = new Schema<IRefreshToken, IRefreshTokenModel>(
     }
 );
 
-// ==================== INDEXES ====================
-// ✅ Sirf compound indexes yahan - single field indexes upar defined hain
 RefreshTokenSchema.index({ userId: 1, isActive: 1, expiresAt: -1 });
 RefreshTokenSchema.index({ hashedToken: 1, isActive: 1 });
 RefreshTokenSchema.index({ sessionId: 1, isActive: 1 });
 
 RefreshTokenSchema.statics.generateHashedToken = function (token: string): string {
     const salt = process.env['REFRESH_TOKEN_SALT'] || 'default-salt-change-in-production';
-    return crypto.createHash('sha256').update(token + salt).digest('hex');
+    return crypto
+        .createHash('sha256')
+        .update(token + salt)
+        .digest('hex');
 };
 
 RefreshTokenSchema.statics.createToken = async function (
@@ -133,6 +166,7 @@ RefreshTokenSchema.statics.createToken = async function (
 ): Promise<{ rawToken: string; tokenId: string; expiresAt: Date }> {
     try {
         const { ttl = 7 * 24 * 60 * 60, userAgent, metadata = {}, maxUsageCount = 1 } = options;
+
         const rawToken = crypto.randomBytes(64).toString('hex');
         const hashedToken = this.generateHashedToken(rawToken);
 
@@ -172,8 +206,10 @@ RefreshTokenSchema.statics.createToken = async function (
             timestamp: new Date(),
         });
 
+        logger.info('Refresh token created', { userId, tokenId: refreshToken.tokenId });
+
         return { rawToken, tokenId: refreshToken.tokenId, expiresAt: refreshToken.expiresAt };
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Refresh token creation failed', { error: (error as Error).message, userId });
         throw error;
     }
@@ -182,13 +218,16 @@ RefreshTokenSchema.statics.createToken = async function (
 RefreshTokenSchema.statics.validateToken = async function (rawToken: string, ipAddress: string): Promise<IRefreshToken> {
     try {
         const hashedToken = this.generateHashedToken(rawToken);
+
         const token = await this.findOne({
             hashedToken,
             isActive: true,
             expiresAt: { $gt: new Date() },
         });
 
-        if (!token) throw new Error('Invalid or expired refresh token');
+        if (!token) {
+            throw new Error('Invalid or expired refresh token');
+        }
 
         if (token.usageCount >= token.maxUsageCount) {
             await token.revoke('token_rotation', 'system');
@@ -196,6 +235,11 @@ RefreshTokenSchema.statics.validateToken = async function (rawToken: string, ipA
         }
 
         if (token.ipAddress !== ipAddress) {
+            logger.warn('IP address mismatch for refresh token', {
+                tokenId: token.tokenId,
+                originalIp: token.ipAddress,
+                currentIp: ipAddress,
+            });
             await AuditLog.logAction({
                 userId: token.userId,
                 action: 'SUSPICIOUS_ACTIVITY',
@@ -214,20 +258,19 @@ RefreshTokenSchema.statics.validateToken = async function (rawToken: string, ipA
         token.lastUsedAt = new Date();
         await token.save();
 
+        logger.info('Refresh token validated', { tokenId: token.tokenId, userId: token.userId });
+
         return token;
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Refresh token validation failed', { error: (error as Error).message });
         throw error;
     }
 };
 
-RefreshTokenSchema.methods.revoke = async function (
-    this: IRefreshToken,
-    reason: string = 'user_request',
-    revokedBy: string = 'user'
-): Promise<IRefreshToken> {
+RefreshTokenSchema.methods.revoke = async function (this: IRefreshToken, reason: string = 'user_request', revokedBy: string = 'user'): Promise<IRefreshToken> {
     try {
         if (!this.isActive) return this;
+
         this.isActive = false;
         this.revokedAt = new Date();
         this.revokedReason = reason as any;
@@ -254,8 +297,10 @@ RefreshTokenSchema.methods.revoke = async function (
             timestamp: new Date(),
         });
 
+        logger.info('Refresh token revoked', { tokenId: this.tokenId, userId: this.userId, reason });
+
         return this;
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Refresh token revocation failed', { error: (error as Error).message, tokenId: this.tokenId });
         throw error;
     }
@@ -274,7 +319,7 @@ RefreshTokenSchema.statics.revokeAllUserTokens = async function (
                     isActive: false,
                     revokedAt: new Date(),
                     revokedReason: reason,
-                    revokedBy,
+                    revokedBy: revokedBy,
                 },
             }
         );
@@ -285,8 +330,8 @@ RefreshTokenSchema.statics.revokeAllUserTokens = async function (
             status: 'SUCCESS',
             severity: 'HIGH',
             metadata: new Map([
-                ['count', result.modifiedCount.toString()],
-                ['reason', reason],
+                ['count', result.modifiedCount],
+                // ['reason', reason],
             ]),
         });
 
@@ -297,8 +342,10 @@ RefreshTokenSchema.statics.revokeAllUserTokens = async function (
             timestamp: new Date(),
         });
 
+        logger.info('All refresh tokens revoked', { userId, count: result.modifiedCount });
+
         return { revokedCount: result.modifiedCount };
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('All refresh tokens revocation failed', { error: (error as Error).message, userId });
         throw error;
     }
@@ -306,14 +353,17 @@ RefreshTokenSchema.statics.revokeAllUserTokens = async function (
 
 RefreshTokenSchema.statics.cleanupOldTokens = async function (userId: string, keepCount: number = 5): Promise<number> {
     try {
-        const tokens = await this.find({ userId, isActive: false })
-            .sort({ createdAt: -1 })
-            .skip(keepCount);
-        if (tokens.length === 0) return 0;
-        const tokenIds = tokens.map((t) => t._id);
-        const result = await this.deleteMany({ _id: { $in: tokenIds } });
-        return result.deletedCount || 0;
-    } catch (error: any) {
+        const tokens = await this.find({ userId, isActive: false }).sort({ createdAt: -1 }).skip(keepCount);
+
+        if (tokens.length > 0) {
+            const tokenIds = tokens.map((t) => t._id);
+            const result = await this.deleteMany({ _id: { $in: tokenIds } });
+            logger.info(`Cleaned up ${result.deletedCount} old refresh tokens for user ${userId}`);
+            return result.deletedCount || 0;
+        }
+
+        return 0;
+    } catch(error : any) {
         logger.error('Token cleanup failed', { error: (error as Error).message, userId });
         throw error;
     }
@@ -321,10 +371,8 @@ RefreshTokenSchema.statics.cleanupOldTokens = async function (userId: string, ke
 
 RefreshTokenSchema.statics.getUserTokens = async function (userId: string, { limit = 10 }: { limit?: number } = {}): Promise<any[]> {
     try {
-        const tokens = await this.find({ userId, isActive: true })
-            .sort({ createdAt: -1 })
-            .limit(limit)
-            .lean();
+        const tokens = await this.find({ userId, isActive: true }).sort({ createdAt: -1 }).limit(limit).lean();
+
         return tokens.map((token) => ({
             tokenId: token.tokenId,
             deviceId: token.deviceId,
@@ -335,7 +383,7 @@ RefreshTokenSchema.statics.getUserTokens = async function (userId: string, { lim
             usageCount: token.usageCount,
             metadata: token.metadata,
         }));
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('User tokens retrieval failed', { error: (error as Error).message, userId });
         throw error;
     }
@@ -348,25 +396,34 @@ RefreshTokenSchema.statics.rotateToken = async function (
 ): Promise<{ rawToken: string; tokenId: string; expiresAt: Date }> {
     try {
         const oldToken = await this.validateToken(oldRawToken, ipAddress);
+
         await oldToken.revoke('token_rotation', 'system');
-        const newToken = await this.createToken(
-            oldToken.userId,
-            oldToken.sessionId,
-            oldToken.deviceId!,
-            ipAddress,
-            { ...options, userAgent: oldToken.userAgent, metadata: oldToken.metadata }
-        );
+
+        const newToken = await this.createToken(oldToken.userId, oldToken.sessionId, oldToken.deviceId!, ipAddress, {
+            ...options,
+            userAgent: oldToken.userAgent,
+            metadata: oldToken.metadata,
+        });
+
+        logger.info('Refresh token rotated', {
+            userId: oldToken.userId,
+            oldTokenId: oldToken.tokenId,
+            newTokenId: newToken.tokenId,
+        });
+
         return newToken;
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Token rotation failed', { error: (error as Error).message });
         throw error;
     }
 };
 
 RefreshTokenSchema.pre('save', function (next) {
-    if (this.expiresAt && new Date(this.expiresAt) < new Date()) this.isActive = false;
+    if (this.expiresAt && new Date(this.expiresAt) < new Date()) {
+        this.isActive = false;
+    }
     next();
-}); 
+});
 
 const RefreshToken = mongoose.model<IRefreshToken, IRefreshTokenModel>('RefreshToken', RefreshTokenSchema);
 export default RefreshToken;

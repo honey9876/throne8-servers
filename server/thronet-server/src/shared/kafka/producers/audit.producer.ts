@@ -148,8 +148,8 @@ class AuditProducer {
     await CacheUtil.lpush(AUDIT_FALLBACK_KEY, serialized);
 
     // Keep fallback list bounded (max 1000 entries)
-    const client = CacheUtil.getClient();
     if (CacheUtil.isConnected()) {
+      const client = CacheUtil.getClient();
       await client.lTrim(
         `${process.env['REDIS_KEY_PREFIX'] || 'auth:'}${AUDIT_FALLBACK_KEY}`,
         0,
@@ -177,3 +177,343 @@ export default AuditProducer;
 
 
 
+
+
+
+
+// /**
+//  * audit.producer.ts
+//  * Production-grade Kafka Audit Producer
+//  * Handles audit event streaming for auth-service
+//  *
+//  * @version 3.0.0
+//  * Compliant with NIST 800-63B and OWASP guidelines
+//  */
+
+// import { Kafka, Producer, ProducerRecord, Message } from 'kafkajs';
+// import kafkaConfig from '@/config/kafka.config';
+// import { LoggerUtil } from '@/shared/logger.util';
+// import topics from '@/shared/kafka/config/topic.config';
+// import { KafkaRetryUtil } from '@/shared/kafka/utils/kafka-retry.util';
+
+// // ==================== INTERFACES & TYPES ====================
+
+// export interface AuditEvent {
+//   eventId: string;
+//   userId: string | null;
+//   action: string;
+//   ipAddress: string;
+//   status: 'SUCCESS' | 'ERROR' | 'WARNING' | 'FAILURE' | 'PENDING';
+//   severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+//   timestamp: string;
+//   metadata?: Record<string, any>;
+// }
+
+// // ==================== AUDIT PRODUCER CLASS ====================
+
+// class AuditProducer {
+//   private topic: string;
+//   private kafka: Kafka;
+//   private producer: Producer;
+//   private isConnected: boolean = false;
+//   private messagesSent: number = 0;
+//   private messagesFailed: number = 0;
+//   private connectionAttempts: number = 0;
+
+//   constructor() {
+//     this.topic = topics.auditEvents.topic;
+//     this.kafka = new Kafka(kafkaConfig);
+
+//     this.producer = this.kafka.producer({
+//       allowAutoTopicCreation: true, // ✅ Allow auto-creation
+//       transactionTimeout: 30000,
+//       idempotent: true,
+//       maxInFlightRequests: 5,
+//       retry: {
+//         initialRetryTime: 300,
+//         retries: 8,
+//         maxRetryTime: 30000,
+//         multiplier: 2,
+//       },
+//     });
+
+//     this.setupEventListeners();
+//   }
+
+//   // ==================== CONNECTION MANAGEMENT ====================
+
+//   async connect(): Promise<void> {
+//     if (this.isConnected) {
+//       LoggerUtil.debug('Audit producer already connected');
+//       return;
+//     }
+
+//     try {
+//       this.connectionAttempts++;
+
+//       await KafkaRetryUtil.withRetry(
+//         async () => {
+//           await this.producer.connect();
+//         },
+//         {
+//           maxRetries: 3,
+//           initialDelayMs: 1000,
+//           maxDelayMs: 10000,
+//         },
+//         'audit-producer-connect'
+//       );
+
+//       this.isConnected = true;
+
+//       LoggerUtil.info('✅ Audit producer connected', {
+//         topic: this.topic,
+//         attempt: this.connectionAttempts,
+//       });
+
+//       this.recordMetric('connection_success', 1);
+//     } catch (error: any) {
+//       this.isConnected = false;
+
+//       LoggerUtil.error('❌ Audit producer connection failed', {
+//         topic: this.topic,
+//         attempt: this.connectionAttempts,
+//         error: error.message,
+//       });
+
+//       this.recordMetric('connection_failure', 1);
+//       // ✅ Don't throw - allow app to continue
+//     }
+//   }
+
+//   async disconnect(): Promise<void> {
+//     if (!this.isConnected) {
+//       LoggerUtil.debug('Audit producer already disconnected');
+//       return;
+//     }
+
+//     try {
+//       await this.producer.disconnect();
+//       this.isConnected = false;
+
+//       LoggerUtil.info('✅ Audit producer disconnected', {
+//         topic: this.topic,
+//         messagesSent: this.messagesSent,
+//         messagesFailed: this.messagesFailed,
+//       });
+
+//       this.recordMetric('disconnection_success', 1);
+//     } catch (error: any) {
+//       LoggerUtil.error('❌ Audit producer disconnection failed', {
+//         topic: this.topic,
+//         error: error.message,
+//       });
+
+//       this.recordMetric('disconnection_failure', 1);
+//     }
+//   }
+
+//   // ==================== MESSAGE SENDING ====================
+
+//   async sendAuditEvent(event: AuditEvent): Promise<void> {
+//     try {
+//       // ✅ Validate event
+//       this.validateAuditEvent(event);
+
+//       // ✅ Auto-reconnect if needed
+//       if (!this.isConnected) {
+//         LoggerUtil.warn('Producer not connected, attempting reconnection...');
+//         await this.connect();
+//       }
+
+//       // ✅ If still not connected, skip silently
+//       if (!this.isConnected) {
+//         LoggerUtil.warn('Skipping audit event - producer not connected', {
+//           eventId: event.eventId,
+//           action: event.action,
+//         });
+//         return;
+//       }
+
+//       const message: Message = {
+//         key: event.userId || event.eventId,
+//         value: JSON.stringify(event),
+//         timestamp: Date.now().toString(),
+//         headers: {
+//           'event-type': 'audit',
+//           'severity': event.severity,
+//           'correlation-id': event.eventId,
+//         },
+//       };
+
+//       const record: ProducerRecord = {
+//         topic: this.topic,
+//         messages: [message],
+//         compression: 1,
+//       };
+
+//       await this.producer.send(record);
+
+//       this.messagesSent++;
+//       this.recordMetric('messages_sent', 1);
+
+//       LoggerUtil.debug('Audit event sent', {
+//         eventId: event.eventId,
+//         action: event.action,
+//         userId: event.userId,
+//       });
+//     } catch (error: any) {
+//       this.messagesFailed++;
+//       this.recordMetric('messages_failed', 1);
+
+//       LoggerUtil.error('Failed to send audit event', {
+//         eventId: event.eventId,
+//         action: event.action,
+//         error: error.message,
+//       });
+
+//       // ✅ Don't throw - just log
+//     }
+//   }
+
+//   async sendAuditEventsBatch(events: AuditEvent[]): Promise<void> {
+//     if (!events || events.length === 0) {
+//       LoggerUtil.warn('No audit events to send in batch');
+//       return;
+//     }
+
+//     try {
+//       events.forEach(event => this.validateAuditEvent(event));
+
+//       if (!this.isConnected) {
+//         await this.connect();
+//       }
+
+//       if (!this.isConnected) {
+//         LoggerUtil.warn('Skipping batch audit events - producer not connected');
+//         return;
+//       }
+
+//       const messages: Message[] = events.map(event => ({
+//         key: event.userId || event.eventId,
+//         value: JSON.stringify(event),
+//         timestamp: Date.now().toString(),
+//         headers: {
+//           'event-type': 'audit',
+//           'severity': event.severity,
+//           'correlation-id': event.eventId,
+//         },
+//       }));
+
+//       const record: ProducerRecord = {
+//         topic: this.topic,
+//         messages,
+//         compression: 1,
+//       };
+
+//       await this.producer.send(record);
+
+//       this.messagesSent += events.length;
+//       this.recordMetric('messages_sent', events.length);
+
+//       LoggerUtil.info('Audit events batch sent', {
+//         count: events.length,
+//         topic: this.topic,
+//       });
+//     } catch (error: any) {
+//       this.messagesFailed += events.length;
+//       this.recordMetric('messages_failed', events.length);
+
+//       LoggerUtil.error('Failed to send audit events batch', {
+//         count: events.length,
+//         error: error.message,
+//       });
+//     }
+//   }
+
+//   // ==================== VALIDATION ====================
+
+//   private validateAuditEvent(event: AuditEvent): void {
+//     const requiredFields: (keyof AuditEvent)[] = [
+//       'eventId',
+//       'action',
+//       'ipAddress',
+//       'status',
+//       'severity',
+//       'timestamp',
+//     ];
+
+//     for (const field of requiredFields) {
+//       if (!event[field]) {
+//         throw new Error(`Missing required field: ${field}`);
+//       }
+//     }
+
+//     // ✅ Include all valid statuses
+//     const validStatuses = ['SUCCESS', 'ERROR', 'WARNING', 'FAILURE', 'PENDING'];
+//     const validSeverities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+
+//     if (!validStatuses.includes(event.status)) {
+//       throw new Error(`Invalid status: ${event.status}`);
+//     }
+
+//     if (!validSeverities.includes(event.severity)) {
+//       throw new Error(`Invalid severity: ${event.severity}`);
+//     }
+//   }
+
+//   // ==================== EVENT LISTENERS ====================
+
+//   private setupEventListeners(): void {
+//     this.producer.on('producer.connect', () => {
+//       LoggerUtil.debug('Producer connected event received');
+//       this.isConnected = true;
+//     });
+
+//     this.producer.on('producer.disconnect', () => {
+//       LoggerUtil.debug('Producer disconnected event received');
+//       this.isConnected = false;
+//     });
+
+//     this.producer.on('producer.network.request', () => {
+//       LoggerUtil.debug('Producer network request');
+//     });
+
+//     this.producer.on('producer.network.request_timeout', ({ payload }) => {
+//       LoggerUtil.warn('Producer request timeout', {
+//         broker: payload.broker,
+//         clientId: payload.clientId,
+//       });
+//       this.recordMetric('request_timeout', 1);
+//     });
+//   }
+
+//   // ==================== METRICS ====================
+
+//   private recordMetric(metric: string, value: number): void {
+//     LoggerUtil.debug('Metric recorded', {
+//       metric,
+//       value,
+//       topic: this.topic,
+//       timestamp: new Date().toISOString(),
+//     });
+//   }
+
+//   getStats() {
+//     return {
+//       isConnected: this.isConnected,
+//       messagesSent: this.messagesSent,
+//       messagesFailed: this.messagesFailed,
+//       connectionAttempts: this.connectionAttempts,
+//       topic: this.topic,
+//     };
+//   }
+
+//   resetStats(): void {
+//     this.messagesSent = 0;
+//     this.messagesFailed = 0;
+//     this.connectionAttempts = 0;
+//     LoggerUtil.info('Audit producer stats reset');
+//   }
+// }
+
+// export default new AuditProducer();

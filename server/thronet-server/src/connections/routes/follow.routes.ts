@@ -1,4 +1,4 @@
-// src/connections/routes/follow.routes.ts
+// src/routes/followRoutes.ts
 
 import { Router } from 'express';
 import { followController } from '../controllers/index';

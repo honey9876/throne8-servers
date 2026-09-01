@@ -1,6 +1,8 @@
-﻿import mongoose, { Document, Model, Schema } from 'mongoose';
+import mongoose, { Document, Model, Schema } from 'mongoose';
 import crypto from 'crypto';
 import userEmitter from '@/shared/events/emitters/user.emitter';
+
+// ==================== TYPES ====================
 
 export type OTPType =
     | 'email_verification'
@@ -40,6 +42,7 @@ export interface IOTPVerification extends Document {
     };
     requestedAt: Date;
     resentCount: number;
+    // Instance methods
     generateOTPHash(otp: string): string;
     verifyOTP(providedOTP: string): Promise<boolean>;
     revoke(): Promise<void>;
@@ -61,6 +64,8 @@ export interface IOTPVerificationModel extends Model<IOTPVerification> {
     cleanupExpiredOTPs(): Promise<number>;
 }
 
+// ==================== SCHEMA ====================
+
 const OTPVerificationSchema = new Schema<IOTPVerification, IOTPVerificationModel>(
     {
         otpId: {
@@ -68,41 +73,33 @@ const OTPVerificationSchema = new Schema<IOTPVerification, IOTPVerificationModel
             required: true,
             unique: true,
             default: () => crypto.randomUUID(),
-            // ✅ FIX:  hataya - unique:true apne aap index banata hai, duplicate avoid
+            index: true,
         },
-        userId: { type: String, required: true },
+        userId: { type: String, required: true, index: true },
         otpHash: { type: String, required: true, select: false },
         otpType: {
             type: String,
             required: true,
             enum: [
-                'email_verification',
-                'phone_verification',
-                'login_2fa',
-                'device_verification',
-                'step_up_auth',
-                'password_change',
-                'password_reset',
-                'annual_email_recheck',
-                'annual_phone_recheck',
-                'unusual_activity_verification',
-                'suspicious_location_verification',
+                'email_verification', 'phone_verification', 'login_2fa',
+                'device_verification', 'step_up_auth', 'password_change',
+                'password_reset', 'annual_email_recheck', 'annual_phone_recheck',
+                'unusual_activity_verification', 'suspicious_location_verification',
                 'aadhaar_verification',
                 'company_email_verification',
             ],
+            index: true,
         },
-        email: { type: String, lowercase: true, trim: true },
+        email: { type: String, lowercase: true, trim: true, index: true },
         phoneNumber: { type: String, trim: true },
         status: {
             type: String,
             enum: ['pending', 'verified', 'expired', 'failed', 'revoked'],
             default: 'pending',
+            index: true,
         },
-        attempts: { type: Number, default: 0 },
+        attempts: { type: Number, default: 0, max: 3 },
         maxAttempts: { type: Number, default: 3 },
-        // ✅ FIX: expiresAt field mein  tha AUR neeche
-        // OTPVerificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }) bhi tha
-        // DUPLICATE tha - field level index hataya, neeche sirf TTL index rakha
         expiresAt: { type: Date, required: true },
         verifiedAt: { type: Date },
         metadata: {
@@ -112,7 +109,7 @@ const OTPVerificationSchema = new Schema<IOTPVerification, IOTPVerificationModel
             deviceFingerprint: String,
             action: String,
         },
-        requestedAt: { type: Date, default: Date.now },
+        requestedAt: { type: Date, default: Date.now, index: true },
         resentCount: { type: Number, default: 0 },
     },
     {
@@ -121,13 +118,10 @@ const OTPVerificationSchema = new Schema<IOTPVerification, IOTPVerificationModel
     }
 );
 
-// ==================== INDEXES ====================
-// ✅ FIX: Pehle expiresAt field mein  tha AUR yahan bhi index tha - DUPLICATE
-// Ab sirf yahan TTL index hai, field mein  nahi
 OTPVerificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-
-// ✅ CORRECT: Compound index - query performance ke liye zaroori
 OTPVerificationSchema.index({ userId: 1, otpType: 1, status: 1 });
+
+// ==================== INSTANCE METHODS ====================
 
 OTPVerificationSchema.methods.generateOTPHash = function (otp: string): string {
     const salt = process.env.OTP_SALT || 'default-otp-salt-change-in-production';
@@ -155,26 +149,24 @@ OTPVerificationSchema.methods.verifyOTP = async function (providedOTP: string): 
         this.status = 'verified';
         this.verifiedAt = new Date();
         await this.save();
-        userEmitter.emit('otp:verified', {
-            otpId: this.otpId,
-            userId: this.userId,
-            otpType: this.otpType,
-            timestamp: new Date(),
-        });
+        userEmitter.emit('otp:verified', { otpId: this.otpId, userId: this.userId, otpType: this.otpType, timestamp: new Date() });
         return true;
+    } else {
+        await this.save();
+        if (this.attempts >= this.maxAttempts) {
+            this.status = 'failed';
+            await this.save();
+        }
+        throw new Error('Invalid OTP');
     }
-
-    if (this.attempts >= this.maxAttempts) {
-        this.status = 'failed';
-    }
-    await this.save();
-    throw new Error('Invalid OTP');
 };
 
 OTPVerificationSchema.methods.revoke = async function (): Promise<void> {
     this.status = 'revoked';
     await this.save();
 };
+
+// ==================== STATIC METHODS ====================
 
 OTPVerificationSchema.statics.generateOTP = function (): string {
     return crypto.randomInt(100000, 999999).toString();
@@ -195,36 +187,14 @@ OTPVerificationSchema.statics.createOTP = async function (data: any) {
     const otpHash = crypto.createHash('sha256').update(otp + salt).digest('hex');
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
 
-    const otpRecord = new this({
-        userId,
-        otpType,
-        email,
-        phoneNumber,
-        otpHash,
-        expiresAt,
-        maxAttempts,
-        metadata,
-        status: 'pending',
-    });
+    const otpRecord = new this({ userId, otpType, email, phoneNumber, otpHash, expiresAt, maxAttempts, metadata, status: 'pending' });
     await otpRecord.save();
 
-    userEmitter.emit('otp:created', {
-        otpId: otpRecord.otpId,
-        userId,
-        otpType,
-        expiresAt,
-        timestamp: new Date(),
-    });
+    userEmitter.emit('otp:created', { otpId: otpRecord.otpId, userId, otpType, expiresAt, timestamp: new Date() });
 
     return {
         otp,
-        otpRecord: {
-            otpId: otpRecord.otpId,
-            userId: otpRecord.userId,
-            otpType: otpRecord.otpType,
-            expiresAt: otpRecord.expiresAt,
-            status: otpRecord.status,
-        },
+        otpRecord: { otpId: otpRecord.otpId, userId: otpRecord.userId, otpType: otpRecord.otpType, expiresAt: otpRecord.expiresAt, status: otpRecord.status },
     };
 };
 
@@ -240,10 +210,7 @@ OTPVerificationSchema.statics.getActiveOTP = async function (userId: string, otp
 };
 
 OTPVerificationSchema.statics.cleanupExpiredOTPs = async function () {
-    const result = await this.updateMany(
-        { status: 'pending', expiresAt: { $lt: new Date() } },
-        { $set: { status: 'expired' } }
-    );
+    const result = await this.updateMany({ status: 'pending', expiresAt: { $lt: new Date() } }, { $set: { status: 'expired' } });
     return result.modifiedCount;
 };
 

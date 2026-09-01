@@ -6,7 +6,7 @@
  */
 
 import express from 'express';
-import testController  from '../controllers/test.controller';
+import {testController } from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 import { validation } from '@/shared/middlewares/validation.middleware';
 import {

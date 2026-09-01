@@ -154,60 +154,42 @@ export const companyValidators = {
   }).required(),
 
   update: Joi.object({
-    name: Joi.string().optional().trim().min(2).max(100),
-    companyName: Joi.string().optional().trim().min(2).max(100),
-    tagline: Joi.string().optional().allow('').trim().max(200),
-    description: Joi.string().optional().allow('').trim().max(5000),
-    descriptions: Joi.object({
-      tagline: Joi.string().optional().allow('').max(200),
-      short: Joi.string().optional().allow('').max(5000),
-      detailed: Joi.string().optional().allow('').max(10000),
-    }).optional(),
+    name: Joi.string().optional().trim().min(2).max(100).pattern(PATTERNS.name),
+    tagline: Joi.string().optional().trim().max(200),
+    description: Joi.string().optional().trim().max(5000),
     email: Joi.string().optional().email().lowercase().trim(),
-    phone: Joi.string().optional().allow('').pattern(PATTERNS.phone),
-    website: Joi.string().optional().allow(''),
-    industry: Joi.string().optional().allow(''),
-    size: Joi.string().optional().allow(''),
-    companySize: Joi.string().optional().allow(''),
+    phone: Joi.string().optional().pattern(PATTERNS.phone),
+    website: Joi.string().optional().pattern(PATTERNS.url),
+    industry: Joi.string().optional().valid(...INDUSTRIES),
+    size: Joi.string().optional().valid(...COMPANY_SIZES),
     founded: Joi.number().optional().integer().min(1800).max(new Date().getFullYear()),
-    foundedYear: Joi.number().optional().integer().min(1800).max(new Date().getFullYear()),
-    headquarters: Joi.object().unknown(true).optional(),
-    socialMedia: Joi.object().unknown(true).optional(),
-    socialLinks: Joi.object().unknown(true).optional(),
-    logo: Joi.string().optional().allow(''),
-    banner: Joi.string().optional().allow(''),
+    headquarters: Joi.object({
+      street: Joi.string().optional().trim().max(200),
+      city: Joi.string().optional().trim().max(100),
+      state: Joi.string().optional().trim().max(100),
+      country: Joi.string().optional().trim().max(100),
+    }).optional(),
+    logo: Joi.string().optional().pattern(PATTERNS.url),
+    banner: Joi.string().optional().pattern(PATTERNS.url),
     status: Joi.string().optional().valid(...COMPANY_STATUSES),
     isVerified: Joi.boolean().optional(),
-  }).unknown(true).min(1).required(),
+  }).min(1).required(),
 
   partialUpdate: Joi.object({
-    name: Joi.string().optional().trim().min(2).max(100),
-    companyName: Joi.string().optional().trim().min(2).max(100),
-    slug: Joi.string().optional().lowercase().trim().min(2).max(100),
-    companySlug: Joi.string().optional().lowercase().trim().min(2).max(100),
-    tagline: Joi.string().optional().allow('').trim().max(200),
-    description: Joi.string().optional().allow('').trim().max(5000),
-    descriptions: Joi.object({
-      tagline: Joi.string().optional().allow('').max(200),
-      short: Joi.string().optional().allow('').max(5000),
-      detailed: Joi.string().optional().allow('').max(10000),
-    }).optional(),
+    name: Joi.string().optional().trim().min(2).max(100).pattern(PATTERNS.name),
+    tagline: Joi.string().optional().trim().max(200),
+    description: Joi.string().optional().trim().max(5000),
     email: Joi.string().optional().email().lowercase().trim(),
-    phone: Joi.string().optional().allow('').pattern(PATTERNS.phone),
-    website: Joi.string().optional().allow(''),
-    industry: Joi.string().optional().allow(''),
-    size: Joi.string().optional().allow(''),
-    companySize: Joi.string().optional().allow(''),
+    phone: Joi.string().optional().pattern(PATTERNS.phone),
+    website: Joi.string().optional().pattern(PATTERNS.url),
+    industry: Joi.string().optional().valid(...INDUSTRIES),
+    size: Joi.string().optional().valid(...COMPANY_SIZES),
     founded: Joi.number().optional().integer().min(1800).max(new Date().getFullYear()),
-    foundedYear: Joi.number().optional().integer().min(1800).max(new Date().getFullYear()),
-    headquarters: Joi.object().unknown(true).optional(),
-    socialMedia: Joi.object().unknown(true).optional(),
-    socialLinks: Joi.object().unknown(true).optional(),
-    logo: Joi.string().optional().allow(''),
-    banner: Joi.string().optional().allow(''),
+    logo: Joi.string().optional().pattern(PATTERNS.url),
+    banner: Joi.string().optional().pattern(PATTERNS.url),
     status: Joi.string().optional().valid(...COMPANY_STATUSES),
     isVerified: Joi.boolean().optional(),
-  }).unknown(true).min(1).required(),
+  }).min(1).required(),
 
   query: Joi.object({
     page: Joi.number().optional().integer().min(1).default(1),
@@ -234,8 +216,10 @@ export const companyValidators = {
 
   id: Joi.object({
     id: Joi.string()
+      .uuid({ version: ['uuidv4'] })
       .required()
       .messages({
+        'string.guid': 'Company ID must be a valid UUID v4',
         'any.required': 'Company ID is required',
       }),
   }).required(),
@@ -245,13 +229,13 @@ export const companyValidators = {
   }).required(),
 
   idWithLogoId: Joi.object({
-    id: Joi.string().required(),
-    logoId: Joi.string().required(),
+    id: Joi.string().uuid({ version: 'uuidv4' }).required(),
+    logoId: Joi.string().uuid({ version: 'uuidv4' }).required(),
   }),
 
   idWithCoverId: Joi.object({
-    id: Joi.string().required(),
-    coverId: Joi.string().required(),
+    id: Joi.string().uuid({ version: 'uuidv4' }).required(),
+    coverId: Joi.string().uuid({ version: 'uuidv4' }).required(),
   }),
 
   socialLinks: Joi.object({
@@ -273,135 +257,109 @@ export const postValidators = {
     title: Joi.string()
       .required()
       .trim()
-      .min(3)
+      .min(5)
       .max(200)
       .messages({
-        'string.min': 'Title must be at least 3 characters',
+        'string.min': 'Title must be at least 5 characters',
         'string.max': 'Title cannot exceed 200 characters',
         'any.required': 'Title is required',
       }),
 
+    // ✅ CHANGED: optional kiya — sirf media/poll wali post bhi ho sakti hai
     content: Joi.string()
       .optional()
-      .allow('', null)
-      .trim(),
-
-    company: Joi.string()
-      .optional()
-      .allow('', null),
-
-    companyId: Joi.string()
-      .optional()
-      .allow('', null),
-
-    author: Joi.string()
-      .optional()
-      .allow('', null)
+      .allow('')
+      .trim()
+      .min(10)
       .messages({
-        'string.base': 'Author ID must be a valid string',
+        'string.min': 'Content must be at least 10 characters',
       }),
 
-    authorId: Joi.string()
-      .optional()
-      .allow('', null),
+    company: Joi.string()
+      .required()
+      .uuid({ version: ['uuidv4'] })
+      .messages({
+        'string.guid': 'Company ID must be a valid UUID v4',
+        'any.required': 'Company ID is required',
+      }),
+
+    author: Joi.string()
+      .required()
+      .uuid({ version: ['uuidv4'] })
+      .messages({
+        'string.guid': 'Author ID must be a valid UUID v4',
+        'any.required': 'Author ID is required',
+      }),
 
     type: Joi.string()
       .optional()
-      .valid(...POST_TYPES, 'blog', 'news', 'update', 'achievement', 'Blog', 'News', 'Update', 'Achievement')
+      .valid(...POST_TYPES)
       .default('Blog')
       .messages({
         'any.only': `Post type must be one of: ${POST_TYPES.join(', ')}`,
       }),
 
-    postType: Joi.string()
+    media: Joi.array()
       .optional()
-      .valid(...POST_TYPES, 'blog', 'news', 'update', 'achievement', 'Blog', 'News', 'Update', 'Achievement'),
+      .items(
+        Joi.object({
+          url: Joi.string().required().pattern(PATTERNS.url),
+          type: Joi.string().required().valid(...MEDIA_TYPES),
+          caption: Joi.string().optional().trim().max(500),
+        })
+      )
+      .max(10)
+      .messages({
+        'array.max': 'Maximum 10 media items allowed',
+      }),
 
-    status: Joi.string()
-      .optional()
-      .valid(...POST_STATUSES, 'draft', 'published', 'scheduled', 'archived', 'Draft', 'Published', 'Scheduled', 'Archived')
-      .allow('', null),
-
-    media: Joi.alternatives()
+    // ✅ CHANGED: form-data mein tags JSON string ya array dono accept karega
+    tags: Joi.alternatives()
       .try(
+        // Case 1: Already parsed array aaya
         Joi.array()
-          .items(
-            Joi.object({
-              url: Joi.string().required(),
-              type: Joi.string().required().valid(...MEDIA_TYPES),
-              caption: Joi.string().optional().allow('').trim().max(500),
-            })
-          )
-          .max(10),
+          .items(Joi.string().trim().lowercase().max(50))
+          .max(20)
+          .messages({
+            'array.max': 'Maximum 20 tags allowed',
+          }),
+        // Case 2: JSON string ke roop mein aaya — form-data mein aisa hota hai
         Joi.string().custom((value, helpers) => {
           try {
             const parsed = JSON.parse(value);
-            if (!Array.isArray(parsed)) return helpers.error('any.invalid');
-            return parsed;
+            if (!Array.isArray(parsed)) {
+              return helpers.error('any.invalid');
+            }
+            // Validate each item
+            for (const item of parsed) {
+              if (typeof item !== 'string' || item.length > 50) {
+                return helpers.error('any.invalid');
+              }
+            }
+            if (parsed.length > 20) {
+              return helpers.error('any.invalid');
+            }
+            return parsed.map((t: string) => t.trim().toLowerCase());
           } catch {
-            return helpers.error('any.invalid');
+            // Single tag string hai toh array banao
+            return [value.trim().toLowerCase()];
           }
         })
       )
       .optional(),
 
-    existingMedia: Joi.alternatives().try(
-      Joi.array().items(
-        Joi.object({
-          url: Joi.string().required(),
-          type: Joi.string().required().valid(...MEDIA_TYPES),
-          caption: Joi.string().optional().allow('').trim().max(500),
-        })
-      ).max(10),
-      Joi.string().custom((value, helpers) => {
-        try {
-          const parsed = JSON.parse(value);
-          if (!Array.isArray(parsed)) return helpers.error('any.invalid');
-          return parsed;
-        } catch {
-          return helpers.error('any.invalid');
-        }
-      })
-    ).optional(),
-
-    tags: Joi.alternatives()
-      .try(
-        Joi.array()
-          .items(Joi.string().trim().lowercase().max(50))
-          .max(20),
-        Joi.string().custom((value, helpers) => {
-          try {
-            const parsed = JSON.parse(value);
-            if (!Array.isArray(parsed)) {
-              return [value.trim().toLowerCase()];
-            }
-            return parsed.map((t: string) => String(t).trim().toLowerCase());
-          } catch {
-            return value.split(',').map((t: string) => t.trim().toLowerCase()).filter(Boolean);
-          }
-        })
-      )
-      .optional()
-      .allow('', null),
-
     scheduledFor: Joi.date()
       .optional()
-      .allow(null, '')
       .greater('now')
       .messages({
         'date.greater': 'Scheduled date must be in the future',
       }),
 
-    scheduledAt: Joi.date()
-      .optional()
-      .allow(null, '')
-      .greater('now')
-      .messages({
-        'date.greater': 'Scheduled date must be in the future',
-      }),
-
+    // ✅ ADDED: pollData — create object ke ANDAR hona chahiye
+    // form-data mein JSON string ke roop mein aata hai
     pollData: Joi.alternatives()
       .try(
+        // Case 1: Already parsed object aaya
         Joi.object({
           question: Joi.string()
             .max(140)
@@ -428,9 +386,11 @@ export const postValidators = {
               'any.required': 'Poll duration is required',
             }),
         }),
+        // Case 2: JSON string ke roop mein aaya — form-data mein aisa hota hai
         Joi.string().custom((value, helpers) => {
           try {
             const parsed = JSON.parse(value);
+            // Basic structure check
             if (typeof parsed !== 'object' || parsed === null) {
               return helpers.error('any.invalid');
             }
@@ -451,15 +411,15 @@ export const postValidators = {
           'any.invalid': 'pollData must be a valid JSON object with question, options, and duration',
         })
       )
-      .optional()
-      .allow(null, ''),
+      .optional(),
 
     documents: Joi.alternatives()
       .try(
+        // Case 1: Already parsed array
         Joi.array()
           .items(
             Joi.object({
-              url: Joi.string().optional(),
+              url: Joi.string().optional().pattern(PATTERNS.url),
               type: Joi.string()
                 .valid('PDF', 'DOC', 'DOCX', 'TXT')
                 .optional(),
@@ -467,7 +427,11 @@ export const postValidators = {
               caption: Joi.string().optional().trim().max(500),
             })
           )
-          .max(5),
+          .max(5)
+          .messages({
+            'array.max': 'Maximum 5 documents allowed',
+          }),
+        // Case 2: JSON string — form-data mein aisa aata hai
         Joi.string().custom((value, helpers) => {
           try {
             const parsed = JSON.parse(value);
@@ -478,15 +442,9 @@ export const postValidators = {
           }
         })
       )
-      .optional()
-      .allow(null, ''),
+      .optional(),
 
-    images: Joi.any().optional(),
-    videos: Joi.any().optional(),
-    attachments: Joi.any().optional(),
-    visibility: Joi.string().optional().allow('', null),
-    hasPoll: Joi.alternatives().try(Joi.boolean(), Joi.string()).optional(),
-  }).unknown(true).required(),
+  }).required(),
 
   // ✅ SAME — standalone media validator (routes mein alag use ke liye)
   media: Joi.array()
@@ -513,113 +471,43 @@ export const postValidators = {
 
   update: Joi.object({
     title: Joi.string().optional().trim().min(5).max(200),
-    content: Joi.string().optional().allow('', null).trim(),
+    content: Joi.string().optional().trim().min(10),
     type: Joi.string().optional().valid(...POST_TYPES),
-    media: Joi.alternatives().try(
-      Joi.array().items(
+    media: Joi.array()
+      .optional()
+      .items(
         Joi.object({
-          url: Joi.string().required(),
+          url: Joi.string().required().pattern(PATTERNS.url),
           type: Joi.string().required().valid(...MEDIA_TYPES),
-          caption: Joi.string().optional().allow('').trim().max(500),
+          caption: Joi.string().optional().trim().max(500),
         })
-      ).max(10),
-      Joi.string().custom((value, helpers) => {
-        try {
-          const parsed = JSON.parse(value);
-          if (!Array.isArray(parsed)) return helpers.error('any.invalid');
-          return parsed;
-        } catch {
-          return helpers.error('any.invalid');
-        }
-      })
-    ).optional(),
-    existingMedia: Joi.alternatives().try(
-      Joi.array().items(
-        Joi.object({
-          url: Joi.string().required(),
-          type: Joi.string().required().valid(...MEDIA_TYPES),
-          caption: Joi.string().optional().allow('').trim().max(500),
-        })
-      ).max(10),
-      Joi.string().custom((value, helpers) => {
-        try {
-          const parsed = JSON.parse(value);
-          if (!Array.isArray(parsed)) return helpers.error('any.invalid');
-          return parsed;
-        } catch {
-          return helpers.error('any.invalid');
-        }
-      })
-    ).optional(),
-    tags: Joi.alternatives().try(
-      Joi.array().items(Joi.string().trim().lowercase().max(50)).max(20),
-      Joi.string().custom((value, helpers) => {
-        try {
-          const parsed = JSON.parse(value);
-          if (!Array.isArray(parsed)) return helpers.error('any.invalid');
-          return parsed.map((t: string) => t.trim().toLowerCase());
-        } catch {
-          return [value.trim().toLowerCase()];
-        }
-      })
-    ).optional(),
+      )
+      .max(10),
+    tags: Joi.array()
+      .optional()
+      .items(Joi.string().trim().lowercase().max(50))
+      .max(20),
     status: Joi.string().optional().valid(...POST_STATUSES),
-  }).unknown(true).min(1).required(),
+  }).min(1).required(),
 
   partialUpdate: Joi.object({
     title: Joi.string().optional().trim().min(5).max(200),
-    content: Joi.string().optional().allow('', null).trim(),
+    content: Joi.string().optional().trim().min(10),
     type: Joi.string().optional().valid(...POST_TYPES),
-    media: Joi.alternatives().try(
-      Joi.array().items(
+    media: Joi.array()
+      .optional()
+      .items(
         Joi.object({
-          url: Joi.string().required(),
+          url: Joi.string().required().pattern(PATTERNS.url),
           type: Joi.string().required().valid(...MEDIA_TYPES),
-          caption: Joi.string().optional().allow('').trim().max(500),
+          caption: Joi.string().optional().trim().max(500),
         })
-      ).max(10),
-      Joi.string().custom((value, helpers) => {
-        try {
-          const parsed = JSON.parse(value);
-          if (!Array.isArray(parsed)) return helpers.error('any.invalid');
-          return parsed;
-        } catch {
-          return helpers.error('any.invalid');
-        }
-      })
-    ).optional(),
-    existingMedia: Joi.alternatives().try(
-      Joi.array().items(
-        Joi.object({
-          url: Joi.string().required(),
-          type: Joi.string().required().valid(...MEDIA_TYPES),
-          caption: Joi.string().optional().allow('').trim().max(500),
-        })
-      ).max(10),
-      Joi.string().custom((value, helpers) => {
-        try {
-          const parsed = JSON.parse(value);
-          if (!Array.isArray(parsed)) return helpers.error('any.invalid');
-          return parsed;
-        } catch {
-          return helpers.error('any.invalid');
-        }
-      })
-    ).optional(),
-    tags: Joi.alternatives().try(
-      Joi.array().items(Joi.string().trim().lowercase().max(50)).max(20),
-      Joi.string().custom((value, helpers) => {
-        try {
-          const parsed = JSON.parse(value);
-          if (!Array.isArray(parsed)) return helpers.error('any.invalid');
-          return parsed.map((t: string) => t.trim().toLowerCase());
-        } catch {
-          return [value.trim().toLowerCase()];
-        }
-      })
-    ).optional(),
+      ),
+    tags: Joi.array()
+      .optional()
+      .items(Joi.string().trim().lowercase().max(50)),
     status: Joi.string().optional().valid(...POST_STATUSES),
-  }).unknown(true).min(1).required(),
+  }).min(1).required(),
 
   query: Joi.object({
     page: Joi.number().optional().integer().min(1).default(1),
@@ -647,16 +535,20 @@ export const postValidators = {
 
   id: Joi.object({
     id: Joi.string()
+      .uuid({ version: ['uuidv4'] })
       .required()
       .messages({
+        'string.guid': 'Post ID must be a valid UUID v4',
         'any.required': 'Post ID is required',
       }),
   }).required(),
 
   authorId: Joi.object({
     id: Joi.string()
+      .uuid({ version: ['uuidv4'] })
       .required()
       .messages({
+        'string.guid': 'Author ID must be a valid UUID v4',
         'any.required': 'Author ID is required',
       }),
   }).required(),
@@ -1618,18 +1510,18 @@ export const followerValidators = {
 export const aboutValidators = {
 
   identity: Joi.object({
-    story: Joi.string().optional().allow('').trim().max(5000),
-    mission: Joi.string().optional().allow('').trim().max(1000),
-    vision: Joi.string().optional().allow('').trim().max(1000),
-    promises: Joi.array().optional().items(Joi.string().allow('').trim().max(500)).max(20),
+    story: Joi.string().optional().trim().min(10).max(5000),
+    mission: Joi.string().optional().trim().max(1000),
+    vision: Joi.string().optional().trim().max(1000),
+    promises: Joi.array().optional().items(Joi.string().trim().max(500)).max(20),
     impacts: Joi.array().optional().items(
       Joi.object({
-        title: Joi.string().optional().allow('').trim().max(100),
-        metric: Joi.string().optional().allow('').trim().max(100),
-        description: Joi.string().optional().allow('').trim().max(300),
-      }).unknown(true)
+        title: Joi.string().required().trim().max(100),
+        metric: Joi.string().required().trim().max(100),
+        description: Joi.string().optional().trim().max(300),
+      })
     ).max(20),
-  }).unknown(true),
+  }).min(1).required(),
 
   timeline: Joi.object({
     year: Joi.number().required().integer().min(1800).max(new Date().getFullYear() + 1),

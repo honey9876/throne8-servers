@@ -13,6 +13,7 @@ import AuditProducer from '@/shared/kafka/producers/audit.producer';
 import { LoggerUtil } from '@/shared/logger.util';
 import ResponseUtil from '@/shared/response.util';
 import { Comment } from '@/shared/models/index.models';
+import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
 
 // ==================== INTERFACES ====================
 
@@ -57,10 +58,31 @@ class CommentController {
                 correlationId,
             });
 
+            let imageUrl = undefined;
+            if (req.file) {
+                try {
+                    const result: any = await new Promise((resolve, reject) => {
+                        const stream = cloudinary.uploader.upload_stream(
+                            { folder: 'comments' },
+                            (error: any, res: any) => {
+                                if (error) reject(error);
+                                else resolve(res);
+                            }
+                        );
+                        stream.end(req.file!.buffer);
+                    });
+                    imageUrl = result.secure_url;
+                } catch (err: any) {
+                    LoggerUtil.error('Failed to upload comment image', { error: err.message });
+                }
+            }
+
             const result = await CommentService.createComment(
                 userId,
                 postId,
-                content
+                content || '',
+                undefined,
+                imageUrl
             );
 
             // Audit log (non-blocking)
@@ -145,7 +167,9 @@ class CommentController {
 
             ResponseUtil.internalError(
                 res,
-                error.message,
+                process.env.NODE_ENV === 'production'
+                    ? 'Comment creation failed'
+                    : error.message,
                 error
             );
             return;
@@ -320,57 +344,6 @@ class CommentController {
             LoggerUtil.error('Get comments failed', {
                 error: error.message,
                 postId: req.params.postId,
-                correlationId,
-            });
-
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-    /**
-     * ✅ GET COMMENTS BY USER ID (public profile view)
-     * GET /api/v1/activity/comments/user/:userId
-     * @access Private (any logged-in user can view someone else's public comments)
-     */
-    static async getCommentsByUserId(
-        req: Request<{ userId: string }> & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-
-            const { userId } = req.params;
-
-            if (!userId) {
-                ResponseUtil.badRequest(res, 'User ID is required');
-                return;
-            }
-
-            const result = await CommentService.getCommentsByUserId(userId);
-
-            LoggerUtil.info('Comments fetched for specific user', {
-                userId,
-                count: result.total,
-                correlationId,
-            });
-
-            ResponseUtil.success(
-                res,
-                result,
-                'Comments fetched successfully'
-            );
-            return;
-
-        } catch (error: any) {
-            LoggerUtil.error('Get comments by userId failed', {
-                error: error.message,
-                userId: req.params.userId,
                 correlationId,
             });
 
@@ -740,6 +713,52 @@ class CommentController {
 
             if (error.message === 'Comment not liked yet') {
                 ResponseUtil.badRequest(res, 'Comment not liked yet');
+                return;
+            }
+
+            ResponseUtil.internalError(res, error.message, error);
+            return;
+        }
+    }
+
+    /**
+     * ✅ ADD REACTION TO COMMENT
+     * POST /api/v1/activity/comments/:commentId/react
+     */
+    static async reactComment(
+        req: Request<{ commentId: string }, any, { reactionType: 'like' | 'celebrate' | 'support' | 'love' | 'insightful' | 'funny' }> & { user?: UserPayload },
+        res: Response
+    ): Promise<void> {
+        const correlationId = (req as any).correlationId || uuidv4();
+
+        try {
+            if (!req.user?.userId) {
+                ResponseUtil.unauthorized(res, 'Authentication required');
+                return;
+            }
+
+            const userId = req.user.userId;
+            const { commentId } = req.params;
+            const { reactionType } = req.body;
+
+            if (!reactionType) {
+                ResponseUtil.badRequest(res, 'reactionType is required');
+                return;
+            }
+
+            const result = await CommentService.addReaction(commentId, userId, reactionType);
+
+            ResponseUtil.success(res, result, `Comment reacted with ${reactionType} successfully`);
+            return;
+
+        } catch (error: any) {
+            LoggerUtil.error('React comment failed', {
+                error: error.message,
+                correlationId,
+            });
+
+            if (error.message === 'Comment not found') {
+                ResponseUtil.notFound(res, 'Comment not found');
                 return;
             }
 

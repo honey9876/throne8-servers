@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import crypto from 'crypto';
 import { LoggerUtil } from '@/shared/logger.util';
 import userEmitter from '@/shared/events/emitters/user.emitter';
@@ -36,6 +36,7 @@ export interface IDevice extends Document {
     metadata?: Map<string, any>;
     createdAt: Date;
     updatedAt: Date;
+
     revoke(reason?: string): Promise<IDevice>;
     recordLoginAttempt(success: boolean, ipAddress: string, attemptType?: string): Promise<IDevice>;
     calculateRiskScore(): number;
@@ -59,10 +60,12 @@ const DeviceSchema = new Schema<IDevice, IDeviceModel>(
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
         },
         fingerprintHash: {
             type: String,
             required: [true, 'Fingerprint hash is required'],
+            index: true,
             select: false,
         },
         deviceType: {
@@ -82,6 +85,7 @@ const DeviceSchema = new Schema<IDevice, IDeviceModel>(
             type: String,
             enum: ['trusted', 'recognized', 'new', 'suspicious'],
             default: 'new',
+            index: true,
         },
         riskScore: {
             type: Number,
@@ -92,6 +96,7 @@ const DeviceSchema = new Schema<IDevice, IDeviceModel>(
         isActive: {
             type: Boolean,
             default: true,
+            index: true,
         },
         isVerified: {
             type: Boolean,
@@ -111,7 +116,7 @@ const DeviceSchema = new Schema<IDevice, IDeviceModel>(
         revokedAt: Date,
         revokedReason: {
             type: String,
-            enum: ['user_request', 'security_breach', 'session_timeout' , 'device_limit_exceeded'],
+            enum: ['user_request', 'security_breach', 'session_timeout', 'device_limit_exceeded'],
         },
         usageStats: {
             totalSessions: { type: Number, default: 0 },
@@ -148,7 +153,7 @@ DeviceSchema.statics.generateFingerprintHash = function (deviceData: any): strin
 
 DeviceSchema.statics.registerDevice = async function (userId: string, deviceData: any, options: any = {}): Promise<IDevice> {
     try {
-        const { deviceType, deviceName, os, browser, metadata = {} } = deviceData;
+        const { deviceType, deviceName, os, browser, fingerprint, metadata = {} } = deviceData;
 
         const deviceCount = await this.countDocuments({ userId, isActive: true });
         if (deviceCount >= 10) {
@@ -168,7 +173,6 @@ DeviceSchema.statics.registerDevice = async function (userId: string, deviceData
             await device.save();
             return device;
         }
-
         device = new this({
             userId,
             deviceType,
@@ -199,7 +203,7 @@ DeviceSchema.statics.registerDevice = async function (userId: string, deviceData
         });
 
         return device;
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Device registration failed', { error: (error as Error).message, userId });
         throw error;
     }
@@ -209,7 +213,6 @@ DeviceSchema.statics.validateDevice = async function (deviceId: string, fingerpr
     try {
         const device = await this.findOne({ deviceId, isActive: true }).select('+fingerprintHash');
         if (!device) throw new Error('Device not found or revoked');
-
         if (fingerprint) {
             const fingerprintHash = this.generateFingerprintHash({ userAgent: fingerprint });
             if (fingerprintHash !== device.fingerprintHash) throw new Error('Device fingerprint mismatch');
@@ -219,32 +222,11 @@ DeviceSchema.statics.validateDevice = async function (deviceId: string, fingerpr
         await device.save();
 
         return device;
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Device validation failed', { error: (error as Error).message, deviceId });
         throw error;
     }
 };
-
-DeviceSchema.statics.getUserDevices = async function (userId: string, { limit = 10 }: { limit?: number } = {}): Promise<any[]> {
-    try {
-        const devices = await this.find({ userId, isActive: true }).sort({ lastSeenAt: -1 }).limit(limit).lean();
-        return devices.map((device) => ({
-            deviceId: device.deviceId,
-            deviceType: device.deviceType,
-            deviceName: device.deviceName,
-            os: device.os,
-            browser: device.browser,
-            trustLevel: device.trustLevel,
-            riskScore: device.riskScore,
-            lastSeenAt: device.lastSeenAt,
-            registeredAt: device.registeredAt,
-        }));
-    } catch (error: any) {
-        logger.error('User devices retrieval failed', { error: (error as Error).message, userId });
-        throw error;
-    }
-};
-
 DeviceSchema.methods.revoke = async function (this: IDevice, reason: string = 'user_request'): Promise<IDevice> {
     try {
         if (!this.isActive) return this;
@@ -269,7 +251,7 @@ DeviceSchema.methods.revoke = async function (this: IDevice, reason: string = 'u
         });
 
         return this;
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Device revocation failed', { error: (error as Error).message, deviceId: this.deviceId });
         throw error;
     }
@@ -279,7 +261,7 @@ DeviceSchema.methods.recordLoginAttempt = async function (this: IDevice, success
     try {
         this.usageStats.totalSessions += 1;
         if (success) {
-            this.usageStats.successfulLogins += 1;
+            this.usageStats.successfulLogins += 1;  
             this.usageStats.lastSuccessfulLogin = new Date();
             this.trustLevel = this.trustLevel === 'new' ? 'recognized' : this.trustLevel;
         } else {
@@ -298,19 +280,16 @@ DeviceSchema.methods.recordLoginAttempt = async function (this: IDevice, success
         });
 
         return this;
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Login attempt recording failed', { error: (error as Error).message, deviceId: this.deviceId });
         throw error;
     }
 };
-
 DeviceSchema.methods.calculateRiskScore = function (): number {
     let score = 0;
     if (this.trustLevel === 'new') score += 20;
     if (this.trustLevel === 'suspicious') score += 50;
-    const failureRate = this.usageStats.totalSessions > 0
-        ? (this.usageStats.failedLogins / this.usageStats.totalSessions) * 100
-        : 0;
+    const failureRate = this.usageStats.totalSessions > 0 ? (this.usageStats.failedLogins / this.usageStats.totalSessions) * 100 : 0;
     if (failureRate > 50) score += 30;
     else if (failureRate > 25) score += 15;
     const daysSinceRegistered = Math.floor((Date.now() - this.registeredAt.getTime()) / (24 * 60 * 60 * 1000));
@@ -319,6 +298,25 @@ DeviceSchema.methods.calculateRiskScore = function (): number {
     if (!this.isVerified) score += 10;
     this.riskScore = Math.min(score, 100);
     return this.riskScore;
+};
+DeviceSchema.statics.getUserDevices = async function (userId: string, { limit = 10 }: { limit?: number } = {}): Promise<any[]> {
+    try {
+        const devices = await this.find({ userId, isActive: true }).sort({ lastSeenAt: -1 }).limit(limit).lean();
+        return devices.map((device) => ({
+            deviceId: device.deviceId,
+            deviceType: device.deviceType,
+            deviceName: device.deviceName,
+            os: device.os,
+            browser: device.browser,
+            trustLevel: device.trustLevel,
+            riskScore: device.riskScore,
+            lastSeenAt: device.lastSeenAt,
+            registeredAt: device.registeredAt,
+        }));
+    } catch(error : any) {
+        logger.error('User devices retrieval failed', { error: (error as Error).message, userId });
+        throw error;
+    }
 };
 
 const Device = mongoose.model<IDevice, IDeviceModel>('Device', DeviceSchema);

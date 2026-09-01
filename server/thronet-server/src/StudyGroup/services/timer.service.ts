@@ -165,13 +165,13 @@ class TimerService {
    * Cancel an active timer without saving progress
    */
   async cancelTimer(userId: string): Promise<void> {
-    const session = await studySessionRepository.findActiveSession(userId);
-    if (!session) throw new NotFoundError('No active timer found');
+    const result = await studySessionRepository.cancelAllActive(userId);
 
-    session.status = SessionStatus.CANCELLED;
-    await session.save();
-
-    logger.info(`Timer cancelled: ${session.sessionId}`);
+    if (result.modifiedCount > 0) {
+      logger.info(`Cancelled ${result.modifiedCount} active timer(s) for user ${userId}`);
+    } else {
+      logger.info(`No active timers to cancel for user ${userId}`);
+    }
   }
 
   /**
@@ -300,8 +300,61 @@ class TimerService {
       monthEnd:     getEndOfMonth(now),
     });
 
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const dailyStats = await studySessionRepository.getDailyStats(userId, getStartOfDay(thirtyDaysAgo), getEndOfDay(now));
+
+    let streakCount = 0;
+    const studyDays = new Set(dailyStats.map((d: any) => d._id));
+
+    let checkDate = new Date(now);
+    let checkDateStr = checkDate.toISOString().split('T')[0];
+
+    if (studyDays.has(checkDateStr)) {
+      streakCount++;
+      checkDate.setDate(checkDate.getDate() - 1);
+      while (studyDays.has(checkDate.toISOString().split('T')[0])) {
+        streakCount++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      }
+    } else {
+      checkDate.setDate(checkDate.getDate() - 1);
+      if (studyDays.has(checkDate.toISOString().split('T')[0])) {
+        streakCount++;
+        checkDate.setDate(checkDate.getDate() - 1);
+        while (studyDays.has(checkDate.toISOString().split('T')[0])) {
+          streakCount++;
+          checkDate.setDate(checkDate.getDate() - 1);
+        }
+      }
+    }
+
+    const weeklyStats: { [date: string]: number } = {};
+    const weekAgo = new Date(now);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    
+    dailyStats.forEach((d: any) => {
+      if (new Date(d._id) >= weekAgo) {
+        weeklyStats[d._id] = Math.round(d.totalHours / 60);
+      }
+    });
+
+    const todaySessionsList = await studySessionRepository.findTodaySessions(userId, getStartOfDay(now), getEndOfDay(now));
+    const todaySessions = todaySessionsList.map((s: any) => ({
+      subject: s.subject || 'Study',
+      time: Math.round(s.duration / 60),
+      date: s.startTime.toISOString().split('T')[0]
+    }));
+
     logger.info(`Session stats retrieved for user ${userId}`);
-    return stats;
+    return {
+      ...stats,
+      completedSessions: stats.totalSessions,
+      totalStudyTime: Math.round(stats.totalHours * 60),
+      streakCount,
+      weeklyStats,
+      todaySessions
+    };
   }
 
   /**

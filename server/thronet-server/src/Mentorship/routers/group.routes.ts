@@ -6,30 +6,6 @@ import { validateJoi, validateQueryJoi } from '@/shared/middlewares/validation.m
 import logger from '@/shared/utils/company/logger';
 import ResponseHandler from '@/shared/utils/mentorship/responseHandler';
 import queryValidator from '../validations/query.validator';
-import { uploadSingle } from '@/shared/upload/upload';
-import { NextFunction, Request, Response } from 'express';
-
-const parseFormDataFields = (req: Request, res: Response, next: NextFunction): void => {
-  const fieldsToParse = ['outcomes', 'resources', 'followUp'];
-  const numberFields = ['duration', 'maxParticipants', 'minParticipants', 'pricePerPerson', 'bufferTimeMinutes'];
-  const body = req.body as Record<string, any>;
-
-  for (const field of fieldsToParse) {
-    if (body[field] && typeof body[field] === 'string') {
-      try {
-        body[field] = JSON.parse(body[field]);
-      } catch (e) {
-        // ignore
-      }
-    }
-  }
-  for (const field of numberFields) {
-    if (body[field] !== undefined && typeof body[field] === 'string' && !isNaN(Number(body[field]))) {
-      body[field] = Number(body[field]);
-    }
-  }
-  next();
-};
 
 const router = Router();
 
@@ -47,16 +23,6 @@ const createGroupSessionValidator = Joi.object({
   pricePerPerson: Joi.number().min(0).required(),
   agenda: Joi.string().max(2000).optional().allow(''),
   outcomes: Joi.array().items(Joi.string()).optional(),
-  paymentMethod: Joi.string().valid('razorpay', 'stripe', 'cash', 'bank_transfer', 'free').required(),
-  followUp: Joi.object({
-    allowed: Joi.boolean().required(),
-    periodDays: Joi.number().min(0).max(30).when('allowed', {
-      is: true,
-      then: Joi.required(),
-      otherwise: Joi.optional()
-    })
-  }).optional(),
-  bufferTimeMinutes: Joi.number().min(0).max(60).optional().default(0),
 });
 
 const joinGroupSessionValidator = Joi.object({
@@ -95,7 +61,8 @@ const listGroupSessionsValidator = Joi.object({
 }).options({ convert: true });  // ← ADD KARO
 
 
-
+// All routes require authentication
+router.use(AuthMiddleware.authenticate as any);
 
 /**
  * @route   POST /api/v1/group-sessions
@@ -103,10 +70,7 @@ const listGroupSessionsValidator = Joi.object({
  * @access  Private (Mentor)
  */
 router.post(
-  ['/create', '/'],
-  AuthMiddleware.authenticate as any,
-  uploadSingle('thumbnailImage'),
-  parseFormDataFields,
+  '/create',
   validateJoi(createGroupSessionValidator),
   groupController.createGroupSession
 );
@@ -153,7 +117,7 @@ router.get('/upcoming', groupController.getUpcomingGroupSessions);
  * @desc    Get my group sessions
  * @access  Private
  */
-router.get('/my-sessions', AuthMiddleware.authenticate as any, groupController.getMyGroupSessions);
+router.get('/my-sessions', groupController.getMyGroupSessions);
 
 /**
  * @route   GET /api/v1/group-sessions/:id
@@ -169,9 +133,6 @@ router.get('/:id', groupController.getGroupSessionById);
  */
 router.put(
   '/:id',
-  AuthMiddleware.authenticate as any,
-  uploadSingle('thumbnailImage'),
-  parseFormDataFields,
   validateJoi(updateGroupSessionValidator),
   groupController.updateGroupSession
 );
@@ -183,7 +144,6 @@ router.put(
  */
 router.post(
   '/:id/join',
-  AuthMiddleware.authenticate as any,
   validateJoi(joinGroupSessionValidator),
   groupController.joinGroupSession
 );
@@ -193,14 +153,14 @@ router.post(
  * @desc    Leave a group session
  * @access  Private (Mentee)
  */
-router.post('/:id/leave', AuthMiddleware.authenticate as any, groupController.leaveGroupSession);
+router.post('/:id/leave', groupController.leaveGroupSession);
 
 /**
  * @route   POST /api/v1/group-sessions/:id/start
  * @desc    Start group session (Mentor only)
  * @access  Private (Mentor)
  */
-router.post('/:id/start', AuthMiddleware.authenticate as any, groupController.startGroupSession);
+router.post('/:id/start', groupController.startGroupSession);
 
 /**
  * @route   POST /api/v1/group-sessions/:id/complete
@@ -209,7 +169,6 @@ router.post('/:id/start', AuthMiddleware.authenticate as any, groupController.st
  */
 router.post(
   '/:id/complete',
-  AuthMiddleware.authenticate as any,
   validateJoi(completeGroupSessionValidator),
   groupController.completeGroupSession
 );
@@ -221,7 +180,6 @@ router.post(
  */
 router.post(
   '/:id/cancel',
-  AuthMiddleware.authenticate as any,
   validateJoi(cancelGroupSessionValidator),
   groupController.cancelGroupSession
 );
@@ -233,7 +191,6 @@ router.post(
  */
 router.post(
   '/:id/feedback',
-  AuthMiddleware.authenticate as any,
   validateJoi(addFeedbackValidator),
   groupController.addFeedback
 );

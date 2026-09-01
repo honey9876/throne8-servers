@@ -1,4 +1,4 @@
-// src/connections/controllers/followController.ts
+// src/controllers/followController.ts
 
 import { Request, Response, NextFunction } from 'express';
 import logger, { LogCategory } from '@/shared/logger.util';
@@ -16,9 +16,6 @@ import { Follow } from '../models/index';
 import { Types } from 'mongoose';
 import constants from '@/shared/constants.util';
 import { Company, Follower } from '@/company/models';
-
-import { getIO } from '@/socket/index';
-import { emitFollowReceived, emitUnfollowReceived } from '@/socket/handlers/followHandler';
 const ERROR_CODES = constants.ERROR_CODES;
 /**
  * FOLLOW CONTROLLER - COMPLETE API ENDPOINTS
@@ -60,7 +57,7 @@ class FollowController {
    */
   async followUser(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const followerId = (req as any).user?.userId || (req as any).user?.id;
+      const followerId = (req as any).user?.id;
       if (!followerId) {
         return next(new ErrorResponse('User not authenticated', HttpStatus.UNAUTHORIZED, ERROR_CODES.AUTH_FAILED));
       }
@@ -85,7 +82,14 @@ class FollowController {
       }).lean();
 
       if (existingFollow && existingFollow.status === 'active') {
-        return next(new ErrorResponse('Already following this user', HttpStatus.CONFLICT, ERROR_CODES.CONNECTION_ALREADY_EXISTS));
+        logger.info('User is already following', {
+          category: LogCategory.FOLLOW,
+          followerId,
+          followingId: validatedData.followingId
+        });
+        return res.status(HttpStatus.OK).json(
+          SuccessResponse(this.formatFollowResponse(existingFollow), 'Already following this user', HttpStatus.OK)
+        );
       }
 
       let follow;
@@ -120,28 +124,9 @@ class FollowController {
         followingId: validatedData.followingId
       });
 
-      // res.status(HttpStatus.CREATED).json(
-      //   SuccessResponse(this.formatFollowResponse(follow), 'User followed successfully', HttpStatus.CREATED)
-      // );
-
-
-      // ✅ Emit real-time follow event to the followed user
-try {
-  const io = getIO();
-  emitFollowReceived(io, validatedData.followingId, {
-      followerId,
-      timestamp: new Date().toISOString()
-  });
-} catch (socketError) {
-  logger.error('Failed to emit follow event', {
-      category: LogCategory.FOLLOW,
-      error: socketError instanceof Error ? socketError.message : 'Unknown error'
-  });
-}
-
-res.status(HttpStatus.CREATED).json(
-  SuccessResponse(this.formatFollowResponse(follow), 'User followed successfully', HttpStatus.CREATED)
-);
+      res.status(HttpStatus.CREATED).json(
+        SuccessResponse(this.formatFollowResponse(follow), 'User followed successfully', HttpStatus.CREATED)
+      );
 
     } catch (error: any) {
       logger.error('Error following user', {
@@ -159,7 +144,7 @@ res.status(HttpStatus.CREATED).json(
    */
   async unfollowUser(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const followerId = (req as any).user?.userId || (req as any).user?.id || (req as any).user?._id;
+      const followerId = (req as any).user?.id;
       const { userId: followingId } = req.params;
 
       if (!followerId) {
@@ -181,28 +166,15 @@ res.status(HttpStatus.CREATED).json(
         followingId
       });
 
-      logger.info('User unfollowed operation completed', {
+      if (result.deletedCount === 0) {
+        return next(new ErrorResponse('Follow relationship not found', HttpStatus.NOT_FOUND, ERROR_CODES.CONNECTION_NOT_FOUND));
+      }
+
+      logger.info('User unfollowed successfully', {
         category: LogCategory.FOLLOW,
         followerId,
-        followingId,
-        deletedCount: result.deletedCount
+        followingId
       });
-
-      // ✅ Emit real-time unfollow event to the unfollowed user (non-blocking)
-      try {
-        const io = getIO();
-        if (io) {
-          emitUnfollowReceived(io, followingId, {
-            followerId,
-            timestamp: new Date().toISOString()
-          });
-        }
-      } catch (socketError) {
-        logger.error('Failed to emit unfollow event (non-critical)', {
-          category: LogCategory.FOLLOW,
-          error: socketError instanceof Error ? socketError.message : 'Unknown error'
-        });
-      }
 
       res.status(HttpStatus.OK).json(
         SuccessResponse(null, 'User unfollowed successfully')
@@ -212,7 +184,7 @@ res.status(HttpStatus.CREATED).json(
       logger.error('Error unfollowing user', {
         category: LogCategory.FOLLOW,
         error: error instanceof Error ? error.message : 'Unknown error',
-        followerId: (req as any).user?.userId || (req as any).user?.id
+        followerId: (req as any).user?.id
       });
       next(error);
     }
@@ -224,7 +196,7 @@ res.status(HttpStatus.CREATED).json(
    */
   async updateFollowStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const followerId = (req as any).user?.userId || (req as any).user?.id;
+      const followerId = (req as any).user?.id;
       const { userId: followingId } = req.params;
 
       if (!followerId) {
@@ -277,7 +249,7 @@ res.status(HttpStatus.CREATED).json(
    */
   async bulkFollow(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const followerId = (req as any).user?.userId || (req as any).user?.id;
+      const followerId = (req as any).user?.id;
 
       if (!followerId) {
         return next(new ErrorResponse('User not authenticated', HttpStatus.UNAUTHORIZED, ERROR_CODES.AUTH_FAILED));
@@ -439,17 +411,45 @@ res.status(HttpStatus.CREATED).json(
 
       const totalPages = Math.ceil(total / limit);
 
+      const followerIds = followers.map((f: any) => f.followerId);
+      
+      let usersMap: Record<string, any> = {};
+      try {
+        const User = require('@/auth/models/User.model').default;
+        const users = await User.find({ userId: { $in: followerIds }, 'flags.isDeleted': false })
+          .select('userId firstName lastName username profilePhotoId headline followersCount')
+          .lean();
+        
+        usersMap = users.reduce((acc: any, u: any) => {
+          acc[u.userId] = u;
+          return acc;
+        }, {});
+      } catch(err) {
+        logger.warn('Failed to populate user details in getFollowers', { error: err });
+      }
+
       const response = {
-        data: followers.map((f: any) => ({
-          _id: f._id.toString(),
-          followerId: f.followerId,
-          followingId: userId,
-          status: validatedQuery.status || 'active',
-          createdAt: f.createdAt,
-          updatedAt: f.createdAt,
-          notificationEnabled: true,
-          isBlocked: false
-        })),
+        data: followers.map((f: any) => {
+          const userObj = usersMap[f.followerId] || {};
+          return {
+            _id: f._id.toString(),
+            followerId: {
+               userId: f.followerId,
+               firstName: userObj.firstName,
+               lastName: userObj.lastName,
+               username: userObj.username,
+               headline: userObj.headline,
+               profileImage: userObj.profilePhotoId,
+               followersCount: userObj.followersCount || 0
+            },
+            followingId: userId,
+            status: validatedQuery.status || 'active',
+            createdAt: f.createdAt,
+            updatedAt: f.createdAt,
+            notificationEnabled: true,
+            isBlocked: false
+          };
+        }),
         pagination: {
           page,
           limit,
@@ -518,17 +518,46 @@ res.status(HttpStatus.CREATED).json(
 
       const totalPages = Math.ceil(total / limit);
 
+      // Fetch all corresponding users to populate the response
+      const followingIds = following.map((f: any) => f.followingId);
+      
+      let usersMap: Record<string, any> = {};
+      try {
+        const User = require('@/auth/models/User.model').default;
+        const users = await User.find({ userId: { $in: followingIds }, 'flags.isDeleted': false })
+          .select('userId firstName lastName username profilePhotoId headline followersCount')
+          .lean();
+        
+        usersMap = users.reduce((acc: any, u: any) => {
+          acc[u.userId] = u;
+          return acc;
+        }, {});
+      } catch(err) {
+        logger.warn('Failed to populate user details in getFollowing', { error: err });
+      }
+
       const response = {
-        data: following.map((f: any) => ({
-          _id: f._id.toString(),
-          followerId: userId,
-          followingId: f.followingId,
-          status: validatedQuery.status || 'active',
-          createdAt: f.createdAt,
-          updatedAt: f.createdAt,
-          notificationEnabled: true,
-          isBlocked: false
-        })),
+        data: following.map((f: any) => {
+          const userObj = usersMap[f.followingId] || {};
+          return {
+            _id: f._id.toString(),
+            followerId: userId,
+            followingId: {
+               userId: f.followingId,
+               firstName: userObj.firstName,
+               lastName: userObj.lastName,
+               username: userObj.username,
+               headline: userObj.headline,
+               profileImage: userObj.profilePhotoId, // frontend can also look at profilePhotoId
+               followersCount: userObj.followersCount || 0
+            },
+            status: validatedQuery.status || 'active',
+            createdAt: f.createdAt,
+            updatedAt: f.createdAt,
+            notificationEnabled: true,
+            isBlocked: false
+          };
+        }),
         pagination: {
           page,
           limit,
@@ -623,7 +652,7 @@ res.status(HttpStatus.CREATED).json(
    */
   async checkFollowStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const followerId = (req as any).user?.userId || (req as any).user?.id;
+      const followerId = (req as any).user?.id;
       const { userId: followingId } = req.params;
 
       if (!followerId) {
@@ -666,7 +695,7 @@ res.status(HttpStatus.CREATED).json(
    */
   async batchCheckFollowStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const followerId = (req as any).user?.userId || (req as any).user?.id;
+      const followerId = (req as any).user?.id;
 
       if (!followerId) {
         return next(new ErrorResponse('User not authenticated', HttpStatus.UNAUTHORIZED, ERROR_CODES.AUTH_FAILED));
@@ -908,7 +937,7 @@ res.status(HttpStatus.CREATED).json(
    * Get list of companies a user is following
    * GET /api/v1/follow/user/:userId/companies
    */
-  async getUserFollowingCompanies(req: Request, res: Response, next: NextFunction): Promise<void> {
+   async getUserFollowingCompanies(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const authUserId = (req as any).user?.userId || (req as any).user?.id;
       const { userId } = req.params;
@@ -917,31 +946,54 @@ res.status(HttpStatus.CREATED).json(
         return next(new ErrorResponse('User not authenticated', HttpStatus.UNAUTHORIZED, ERROR_CODES.AUTH_FAILED));
       }
 
-      // Sirf apni list dekh sakta hai (ya admin)
-      if (userId !== authUserId && (req as any).user?.role !== 'admin') {
-        return next(new ErrorResponse('You can only view your own following list', HttpStatus.FORBIDDEN, ERROR_CODES.FORBIDDEN));
-      }
-
       const page = parseInt(req.query.page as string) || 1;
       const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
       const skip = (page - 1) * limit;
 
       const [following, total] = await Promise.all([
         Follower.find({ follower: userId, isActive: true })
-          .select('following followedAt notificationPreferences')
           .sort({ followedAt: -1 })
           .skip(skip)
           .limit(limit)
-          .populate('following', 'companyId companyName companySlug media.logo industry stats.followersCount')
           .lean(),
         Follower.countDocuments({ follower: userId, isActive: true })
       ]);
+
+      const companyIds = following.map((f: any) => f.following);
+      let companiesMap: Record<string, any> = {};
+      try {
+        const Company = require('@/company/models').Company;
+        if (Company) {
+            const companies = await Company.find({ companyId: { $in: companyIds } })
+              .select('companyId companyName media industry stats')
+              .lean();
+            
+            companiesMap = companies.reduce((acc: any, c: any) => {
+              acc[c.companyId] = c;
+              return acc;
+            }, {});
+        }
+      } catch(err) {
+         logger.warn('Failed to populate companies in getUserFollowingCompanies', { error: err });
+      }
+
+      const responseData = following.map((f: any) => {
+         const c = companiesMap[f.following] || {};
+         return {
+            ...f,
+            companyId: f.following,
+            companyName: c.companyName,
+            logo: c.media?.logo,
+            industry: c.industry,
+            followersCount: c.stats?.followersCount || 0
+         };
+      });
 
       const totalPages = Math.ceil(total / limit);
 
       res.status(HttpStatus.OK).json(
         SuccessResponse({
-          data: following,
+          data: responseData,
           pagination: { page, limit, total, totalPages, hasNext: page < totalPages, hasPrev: page > 1 }
         }, 'User following companies retrieved successfully')
       );

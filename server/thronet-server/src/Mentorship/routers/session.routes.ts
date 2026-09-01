@@ -1,27 +1,28 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { sessionController } from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 import { validateJoi } from '@/shared/middlewares/validation.middleware';
 import sessionValidator from '../validations/session.validator';
 import { uploadSingle } from '@/shared/upload/upload';
-import { NextFunction, Request, Response } from 'express';
 
-const router = Router();
-
-const parseFormDataFields = (req: Request, res: Response, next: NextFunction): void => {
-  const fieldsToParse = ['pricing', 'followUp', 'meeting'];
-  for (const field of fieldsToParse) {
-    const body = req.body as Record<string, any>;
-    if (body[field] && typeof body[field] === 'string') {
-      try {
-        body[field] = JSON.parse(body[field]);
-      } catch (e) {
-        // ignore
+const parseMultipartJsonFields = (req: Request, res: Response, next: NextFunction) => {
+  if (req.is('multipart/form-data') && req.body) {
+    const fieldsToParse = ['pricing', 'followUp'];
+    for (const field of fieldsToParse) {
+      if (typeof req.body[field] === 'string') {
+        try {
+          req.body[field] = JSON.parse(req.body[field]);
+        } catch (e) {
+          // Let Joi handle validation errors
+        }
       }
     }
   }
   next();
 };
+
+
+const router = Router();
 
 // All routes require authentication
 router.use(AuthMiddleware.authenticate as any);
@@ -40,7 +41,7 @@ router.use(AuthMiddleware.authenticate as any);
 router.post(
   '/create',
   uploadSingle('thumbnailImage'),
-  parseFormDataFields,
+  parseMultipartJsonFields as any,
   validateJoi(sessionValidator.createSession),
   sessionController.createSession
 );
@@ -159,7 +160,7 @@ router.get('/:id/refund-estimate', sessionController.getRefundEstimate);
 router.put(
   '/:id',
   uploadSingle('thumbnailImage'),
-  parseFormDataFields,
+  parseMultipartJsonFields as any,
   validateJoi(sessionValidator.updateSession),
   sessionController.updateSession
 );

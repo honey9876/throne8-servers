@@ -1,9 +1,9 @@
 // src/controllers/networkController.ts
 
 import { Request, Response } from 'express';
-import * as networkService from '../services/network.service';
-import logger from '@/shared/logger.util';
-import { sendResponse } from '@/shared/response.util'
+import * as networkService from '../services/networkService';
+import logger from '../utils/logger'; // Fixed: default import
+import { sendResponse } from '../utils/response';
 import { NetworkPeriod, NetworkCompositionType } from '../types/network.types';
 
 /**

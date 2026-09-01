@@ -86,7 +86,7 @@ const SessionMentorSchema = new Schema<SessionMentorshipDocument>(
         bookedAt:       { type: Date, default: Date.now },
         status: {
           type: String,
-          enum: ['pending', 'confirmed', 'rescheduled', 'in_progress', 'cancelled', 'completed'],
+          enum: ['pending', 'confirmed', 'cancelled', 'completed'],
           default: 'pending',
         },
         slotTime:       { type: String },
@@ -151,7 +151,6 @@ const SessionMentorSchema = new Schema<SessionMentorshipDocument>(
       lastRescheduledAt:  { type: Date },
       previousDates:      [Date],
       rescheduledBy:      { type: String },
-      reason:             { type: String },
     },
     review: {
       mentorReview: { type: String },
@@ -159,7 +158,6 @@ const SessionMentorSchema = new Schema<SessionMentorshipDocument>(
       rating:       { type: Number, min: 1, max: 5 },
       reviewedAt:   { type: Date },
     },
-
     completion: {
       completedAt:      { type: Date },
       actualDuration:   { type: Number },
@@ -238,14 +236,6 @@ SessionMentorSchema.methods.confirmBooking = async function () {
 SessionMentorSchema.methods.startSession = async function () {
   this.status = BookingStatus.IN_PROGRESS;
   this.startedAt = new Date();
-  if (this.bookings && this.bookings.length > 0) {
-    this.bookings.forEach((b: any) => {
-      if (b.status === 'confirmed' || b.status === 'rescheduled') {
-        b.status = 'in_progress';
-      }
-    });
-    this.markModified('bookings');
-  }
   return await this.save();
 };
 
@@ -264,17 +254,6 @@ SessionMentorSchema.methods.completeSession = async function (
     followUpNotes,
   };
   this.endedAt = new Date();
-
-  // Cascade the completed status to the individual bookings
-  if (this.bookings && this.bookings.length > 0) {
-    this.bookings.forEach((b: any) => {
-      if (b.status === 'in_progress' || b.status === 'confirmed' || b.status === 'rescheduled') {
-        b.status = 'completed';
-      }
-    });
-    this.markModified('bookings');
-  }
-
   return await this.save();
 };
 
@@ -284,28 +263,20 @@ SessionMentorSchema.methods.cancelSession = async function (
   refundEligible = false
 ) {
   this.status = BookingStatus.CANCELLED;
-  if (this.bookings && this.bookings.length > 0) {
-    this.bookings[0].status = 'cancelled';
-  }
   this.cancellation = { cancelledBy, cancelledAt: new Date(), reason, refundEligible };
   return await this.save();
 };
 
 SessionMentorSchema.methods.rescheduleSession = async function (
   newScheduledAt: Date,
-  rescheduledBy: string,
-  reason: string
+  rescheduledBy: string
 ) {
   if (this.reschedule.count >= 2) throw new Error('Maximum reschedule limit reached');
   this.reschedule.previousDates.push(this.scheduledAt);
   this.scheduledAt = newScheduledAt;
-  if (this.bookings && this.bookings.length > 0) {
-    this.bookings[0].scheduledAt = newScheduledAt;
-  }
   this.reschedule.count += 1;
   this.reschedule.lastRescheduledAt = new Date();
   this.reschedule.rescheduledBy = rescheduledBy;
-  this.reschedule.reason = reason;
   this.status = BookingStatus.RESCHEDULED;
   return await this.save();
 };

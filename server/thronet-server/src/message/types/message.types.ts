@@ -15,6 +15,8 @@ export enum MessageType {
     TEXT = 'text',
     VOICE = 'voice',
     IMAGE = 'image',
+    VIDEO = 'video',
+    DOCUMENT = 'document',
     REMINDER = 'system_reminder',
     SYSTEM = 'system',
 }
@@ -41,17 +43,6 @@ export enum ConversationType {
 export interface IReaction {
     emoji: string;
     userIds: string[]; // UUID list of who reacted
-}
-
-/**
- * Lightweight snapshot of the message being replied to.
- * Stored directly on the reply message so we never need a join to render it.
- */
-export interface IReplySnapshot {
-    messageId: string;   // UUID of the original message
-    text?: string;
-    senderId: string;    // UUID
-    type: MessageType;
 }
 
 /**
@@ -84,13 +75,6 @@ export interface IMessage extends Document {
     isPinned: boolean;
     pinnedAt?: Date;
     pinnedBy?: string;        // UUID of pinner
-
-    // ── Reply ──
-    replyTo?: IReplySnapshot | null;
-
-    // ── Edit ──
-    isEdited: boolean;
-    editedAt?: Date;
 
     // ── Soft Delete ──
     isDeleted: boolean;
@@ -135,6 +119,7 @@ export interface IConversation extends Document {
     groupAvatar?: string;
     groupDescription?: string;
     adminIds?: string[];      // UUIDs
+    archivedBy?: string[];    // UUIDs of users who archived this
 
     isActive: boolean;
     createdAt: Date;
@@ -150,12 +135,6 @@ export interface SendMessageDTO {
     mediaUrl?: string;
     mediaDuration?: number;
     metadata?: Record<string, unknown>;
-    replyToMessageId?: string; // UUID of the message being replied to
-}
-
-export interface EditMessageDTO {
-    messageId: string;  // UUID
-    text: string;
 }
 
 export interface GetHistoryDTO {
@@ -195,9 +174,6 @@ export interface MessageResponse {
     status: MessageStatus;
     reactions: { emoji: string; count: number; reactedByMe: boolean }[];
     isPinned: boolean;
-    replyTo?: IReplySnapshot | null;
-    isEdited?: boolean;
-    editedAt?: string;
     metadata?: Record<string, unknown>;
     createdAt: string;        // ISO string
     deliveredAt?: string;
@@ -239,8 +215,6 @@ export interface SocketNewMessage {
     text?: string;
     mediaUrl?: string;
     status: MessageStatus;
-    replyTo?: IReplySnapshot | null;
-    metadata?: Record<string, unknown>;
     createdAt: string;
 }
 
@@ -249,13 +223,6 @@ export interface SocketStatusUpdate {
     conversationId: string;
     status: MessageStatus;
     updatedAt: string;
-}
-
-export interface SocketEditedMessage {
-    messageId: string;
-    conversationId: string;
-    text: string;
-    editedAt: string;
 }
 
 export interface SocketTypingEvent {

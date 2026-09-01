@@ -1,4 +1,4 @@
-﻿// src/models/Test.model.ts
+// src/models/Test.model.ts
 
 import mongoose, { Schema } from 'mongoose';
 import { ITest } from '../interfaces/ITest';
@@ -25,6 +25,7 @@ const TestSchema = new Schema<ITest>(
       type: String, // ✅ Correct
       ref: 'StudyGroup_Group',
       required: [true, 'Group reference is required'],
+      index: true,
     },
     creator: {
       type: String, // ✅ Correct

@@ -211,33 +211,17 @@ class HeadlineController {
         }
     }
 
-    static async getMultipleHeadlines(req: Request, res: Response): Promise<void> {
-        try {
-            const { headlineIds } = req.body;
-            if (!headlineIds || !Array.isArray(headlineIds) || headlineIds.length === 0) {
-                ResponseUtil.badRequest(res, 'headlineIds must be a non-empty array');
-                return;
-            }
-            const headlines = await HeadlineService.getMultipleHeadlinesByIds(headlineIds);
-            ResponseUtil.success(res, { headlines }, 'Headlines retrieved successfully');
-        } catch (error: any) {
-            LoggerUtil.error('Get multiple headlines failed', {
-                error: error.message, count: req.body?.headlineIds?.length,
-            });
-            ResponseUtil.error(res, 'Failed to retrieve headlines', 500);
-        }
-    }
-
     /**
      * Get all headlines
      */
     static async getAllHeadlines(req: Request, res: Response): Promise<void> {
         try {
-            const { type, status, page = '1', limit = '20' } = req.query;
+            const { type, status, userId, page = '1', limit = '20' } = req.query;
 
             const filters = {
                 type: type as string,
                 status: status as string,
+                userId: userId as string,
                 page: parseInt(page as string),
                 limit: parseInt(limit as string)
             };

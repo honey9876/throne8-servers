@@ -48,7 +48,13 @@ export class UserRepository {
      * Find user by userId (excludes sensitive fields)
      */
     static async findByUserId(userId: string): Promise<any | null> {
-        return User.findOne({ userId, 'flags.isDeleted': false })
+        const query: any = { 'flags.isDeleted': { $ne: true } };
+        if (/^[0-9a-fA-F]{24}$/.test(userId)) {
+            query.$or = [{ userId }, { _id: userId }];
+        } else {
+            query.userId = userId;
+        }
+        return User.findOne(query)
             .select('-passwordHash -passwordSalt -backupCodes -twoFactorSecret -__v')
             .lean()
             .exec();
@@ -58,7 +64,13 @@ export class UserRepository {
      * Find user by userId for profile (includes more fields)
      */
     static async findByUserIdForProfile(userId: string): Promise<any | null> {
-        return User.findOne({ userId })
+        const query: any = {};
+        if (/^[0-9a-fA-F]{24}$/.test(userId)) {
+            query.$or = [{ userId }, { _id: userId }];
+        } else {
+            query.userId = userId;
+        }
+        return User.findOne(query)
             .select('-passwordHash -passwordSalt -backupCodes -__v')
             .lean()
             .exec();
@@ -123,7 +135,7 @@ export class UserRepository {
         updates: Record<string, any>
     ): Promise<any | null> {
         return User.findOneAndUpdate(
-            { userId, 'flags.isDeleted': false },
+            { userId, 'flags.isDeleted': { $ne: true } },
             { $set: { ...updates, updatedAt: new Date() } },
             {
                 new: true,
@@ -158,7 +170,7 @@ export class UserRepository {
     ): Promise<GetAllUsersResult> {
         const { page, limit, skip, filters, sortBy } = params;
 
-        const query: any = { 'flags.isDeleted': false };
+        const query: any = { 'flags.isDeleted': { $ne: true } };
 
         if (filters.status) query.status = filters.status;
         if (filters.role) query.role = filters.role;
@@ -167,12 +179,27 @@ export class UserRepository {
             query.location = { $regex: filters.location, $options: 'i' };
         }
         if (filters.search) {
-            const searchRegex = { $regex: filters.search, $options: 'i' };
-            query.$or = [
-                { email: searchRegex },
-                { firstName: searchRegex },
-                { lastName: searchRegex },
-            ];
+            const searchParts = filters.search.trim().split(/\s+/);
+            if (searchParts.length > 1) {
+                query.$or = [
+                    { email: { $regex: filters.search, $options: 'i' } },
+                    {
+                        $and: searchParts.map((part: string) => ({
+                            $or: [
+                                { firstName: { $regex: part, $options: 'i' } },
+                                { lastName: { $regex: part, $options: 'i' } },
+                            ]
+                        }))
+                    }
+                ];
+            } else {
+                const searchRegex = { $regex: filters.search, $options: 'i' };
+                query.$or = [
+                    { email: searchRegex },
+                    { firstName: searchRegex },
+                    { lastName: searchRegex },
+                ];
+            }
         }
 
         const sort: Record<string, 1 | -1> =

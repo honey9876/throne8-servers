@@ -10,9 +10,6 @@ import {
 import { logger } from '@/shared/logger.util';
 import ResponseHandler from '@/shared/utils/mentorship/responseHandler';
 import { AuthRequest } from '@/shared/middlewares/auth.middleware';
-import { TrustScoreService } from '@/Mentorship/services/trustScore.service';
-import mentorRepository from '@/Mentorship/repositories/mentor.repository';
-import { TrustScoreCalculator } from '../utils/trustScoreCalculator';
 
 class MentorController {
   /**
@@ -81,18 +78,22 @@ class MentorController {
         status: req.body.status,
       };
 
+      // Handle file uploads for updates
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+      if (files?.profilePic?.[0]) {
+        updates.profilePicFile = files.profilePic[0];
+      }
+      if (files?.bannerImage?.[0]) {
+        updates.coverImageFile = files.bannerImage[0];
+      }
+
       // Remove undefined fields before passing to service
       (Object.keys(updates) as (keyof UpdateMentorInput)[]).forEach((key) => {
         if (updates[key] === undefined) delete updates[key];
       });
 
-      // Extract uploaded files if any
-      const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
-      const profilePicFile = files?.['profilePic']?.[0];
-      const bannerImageFile = files?.['bannerImage']?.[0];
-
       const authToken = req.headers.authorization?.split(' ')[1];
-      const mentor = await mentorService.updateMentor(id, updates, req.user!.id, authToken, profilePicFile, bannerImageFile);
+      const mentor = await mentorService.updateMentor(id, updates, req.user!.id, authToken);
 
       logger.info(`Mentor profile updated: ${id}`);
       ResponseHandler.success(res, 'Mentor profile updated successfully', mentor);
@@ -147,60 +148,11 @@ class MentorController {
 
       ResponseHandler.success(res, 'Your mentor profile fetched successfully', mentor);
     } catch (error: any) {
-      logger.error('Error fetching own mentor profile:', error);
-      next(error);
-    }
-  }
-
-  /**
-   * @route   GET /api/v1/mentorship/me/trust-score
-   * @access  Private
-   */
-  async getTrustScore(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const authToken = req.headers.authorization?.split(' ')[1];
-      const mentor = await mentorService.getMentorByUserId(req.user!.id, authToken);
-
-      if (!mentor) {
-        res.status(404).json({ success: false, message: 'Mentor profile not found' });
+      if (error.message === 'MENTOR_NOT_FOUND' || error.name === 'NotFoundError' || (error.message && error.message.includes('MENTOR_NOT_FOUND'))) {
+        ResponseHandler.success(res, 'User is not a mentor', null);
         return;
       }
-
-      let trustScore = mentor.trustScore;
-
-      // 1. Identify if trustScore is missing OR if it's the empty Mongoose schema default
-      // Even if MongoDB defaults to `{ overall: 0, breakdown: ... }`, we treat it as uncalculated if all metrics are 0
-      const isUncalculated = 
-        !trustScore || 
-        Object.keys(trustScore).length === 0 || 
-        (trustScore.overall === 0 && (!trustScore.metrics || trustScore.metrics.totalCompletedSessions === 0));
-
-      if (isUncalculated) {
-        // 2. Try the primary service which also updates the Database
-        const recalculatedScore = await TrustScoreService.recalculate(mentor.mentorId);
-        
-        if (recalculatedScore) {
-          trustScore = recalculatedScore;
-        } else {
-          // 3. Complete Fallback: If DB errors out, dynamically generate it just for this request
-          trustScore = TrustScoreCalculator.calculate({
-            totalSessions: 0,
-            completedSessions: 0,
-            cancelledSessions: 0,
-            averageRating: 0,
-            totalReviews: 0,
-            hasTitle: !!mentor.title,
-            hasBio: !!mentor.bio && mentor.bio.length >= 50,
-            hasDomains: Array.isArray(mentor.domains) && mentor.domains.length > 0,
-            hasSkills: Array.isArray(mentor.skills) && mentor.skills.length > 0,
-            isVerified: !!mentor.verification?.isVerified,
-          });
-        }
-      }
-
-      ResponseHandler.success(res, 'Trust Score fetched successfully', trustScore || null);
-    } catch (error: any) {
-      logger.error('Error fetching trust score:', error);
+      logger.error('Error fetching own mentor profile:', error);
       next(error);
     }
   }

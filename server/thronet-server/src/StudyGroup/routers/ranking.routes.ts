@@ -11,7 +11,7 @@ import {
   getUserRank,
   recalculateRankings,
   updateMyRanking,
-} from '../controllers/ranking.controller';
+} from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 
 const router = express.Router();

@@ -14,7 +14,7 @@ export async function createAllIndexes(): Promise<void> {
         await createDeviceIndexes();
 
         logger.info('✅ All database indexes created successfully');
-    } catch(error : any) {
+    } catch (error: any) {
         logger.error('❌ Index creation failed', { error: (error as Error).message });
         throw error;
     }

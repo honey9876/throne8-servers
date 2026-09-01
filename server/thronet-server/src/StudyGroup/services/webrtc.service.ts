@@ -9,7 +9,7 @@
 import { Types } from 'mongoose';
 import groupRepository from '../repositories/group.repository';
 import groupMemberRepository from '../repositories/groupMember.repository';
-import liveRoomRepository from '../repositories/liveRoom.repository';
+import liveRoomRepository from '../repositories/liveroom.repository';
 import { NotFoundError, BadRequestError, ForbiddenError, ConflictError } from '@/shared/errors/app.error';
 import { LoggerUtil } from '@/shared/logger.util';
 import {

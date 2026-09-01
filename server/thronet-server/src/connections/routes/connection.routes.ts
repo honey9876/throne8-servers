@@ -42,32 +42,6 @@ import { logger } from '@/shared/logger.util';
 
 const router = Router();
 
-
-
-// Rate limiter specifically for mutual connections (high-frequency, low-cost reads)
-const mutualLimiter = rateLimit({
-    windowMs: 60 * 1000, // 1 minute window
-    max: 300, // bahut zyada limit, kyunki ek page load pe 50-100 calls ho sakti hain
-    message: {
-        error: 'Too many requests',
-        message: 'Rate limit exceeded. Please try again later.',
-        statusCode: 429
-    },
-    standardHeaders: true,
-    legacyHeaders: false,
-    handler: (req: Request, res: Response) => {
-        logger.warn('Mutual connections rate limit exceeded', {
-            ip: req.ip,
-            path: req.path,
-            userId: req.user?.id || 'anonymous'
-        });
-
-        const error = new ErrorResponse('Too many requests', HttpStatus.TOO_MANY_REQUESTS);
-        res.status(error.statusCode).json(error);
-    },
-});
-
-
 // FIXED: Improved rate limiter error handling
 const connectionLimiter = rateLimit({
     windowMs: environmentConfig.RATE_LIMIT_WINDOW_MS,
@@ -174,17 +148,6 @@ router.delete(
     connectionLimiter,
     asyncHandler(connectionController.deleteConnection)
 );
-
-
-// 2.5 Get mutual connections between two users (MUST be before GET /:connectionId)
-router.get(
-    '/mutual/:userId1/:userId2',
-    mutualLimiter,   // ✅ connectionLimiter ki jagah ye
-    asyncHandler(connectionController.getMutualConnections)
-);
-
-
-
 
 // 3. Get connection details
 router.get(

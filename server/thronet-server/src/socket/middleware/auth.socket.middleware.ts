@@ -4,10 +4,6 @@ import { ErrorResponse, HttpStatus } from '@/shared/response.util';
 import logger, { LogCategory } from '@/shared/logger.util';
 import environmentConfig from '@/config/environment/environment';
 
-//////////////////////changed
-import User from '@/auth/models/User.model';
-
-
 interface DecodedToken {
     userId: string;
     email: string;
@@ -33,9 +29,7 @@ export const socketAuthMiddleware = async (socket: Socket, next: (err?: any) => 
         // ✅ ADD DETAILED ERROR LOGGING
         let decoded: DecodedToken;
         try {
-            /////////////////////changed
-             decoded = User.verifyToken(token, 'access') as DecodedToken;
-
+            decoded = jwt.verify(token, environmentConfig.JWT_SECRET) as DecodedToken;
             console.log("jwt token aaya =>>>>>>>>>>>", environmentConfig.JWT_SECRET)
             console.log('✅ [Socket Auth] Token decoded:', decoded); // ✅ ADD
         } catch (jwtError: any) {

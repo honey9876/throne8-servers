@@ -2,11 +2,12 @@
   "name": "throne8-entry-server",
   "version": "1.0.0",
   "description": "",
-  "main": "dist/server.js",
+  "main": "src/app.ts",
+  "type": "module",
   "scripts": {
     "dev": "nodemon",
-    "build": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc && tsc-alias",
-    "start": "node dist/server.js"
+    "start": "node --import tsx/esm server.ts",
+    "build": "echo 'TypeScript runtime - no build needed'"
   },
   "nodemonConfig": {
     "watch": [
@@ -22,7 +23,9 @@
     "legacyWatch": true,
     "delay": 1000
   },
-  "overrides": {},
+  "overrides": {
+    "undici": "5.28.4"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -63,16 +66,17 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "express-mongo-sanitize": "^2.2.0",
-    "express-rate-limit": "^8.6.1",
+    "express-rate-limit": "^8.2.1",
     "express-session": "^1.19.0",
     "express-validator": "^7.3.2",
     "franc-min": "^6.2.0",
     "geoip-lite": "^1.4.10",
+    "google-auth-library": "^11.0.0",
     "handlebars": "^4.7.8",
     "helmet": "^8.1.0",
     "hpp": "^0.2.3",
     "ioredis": "^5.9.1",
-    "isomorphic-dompurify": "^3.19.0",
+    "isomorphic-dompurify": "^3.23.0",
     "joi": "^18.0.2",
     "js-yaml": "^4.1.1",
     "jsonwebtoken": "^9.0.3",
@@ -121,7 +125,6 @@
     "@types/axios": "^0.9.36",
     "@types/bcrypt": "^6.0.0",
     "@types/compression": "^1.8.1",
-    "@types/connect-mongo": "^3.1.2",
     "@types/connect-timeout": "^1.9.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
@@ -136,7 +139,7 @@
     "@types/kafkajs": "^1.8.2",
     "@types/luxon": "^3.7.1",
     "@types/multer": "^2.0.0",
-    "@types/node": "^22.20.1",
+    "@types/node": "^22.19.3",
     "@types/node-geocoder": "^4.2.6",
     "@types/nodemailer": "^7.0.4",
     "@types/opossum": "^8.1.9",

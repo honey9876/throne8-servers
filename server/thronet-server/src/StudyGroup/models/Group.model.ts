@@ -1,10 +1,9 @@
-﻿import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { IGroup } from '../interfaces/IGroup';
 import { GroupCategory } from '../enums/GroupCategory.enum';
 import { GroupVisibility } from '../enums/GroupVisibility.enum';
 import { GROUP_CONSTANTS } from '../utils/constants';
-import crypto from 'crypto';
 
 // IGroup interface mein naye moderation fields nahi hain.
 // Schema ko any se type karo aur model mein IGroup use karo —
@@ -17,6 +16,7 @@ const groupSchema = new Schema(
       type: String,
       required: true,
       unique: true,
+      index: true,
       default: () => uuidv4(),
     },
     title: {
@@ -61,7 +61,7 @@ const groupSchema = new Schema(
       max: [GROUP_CONSTANTS.GOAL_HOURS_MAX, `Goal hours cannot exceed ${GROUP_CONSTANTS.GOAL_HOURS_MAX}`],
     },
     tags:    { type: [String], default: [] },
-    joinCode:{ type: String, unique: true, sparse: true },
+    joinCode:{ type: String },
     isActive:{ type: Boolean, default: true },
 
     cameraRequired:      { type: Boolean, default: false },
@@ -72,7 +72,7 @@ const groupSchema = new Schema(
       min: [50, 'Minimum attendance must be at least 50%'],
       max: [100, 'Minimum attendance cannot exceed 100%'],
     },
-    groupScore:       { type: Number, default: 0 },
+    groupScore:       { type: Number, default: 0, index: true },
     lastScoreUpdated: { type: Date, default: Date.now },
 
     // ── Moderation ────────────────────────────────────────────────
@@ -157,29 +157,28 @@ const groupSchema = new Schema(
   },
   {
     timestamps: true,
-   toJSON: {
-  virtuals: true,
-  transform: (_doc, ret) => {
-    const r = ret as any;
-    r.id = r.groupId;
-    delete r._id;
-    delete r.__v;
-    return r;
-  },
-},
+    toJSON: {
+      virtuals: true,
+      transform: (_doc, ret) => {
+        (ret as any).id = (ret as any).groupId;
+        delete ret._id;
+        delete ret.__v;
+        return ret;
+      },
+    },
     toObject: { virtuals: true },
   }
 );
 
 // ── Indexes ──────────────────────────────────────────────────────
-// groupSchema.index({ groupId: 1 }, { unique: true });
+groupSchema.index({ groupId: 1 }, { unique: true });
 groupSchema.index({ title: 'text', description: 'text' });
 groupSchema.index({ category: 1 });
 groupSchema.index({ visibility: 1 });
 groupSchema.index({ leaderId: 1 });
 groupSchema.index({ isActive: 1 });
 groupSchema.index({ createdAt: -1 });
-// groupSchema.index({ joinCode: 1 }, { sparse: true });
+groupSchema.index({ joinCode: 1 }, { unique: true, sparse: true });
 groupSchema.index({ 'bannedUsers.user': 1 });
 groupSchema.index({ 'reports.status': 1 });
 groupSchema.index({ 'messageReports.status': 1 });
@@ -188,7 +187,7 @@ groupSchema.index({ 'messageReports.status': 1 });
 groupSchema.pre('save', function (this: any, next) {
   if (this.visibility === GroupVisibility.PRIVATE && !this.joinCode) {
     const bytes = Buffer.allocUnsafe(4);
-    crypto.randomFillSync(bytes);
+    require('crypto').randomFillSync(bytes);
     this.joinCode = bytes.toString('hex').toUpperCase();
   }
   next();
@@ -203,6 +202,13 @@ groupSchema.virtual('pendingReportsCount').get(function (this: any) {
 
 groupSchema.virtual('bannedUsersCount').get(function (this: any) {
   return (this.bannedUsers ?? []).length;
+});
+
+groupSchema.virtual('leader', {
+  ref: 'User',
+  localField: 'leaderId',
+  foreignField: 'userId',
+  justOne: true
 });
 
 const Group = mongoose.model<GroupDocument>('StudyGroup_Group', groupSchema);

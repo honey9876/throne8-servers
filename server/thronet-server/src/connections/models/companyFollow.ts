@@ -1,4 +1,4 @@
-﻿// src/connections/models/Follow.ts
+// src/connections/models/Follow.ts
 
 import { Schema, model, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -28,23 +28,28 @@ const FollowSchema = new Schema<ICompanyFollow, ICompanyFollowModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
         },
         userId: {
             type: String,
             required: true,
+            index: true,
         },
         companyId: {
             type: String,
             required: true,
+            index: true,
         },
         status: {
             type: String,
             enum: ['active', 'unfollowed'],
             default: 'active',
+            index: true,
         },
         region: {
             type: String,
             default: 'global',
+            index: true,
         },
         cacheVersion: {
             type: Number,

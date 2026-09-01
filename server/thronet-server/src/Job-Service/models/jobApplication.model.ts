@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import { generateSecureId } from '@/shared/security';
 
 const validUUIDRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -105,11 +105,13 @@ const jobApplicationSchema = new Schema<IJobApplication>({
     type: String,
     required: true,
     unique: true,
+    index: true,
     default: generateSecureId
   },
   jobId: {
     type: String,
     required: true,
+    index: true,
     validate: {
       validator: (v: string) => validUUIDRegex.test(v),
       message: 'Invalid job ID format'
@@ -118,6 +120,7 @@ const jobApplicationSchema = new Schema<IJobApplication>({
   userId: {
     type: String,
     required: true,
+    index: true,
     validate: {
       validator: (v: string) => validUUIDRegex.test(v),
       message: 'Invalid user ID format'
@@ -126,6 +129,7 @@ const jobApplicationSchema = new Schema<IJobApplication>({
   companyId: {
     type: String,
     required: true,
+    index: true,
     validate: {
       validator: (v: string) => validUUIDRegex.test(v),
       message: 'Invalid company ID format'
@@ -135,10 +139,12 @@ const jobApplicationSchema = new Schema<IJobApplication>({
     type: String,
     enum: Object.values(ApplicationStatus),
     default: ApplicationStatus.SUBMITTED,
+    index: true
   },
   appliedAt: {
     type: Date,
     default: Date.now,
+    index: true
   },
   resumeVersion: {
     type: String,
@@ -227,6 +233,7 @@ const jobApplicationSchema = new Schema<IJobApplication>({
     skills: {
     type: [String],
     default: [],
+    index: true
   },
     salary: { type: Number, min: 0 },
     equity: { type: Number, min: 0 },

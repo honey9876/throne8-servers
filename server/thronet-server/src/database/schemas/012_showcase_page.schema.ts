@@ -1,4 +1,4 @@
-﻿import { Schema } from 'mongoose';
+import { Schema } from 'mongoose';
 
 export const ShowcasePageSchema = new Schema(
   {
@@ -7,6 +7,7 @@ export const ShowcasePageSchema = new Schema(
       ref: 'Company',
       required: true,
       unique: true,
+      index: true,
     },
     slug: {
       type: String,
@@ -85,6 +86,7 @@ export const ShowcasePageSchema = new Schema(
     isPublished: {
       type: Boolean,
       default: false,
+      index: true,
     },
     publishedAt: Date,
   },

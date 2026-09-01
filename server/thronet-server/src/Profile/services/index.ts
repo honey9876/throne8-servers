@@ -1,28 +1,56 @@
-/**
- * Profile/services/index.ts
- * Centralized export of all Profile services
- */
+import AuthService from '@/auth/services/auth.service';
 
-export { default as AboutService } from './about.service';
-export { default as ActivityMediaService } from './activity/activityMedia.service';
-export { default as AnalyticsService } from './analytics.service';
-export { default as CareerBreakService } from './careerBreak.service';
-export { default as CommentService } from './activity/comment.service';
-export { default as ContactService } from './contact.service';
-export { default as CourseService } from './course.service';
-export { default as CoverPhotoService } from './cover.service';
-export { default as EducationService } from './education.service';
-export { default as ExperienceService } from './experience.service';
-export { default as HeadlineService } from './headline.service';
-export { default as HonorService } from './honor.service';
-export { default as PatentService } from './patent.service';
-export { default as PositionService } from './position.service';
-export { default as PostService } from './activity/post.service';
-export { default as ProfilePhotoService } from './profilePhoto.service';
-export { default as ProjectService } from './project.service';
-export { default as PublicationService } from './publication.service';
-export { default as RepostService } from './activity/repost.service';
-export { default as SkillService } from './skill.service';
-export { default as TestScoreService } from './testScore.service';
-export { default as VolunteerService } from './volunteer.service';
-export { default as ReportService } from '@/Profile/services/report.service';
+
+// Dashboard Services
+import HeadlineService from './headline.service';
+import EducationService from './education.service';
+import ExperienceService from './experience.service';
+import ActivityMediaService from './activity/activityMedia.service';
+import ProjectService from './project.service';
+import PublicationService from './publication.service';
+import CommentService from './activity/comment.service';
+import VolunteerService from './volunteer.service';
+import PostService from './activity/post.service';
+import ContactService from './contact.service';
+import ProfilePhotoService from './profilePhoto.service';
+import CoverPhotoService from './cover.service';
+import AboutService from './about.service';
+import SkillService from './skill.service';
+import AnalyticsService from './analytics.service';
+import CareerBreakService from './careerBreak.service';
+import TestScoreService from './testScore.service';
+import PositionService from './position.service';
+import CourseService from './course.service';
+import HonorService from './honor.service';
+import PatentService from './patent.service';
+import RepostService from './activity/repost.service';
+
+export {
+    // Auth Service
+    AuthService,
+
+    // Dashboard Services
+    HeadlineService,
+    ExperienceService,
+    EducationService,
+    ProfilePhotoService,
+    PostService,
+    CommentService,
+    ActivityMediaService,
+    CoverPhotoService,
+    AboutService,
+    SkillService,
+    ContactService,
+    AnalyticsService,
+    CareerBreakService,
+    TestScoreService,
+    ProjectService,
+    CourseService,
+    VolunteerService,
+    PositionService,
+    PublicationService,
+    PatentService,
+    HonorService,
+
+    RepostService,
+}

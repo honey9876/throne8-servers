@@ -1,7 +1,7 @@
-// src/connections/middleware/compression.middleware.ts
+// src/middleware/compression.middleware.ts
 import { Request, Response, RequestHandler } from 'express';
 import compression from 'compression';
-import logger, { LogCategory } from '@/shared/logger.util'; // PublicLogMetadata not needed — metadata param is Record<string, any>
+import logger, { LogCategory, PublicLogMetadata } from '../utils/logger';
 
 // Configure compression middleware
 export const compressionMiddleware: RequestHandler = compression({
@@ -14,7 +14,7 @@ export const compressionMiddleware: RequestHandler = compression({
       logger.debug('Compression skipped due to x-no-compression header', {
         category: LogCategory.HTTP,
         data: { url: req.originalUrl, duration: Date.now() - startTime }
-      });
+      } as PublicLogMetadata);
       return false;
     }
 
@@ -29,12 +29,12 @@ export const compressionMiddleware: RequestHandler = compression({
         'application/gzip',
         'application/pdf'
       ];
-
+      
       if (nonCompressible.some(type => contentType.includes(type))) {
         logger.debug('Compression skipped due to non-compressible content type', {
           category: LogCategory.HTTP,
           data: { url: req.originalUrl, contentType, duration: Date.now() - startTime }
-        });
+        } as PublicLogMetadata);
         return false;
       }
     }
@@ -44,7 +44,7 @@ export const compressionMiddleware: RequestHandler = compression({
     logger.debug('Compression applied', {
       category: LogCategory.HTTP,
       data: { url: req.originalUrl, shouldCompress, duration: Date.now() - startTime }
-    });
+    } as PublicLogMetadata);
     return shouldCompress;
   }
 });

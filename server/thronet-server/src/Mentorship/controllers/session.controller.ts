@@ -20,9 +20,11 @@ class SessionController {
         return;
       }
 
-      const payload = { ...req.body };
-      const file = req.file as Express.Multer.File | undefined;
-      const session = await mentorshipSessionService.createMentorSession(mentorUserId, payload, file);
+      const sessionData = {
+        ...req.body,
+        thumbnailImageFile: req.file
+      };
+      const session = await mentorshipSessionService.createMentorSession(mentorUserId, sessionData);
       ResponseHandler.created(res, 'Session assigned successfully', session);
     } catch (error: any) {
       logger.error('Failed to create mentor session:', error);
@@ -106,7 +108,8 @@ class SessionController {
       const authToken = getAuthToken(req) || undefined;
 
       const session = await mentorshipSessionService.getSessionById(id, userId, authToken);
-      ResponseHandler.success(res, 'Session retrieved successfully', session);
+      const enriched = (await mentorshipSessionService.enrichSessionsWithUserDetails([session.toObject()]))[0];
+      ResponseHandler.success(res, 'Session retrieved successfully', enriched);
     } catch (error: any) {
       logger.error('Failed to fetch session:', error);
       next(error);
@@ -265,10 +268,13 @@ class SessionController {
       }
 
       const authToken = getAuthToken(req) || undefined;
-      const payload = { ...req.body };
-      const file = req.file as Express.Multer.File | undefined;
-      const session = await mentorshipSessionService.updateSession(id, userId, payload, authToken, file);
-      ResponseHandler.success(res, 'Session updated successfully', session);
+      const updates = {
+        ...req.body,
+        thumbnailImageFile: req.file
+      };
+      const session = await mentorshipSessionService.updateSession(id, userId, updates, authToken);
+      const enriched = (await mentorshipSessionService.enrichSessionsWithUserDetails([session.toObject()]))[0];
+      ResponseHandler.success(res, 'Session updated successfully', enriched);
     } catch (error: any) {
       logger.error('Failed to update session:', error);
       next(error);
@@ -292,7 +298,8 @@ class SessionController {
       const { bookingId } = req.body;
 
       const session = await mentorshipSessionService.confirmSession(id, userId, authToken, bookingId);
-      ResponseHandler.success(res, 'Session confirmed successfully', session);
+      const enriched = (await mentorshipSessionService.enrichSessionsWithUserDetails([session.toObject()]))[0];
+      ResponseHandler.success(res, 'Session confirmed successfully', enriched);
     } catch (error: any) {
       logger.error('Failed to confirm session:', error);
       next(error);
@@ -314,7 +321,8 @@ class SessionController {
 
       const authToken = getAuthToken(req) || undefined;
       const session = await mentorshipSessionService.startSession(id, userId, authToken);
-      ResponseHandler.success(res, 'Session started successfully', session);
+      const enriched = (await mentorshipSessionService.enrichSessionsWithUserDetails([session.toObject()]))[0];
+      ResponseHandler.success(res, 'Session started successfully', enriched);
     } catch (error: any) {
       logger.error('Failed to start session:', error);
       next(error);
@@ -343,7 +351,8 @@ class SessionController {
         { actualDuration, wasSuccessful, followUpRequired, followUpNotes },
         authToken
       );
-      ResponseHandler.success(res, 'Session completed successfully', session);
+      const enriched = (await mentorshipSessionService.enrichSessionsWithUserDetails([session.toObject()]))[0];
+      ResponseHandler.success(res, 'Session completed successfully', enriched);
     } catch (error: any) {
       logger.error('Failed to complete session:', error);
       next(error);
@@ -363,18 +372,14 @@ class SessionController {
         return;
       }
 
-      const { reason, bookingId } = req.body;
+      const { reason } = req.body;
       if (!reason) {
         ResponseHandler.badRequest(res, 'Cancellation reason is required');
         return;
       }
-      if (!bookingId) {
-        ResponseHandler.badRequest(res, 'bookingId is required to cancel a booking');
-        return;
-      }
 
       const authToken = getAuthToken(req) || undefined;
-      const result = await bookingService.cancelBooking(id, userId, reason, authToken, bookingId);
+      const result = await bookingService.cancelBooking(id, userId, reason, authToken);
 
       ResponseHandler.success(res, 'Session cancelled successfully', {
         session: result.session,
@@ -404,35 +409,24 @@ class SessionController {
         return;
       }
 
-      const { newScheduledAt, reason, bookingId } = req.body;
+      const { newScheduledAt, reason } = req.body;
       if (!newScheduledAt) {
         ResponseHandler.badRequest(res, 'New scheduled time is required');
         return;
       }
-      if (!bookingId) {
-        ResponseHandler.badRequest(res, 'bookingId is required to reschedule a booking');
-        return;
-      }
 
-      const session = await SessionMentor.findOne({ sessionId: id });
+      const session = await SessionMentor.findById(id);
       if (!session) {
         ResponseHandler.notFound(res, 'Session not found');
         return;
       }
 
-      // 1. Identify the true scheduledAt to compare against the 24h baseline.
-      // If it's a specific booking, validate against the booking's start time instead of the overall parent session's start time.
-      let existingStartTime = session.scheduledAt;
-      if (bookingId && session.bookings && session.bookings.length > 0) {
-        const targetBooking = session.bookings.find((b: any) => b._id.toString() === bookingId);
-        if (targetBooking && targetBooking.scheduledAt) {
-          existingStartTime = targetBooking.scheduledAt;
-        }
+      if (session.menteeId !== userId && session.mentorId !== userId) {
+        ResponseHandler.forbidden(res, 'You do not have permission to reschedule this session');
+        return;
       }
 
-      const hoursDiff = (existingStartTime.getTime() - Date.now()) / (1000 * 60 * 60);
-      
-      // LOGIC: The business rule prevents a user from rescheduling a meeting if the CURRENT EXISTNG start time is within 24 hours, or if it already passed.
+      const hoursDiff = (session.scheduledAt.getTime() - Date.now()) / (1000 * 60 * 60);
       if (hoursDiff < 24) {
         ResponseHandler.badRequest(res, 'Cannot reschedule less than 24 hours before start time');
         return;
@@ -450,8 +444,7 @@ class SessionController {
         userId,
         new Date(newScheduledAt),
         reason || 'Rescheduled by user',
-        authToken,
-        bookingId
+        authToken
       );
 
       ResponseHandler.success(res, 'Session rescheduled successfully', {
@@ -481,13 +474,16 @@ class SessionController {
         return;
       }
 
-      const session = await SessionMentor.findOne({ sessionId: id });
+      const session = await SessionMentor.findById(id);
       if (!session) {
         ResponseHandler.notFound(res, 'Session not found');
         return;
       }
 
-      // Permission check deferred to underlying service
+      if (session.menteeId !== userId && session.mentorId !== userId) {
+        ResponseHandler.forbidden(res, 'You do not have permission to view this session');
+        return;
+      }
 
       const hoursDiff = (session.scheduledAt.getTime() - Date.now()) / (1000 * 60 * 60);
 

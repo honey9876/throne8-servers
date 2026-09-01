@@ -3,7 +3,7 @@
 
 import { logger } from '@/shared/logger.util';
 import config from '../env/env';
-import Redis ,  { Cluster } from 'ioredis';
+import Redis, { Cluster } from 'ioredis';
 
 let redis: Redis | Cluster | null = null;
 const POOL_SIZE = 10;
@@ -26,6 +26,7 @@ export const initRedis = (): Redis => {
 
     // Create connection pool for high concurrency
     for (let i = 0; i < POOL_SIZE; i++) {
+      /* OLD:
       const client = new Redis({
         host: config.REDIS_HOST,
         port: config.REDIS_PORT || 6379,
@@ -48,6 +49,46 @@ export const initRedis = (): Redis => {
           return false;
         },
       });
+      */
+      const options: any = {
+        db: config.REDIS_DB || 0,
+        connectTimeout: 10000,
+        maxRetriesPerRequest: 3,
+        enableReadyCheck: true,
+        lazyConnect: false,
+        retryStrategy: (times: number) => {
+          const delay = Math.min(times * 50, 2000);
+          logger.warn(`Redis retry attempt ${times}, waiting ${delay}ms`);
+          return delay;
+        },
+        reconnectOnError: (err: any) => {
+          const targetError = 'READONLY';
+          if (err.message.includes(targetError)) {
+            return true;
+          }
+          return false;
+        },
+      };
+
+      let client;
+      if (process.env.REDIS_URL) {
+        client = new Redis(process.env.REDIS_URL, {
+          db: options.db,
+          connectTimeout: options.connectTimeout,
+          maxRetriesPerRequest: options.maxRetriesPerRequest,
+          enableReadyCheck: options.enableReadyCheck,
+          lazyConnect: options.lazyConnect,
+          retryStrategy: options.retryStrategy,
+          reconnectOnError: options.reconnectOnError,
+        });
+      } else {
+        client = new Redis({
+          ...options,
+          host: config.REDIS_HOST,
+          port: config.REDIS_PORT || 6379,
+          password: config.REDIS_PASSWORD,
+        });
+      }
 
       // Setup event handlers
       if (i === 0) {
@@ -61,7 +102,7 @@ export const initRedis = (): Redis => {
     logger.info(`✅ Redis pool created with ${POOL_SIZE} connections`);
 
     return connectionPool[0];
-  } catch (error : any) {
+  } catch (error: any) {
     logger.error('Failed to initialize Redis:', error);
     return createMockRedis();
   }
@@ -119,7 +160,7 @@ export const closeRedis = async (): Promise<void> => {
       connectionPool.length = 0;
       redis = null;
       logger.info('✅ Redis connections closed gracefully');
-    } catch (error : any) {
+    } catch (error: any) {
       logger.error('Error closing Redis connections:', error);
       await Promise.all(connectionPool.map(client => client.disconnect()));
       connectionPool.length = 0;
@@ -212,8 +253,8 @@ const createMockRedis = (): any => {
     },
 
     pipeline: () => ({
-      setex: () => {},
-      del: () => {},
+      setex: () => { },
+      del: () => { },
       exec: async () => [],
     }),
 
@@ -231,8 +272,8 @@ const createMockRedis = (): any => {
 
     ping: async () => 'PONG',
     quit: async () => 'OK',
-    disconnect: () => {},
-    on: () => {},
+    disconnect: () => { },
+    on: () => { },
   };
 };
 
@@ -242,7 +283,7 @@ const createMockRedis = (): any => {
 export const isRedisAvailable = async (timeoutMs = 3000): Promise<boolean> => {
   try {
     const redis = getRedis();
-    
+
     const pingPromise = redis.ping();
     const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Redis health check timeout')), timeoutMs)
@@ -250,7 +291,7 @@ export const isRedisAvailable = async (timeoutMs = 3000): Promise<boolean> => {
 
     const result = await Promise.race([pingPromise, timeoutPromise]);
     return result === 'PONG';
-  } catch (error : any) {
+  } catch (error: any) {
     logger.error('Redis health check failed:', error);
     return false;
   }
@@ -268,7 +309,7 @@ export const redisCache = {
       const redis = getRedis();
       const data = await redis.get(key);
       return data ? JSON.parse(data) : null;
-    } catch (error : any) {
+    } catch (error: any) {
       logger.error('Redis get error:', error);
       return null;
     }
@@ -283,7 +324,7 @@ export const redisCache = {
       const data = JSON.stringify(value);
       await redis.setex(key, ttl, data);
       return true;
-    } catch (error : any) {
+    } catch (error: any) {
       logger.error('Redis set error:', error);
       return false;
     }
@@ -297,7 +338,7 @@ export const redisCache = {
       const redis = getRedis();
       await redis.del(key);
       return true;
-    } catch (error : any) {
+    } catch (error: any) {
       logger.error('Redis del error:', error);
       return false;
     }
@@ -331,7 +372,7 @@ export const redisCache = {
 
       logger.debug(`Deleted ${deletedCount} keys matching pattern: ${pattern}`);
       return deletedCount;
-    } catch (error : any) {
+    } catch (error: any) {
       logger.error('Redis delPattern error:', error);
       return 0;
     }
@@ -345,7 +386,7 @@ export const redisCache = {
       const redis = getRedis();
       const result = await redis.exists(key);
       return result === 1;
-    } catch (error : any) {
+    } catch (error: any) {
       logger.error('Redis exists error:', error);
       return false;
     }
@@ -358,7 +399,7 @@ export const redisCache = {
     try {
       const redis = getRedis();
       return await redis.ttl(key);
-    } catch (error : any) {
+    } catch (error: any) {
       logger.error('Redis ttl error:', error);
       return -1;
     }
@@ -371,7 +412,7 @@ export const redisCache = {
     try {
       const redis = getRedis();
       return await redis.incr(key);
-    } catch (error : any) {
+    } catch (error: any) {
       logger.error('Redis incr error:', error);
       return 0;
     }
@@ -385,7 +426,7 @@ export const redisCache = {
       const redis = getRedis();
       const result = await redis.expire(key, seconds);
       return result === 1;
-    } catch (error : any) {
+    } catch (error: any) {
       logger.error('Redis expire error:', error);
       return false;
     }
@@ -406,7 +447,7 @@ export const redisCache = {
 
       await pipeline.exec();
       return true;
-    } catch (error : any) {
+    } catch (error: any) {
       logger.error('Redis mset error:', error);
       return false;
     }
@@ -419,7 +460,7 @@ export const redisCache = {
     try {
       const redis = getRedis();
       const values = await redis.mget(...keys);
-      
+
       const result = new Map<string, T>();
       values.forEach((value, index) => {
         if (value) {
@@ -428,7 +469,7 @@ export const redisCache = {
       });
 
       return result;
-    } catch (error : any) {
+    } catch (error: any) {
       logger.error('Redis mget error:', error);
       return new Map();
     }

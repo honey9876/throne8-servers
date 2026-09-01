@@ -1,17 +1,13 @@
-// src/connections/controllers/health.controller.ts - Updated with Network Status
+// src/controllers/healthController.ts - Updated with Network Status
 import { Request, Response } from 'express';
-// ⚠️ neo4j.ts is currently empty/fully commented -> "not a module" error.
-// Path is correct, but the file itself needs at least one export before this will compile.
-// Comment this out until neo4j.ts has real exports, or add a dummy export in that file.
-// import { getNeo4jDriver } from '@/config/neo4j/neo4j';
-import databaseConnection from '@/database/connection'; // default export = object with connectDB/healthCheck/getConnectionStatus etc.
-import environmentConfig from '@/config/environment/environment';
-import logger, { LogCategory } from '@/shared/logger.util';
-import constants from '@/shared/constants.util'; // default export = big nested object, use constants.HTTP_STATUS.OK etc.
-import cacheService from '@/shared/cache.util'; // ⚠️ confirm export name in cache.util.ts
+import { getNeo4jDriver } from '../config/neo4j';
+import { checkMongoDBHealth } from '../config/database';
+import { checkRedisConnection } from '../config/redis';
+import cacheService from '../services/shared/cacheService';
+import environmentConfig from '../config/environment';
+import logger, { LogCategory } from '../utils/logger';
+import { HTTP_STATUS } from '../utils/constants';
 import os from 'os';
-
-const HTTP_STATUS = constants.HTTP_STATUS;
 
 class HealthController {
   /**
@@ -19,13 +15,13 @@ class HealthController {
    */
   async checkServiceHealth(_req: Request, res: Response): Promise<void> {
     try {
-      // Neo4j check disabled until config/neo4j/neo4j.ts is fixed
-      // const driver = await getNeo4jDriver();
-      // await driver.verifyConnectivity();
-
+      // Check Neo4j connectivity
+      const driver = await getNeo4jDriver();
+      await driver.verifyConnectivity();
+      
       // Check cache connectivity
       await cacheService.get('health-check');
-
+      
       const healthData = {
         status: 'OK',
         message: 'Connection Service is running successfully',
@@ -67,23 +63,20 @@ class HealthController {
   async checkDatabaseConnectivity(_req: Request, res: Response): Promise<void> {
     try {
       logger.info('Database connectivity check requested', { category: LogCategory.DATABASE });
-      const isHealthy = await databaseConnection.healthCheck();
-      const connStatus = databaseConnection.getConnectionStatus();
-
-      const statusCode = isHealthy ? HTTP_STATUS.OK : HTTP_STATUS.SERVICE_UNAVAILABLE;
-      res.status(statusCode).json({
-        success: isHealthy,
+      const dbStatus = await checkMongoDBHealth();
+      
+      const statusCode = dbStatus.connection === 'active' ? HTTP_STATUS.OK : HTTP_STATUS.SERVICE_UNAVAILABLE;
+      res.status(statusCode).json({ 
+        success: dbStatus.connection === 'active', 
         data: {
-          status: isHealthy ? 'OK' : 'ERROR',
-          message: isHealthy ? 'Database connection is healthy' : 'Database connection failed',
+          status: dbStatus.connection === 'active' ? 'OK' : 'ERROR',
+          message: dbStatus.connection === 'active' ? 'Database connection is healthy' : 'Database connection failed',
           database: {
-            connected: connStatus.isConnected,
+            connected: dbStatus.connection === 'active',
             type: 'MongoDB',
-            readyState: connStatus.readyState,
-            readyStateName: connStatus.readyStateName,
-            host: connStatus.host,
-            dbName: connStatus.dbName,
-            timestamp: new Date().toISOString()
+            readyState: dbStatus.readyState,
+            timestamp: new Date().toISOString(),
+            ...(dbStatus.error && { error: dbStatus.error })
           }
         }
       });
@@ -95,10 +88,10 @@ class HealthController {
       res.status(HTTP_STATUS.SERVICE_UNAVAILABLE).json({
         success: false,
         message: 'Database connectivity check failed',
-        database: {
-          connected: false,
-          error: error.message,
-          timestamp: new Date().toISOString()
+        database: { 
+          connected: false, 
+          error: error.message, 
+          timestamp: new Date().toISOString() 
         }
       });
     }
@@ -106,33 +99,20 @@ class HealthController {
 
   /**
    * Feature 3: Check Redis Connectivity
-   * ⚠️ DISABLED - config/cache/redis.config.ts is a pure CONFIG provider
-   * (RedisConfigManager class), not an actual Redis client/connection.
-   * It has no ping/healthCheck against a live connection.
-   * The real Redis client instance almost certainly lives in shared/cache.util.ts
-   * (the file cacheService is imported from above) — once that file's content is
-   * confirmed, wire this up to its actual ping/health method instead.
    */
   async checkRedisConnectivity(_req: Request, res: Response): Promise<void> {
     try {
       logger.info('Redis connectivity check requested', { category: LogCategory.REDIS });
-
-      // Using cacheService (shared/cache.util.ts) as a proxy health-check,
-      // since redis.config.ts has no live connection to check.
-      const testKey = '__redis_health_check__';
-      await cacheService.set(testKey, '1', 5);
-      const val = await cacheService.get(testKey);
-      const connected = val !== null && val !== undefined;
-      if (connected) await cacheService.del(testKey);
-
-      const statusCode = connected ? HTTP_STATUS.OK : HTTP_STATUS.SERVICE_UNAVAILABLE;
-      res.status(statusCode).json({
-        success: connected,
+      const redisStatus = await checkRedisConnection();
+      
+      const statusCode = redisStatus.connected ? HTTP_STATUS.OK : HTTP_STATUS.SERVICE_UNAVAILABLE;
+      res.status(statusCode).json({ 
+        success: redisStatus.connected, 
         data: {
-          status: connected ? 'OK' : 'ERROR',
-          message: connected ? 'Redis connection is healthy' : 'Redis connection failed',
+          status: redisStatus.connected ? 'OK' : 'ERROR',
+          message: redisStatus.connected ? 'Redis connection is healthy' : 'Redis connection failed',
           redis: {
-            connected,
+            ...redisStatus,
             type: 'Redis',
             timestamp: new Date().toISOString()
           }
@@ -146,10 +126,10 @@ class HealthController {
       res.status(HTTP_STATUS.SERVICE_UNAVAILABLE).json({
         success: false,
         message: 'Redis connectivity check failed',
-        redis: {
-          connected: false,
-          error: error.message,
-          timestamp: new Date().toISOString()
+        redis: { 
+          connected: false, 
+          error: error.message, 
+          timestamp: new Date().toISOString() 
         }
       });
     }
@@ -157,19 +137,40 @@ class HealthController {
 
   /**
    * Feature 4: Check Neo4j Connectivity
-   * ⚠️ DISABLED - neo4j.ts is currently empty/commented, has no working getNeo4jDriver export.
-   * Re-enable once config/neo4j/neo4j.ts is actually implemented.
    */
   async checkNeo4jConnectivity(_req: Request, res: Response): Promise<void> {
-    res.status(HTTP_STATUS.SERVICE_UNAVAILABLE).json({
-      success: false,
-      message: 'Neo4j connectivity check is temporarily disabled (neo4j.ts not implemented)',
-      neo4j: {
-        connected: false,
-        error: 'neo4j.ts has no working exports yet',
-        timestamp: new Date().toISOString()
-      }
-    });
+    try {
+      logger.info('Neo4j connectivity check requested', { category: LogCategory.DATABASE });
+      const driver = await getNeo4jDriver();
+      await driver.verifyConnectivity();
+      
+      res.status(HTTP_STATUS.OK).json({ 
+        success: true, 
+        data: {
+          status: 'OK',
+          message: 'Neo4j connection is healthy',
+          neo4j: {
+            connected: true,
+            type: 'Neo4j',
+            timestamp: new Date().toISOString()
+          }
+        }
+      });
+    } catch (error: any) {
+      logger.error('Neo4j connectivity check failed', {
+        category: LogCategory.DATABASE,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      res.status(HTTP_STATUS.SERVICE_UNAVAILABLE).json({
+        success: false,
+        message: 'Neo4j connectivity check failed',
+        neo4j: { 
+          connected: false, 
+          error: error.message, 
+          timestamp: new Date().toISOString() 
+        }
+      });
+    }
   }
 
   /**
@@ -178,14 +179,14 @@ class HealthController {
   async getSystemMetrics(_req: Request, res: Response): Promise<void> {
     try {
       logger.info('System metrics requested', { category: LogCategory.SYSTEM });
-
+      
       const totalMemory = os.totalmem();
       const freeMemory = os.freemem();
       const usedMemory = totalMemory - freeMemory;
       const memoryUsagePercent = ((usedMemory / totalMemory) * 100).toFixed(2);
-
-      res.status(HTTP_STATUS.OK).json({
-        success: true,
+      
+      res.status(HTTP_STATUS.OK).json({ 
+        success: true, 
         data: {
           status: 'OK',
           message: 'System metrics retrieved successfully',
@@ -225,7 +226,7 @@ class HealthController {
   async getServiceStatus(_req: Request, res: Response): Promise<void> {
     try {
       logger.info('Service status requested', { category: LogCategory.SYSTEM });
-
+      
       const serviceHealth = {
         status: 'OK',
         message: 'Connection Service is running successfully',
@@ -236,27 +237,21 @@ class HealthController {
       };
 
       // Check MongoDB
-      let dbStatus: { connected: boolean; readyStateName?: string; error?: string };
+      let dbStatus;
       try {
-        const isHealthy = await databaseConnection.healthCheck();
-        const connStatus = databaseConnection.getConnectionStatus();
-        dbStatus = { connected: isHealthy, readyStateName: connStatus.readyStateName };
+        dbStatus = await checkMongoDBHealth();
       } catch (error: any) {
         logger.error('MongoDB status check failed', {
           category: LogCategory.DATABASE,
           error: error instanceof Error ? error.message : String(error)
         });
-        dbStatus = { connected: false, error: error.message };
+        dbStatus = { connection: 'inactive', error: error.message };
       }
 
-      // Check Redis (proxy via cacheService — see checkRedisConnectivity note above)
-      let redisStatus: { connected: boolean; error?: string };
+      // Check Redis
+      let redisStatus;
       try {
-        const testKey = '__redis_status_check__';
-        await cacheService.set(testKey, '1', 5);
-        const val = await cacheService.get(testKey);
-        redisStatus = { connected: val !== null && val !== undefined };
-        if (redisStatus.connected) await cacheService.del(testKey);
+        redisStatus = await checkRedisConnection();
       } catch (error: any) {
         logger.error('Redis status check failed', {
           category: LogCategory.REDIS,
@@ -265,17 +260,29 @@ class HealthController {
         redisStatus = { connected: false, error: error.message };
       }
 
-      // Neo4j disabled (see checkNeo4jConnectivity note above)
-      const neo4jStatus = { connected: false, error: 'neo4j.ts not implemented' };
+      // Check Neo4j
+      let neo4jStatus;
+      try {
+        const driver = await getNeo4jDriver();
+        await driver.verifyConnectivity();
+        neo4jStatus = { connected: true };
+      } catch (error: any) {
+        logger.error('Neo4j status check failed', {
+          category: LogCategory.DATABASE,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        neo4jStatus = { connected: false, error: error.message };
+      }
 
       const overallStatus = (
-        serviceHealth.status === 'OK' &&
-        dbStatus.connected &&
-        redisStatus.connected
+        serviceHealth.status === 'OK' && 
+        dbStatus.connection === 'active' && 
+        redisStatus.connected && 
+        neo4jStatus.connected
       ) ? 'OK' : 'DEGRADED';
 
-      res.status(HTTP_STATUS.OK).json({
-        success: true,
+      res.status(HTTP_STATUS.OK).json({ 
+        success: true, 
         data: {
           status: overallStatus,
           message: 'Comprehensive service status',
@@ -307,21 +314,22 @@ class HealthController {
   async getCacheStatus(_req: Request, res: Response): Promise<void> {
     try {
       logger.info('Cache status requested', { category: LogCategory.CACHE_ERROR });
-
+      
+      // Test cache read/write
       const testKey = 'health-check-test';
       const testValue = { timestamp: new Date().toISOString(), test: true };
-
+      
       await cacheService.set(testKey, JSON.stringify(testValue), 60);
-      const cachedData = await cacheService.get(testKey);
+      const cachedData = await cacheService.get(testKey); 
       const isWorking = cachedData !== null;
-
+      
       if (isWorking) {
         await cacheService.del(testKey);
       }
 
       const statusCode = isWorking ? HTTP_STATUS.OK : HTTP_STATUS.SERVICE_UNAVAILABLE;
-      res.status(statusCode).json({
-        success: isWorking,
+      res.status(statusCode).json({ 
+        success: isWorking, 
         data: {
           status: isWorking ? 'OK' : 'ERROR',
           message: isWorking ? 'Cache service is healthy' : 'Cache service failed',
@@ -341,10 +349,10 @@ class HealthController {
       res.status(HTTP_STATUS.SERVICE_UNAVAILABLE).json({
         success: false,
         message: 'Cache status check failed',
-        cache: {
-          connected: false,
-          error: error.message,
-          timestamp: new Date().toISOString()
+        cache: { 
+          connected: false, 
+          error: error.message, 
+          timestamp: new Date().toISOString() 
         }
       });
     }
@@ -356,10 +364,11 @@ class HealthController {
   async checkNetworkStatus(_req: Request, res: Response): Promise<void> {
     try {
       logger.info('Network service status requested', { category: LogCategory.SYSTEM });
-
+      
+      // Check if network service is available
       let networkServiceStatus;
       try {
-        const networkModule = await import('@/connections/services/network.service').catch(() => null);
+        const networkModule = await import('../services/networkService').catch(() => null);
         networkServiceStatus = {
           available: !!networkModule,
           type: 'NetworkService',
@@ -399,8 +408,8 @@ class HealthController {
       };
 
       const statusCode = networkServiceStatus.available ? HTTP_STATUS.OK : HTTP_STATUS.SERVICE_UNAVAILABLE;
-      res.status(statusCode).json({
-        success: networkServiceStatus.available,
+      res.status(statusCode).json({ 
+        success: networkServiceStatus.available, 
         data: {
           status: networkServiceStatus.available ? 'OK' : 'ERROR',
           message: networkServiceStatus.available ? 'Network service is available' : 'Network service unavailable',
@@ -416,14 +425,16 @@ class HealthController {
       res.status(HTTP_STATUS.SERVICE_UNAVAILABLE).json({
         success: false,
         message: 'Network service status check failed',
-        networkService: {
-          available: false,
-          error: error.message,
-          timestamp: new Date().toISOString()
+        networkService: { 
+          available: false, 
+          error: error.message, 
+          timestamp: new Date().toISOString() 
         }
       });
     }
   }
+
+
 
   /**
    * Feature 9: Check Note Service Status
@@ -431,14 +442,16 @@ class HealthController {
   async checkNoteStatus(_req: Request, res: Response): Promise<void> {
     try {
       logger.info('Note service status requested', { category: LogCategory.SYSTEM });
-
+      
+      // Check if note-related collections and services are available
       let noteServiceStatus;
       try {
-        // ⚠️ confirm this is a named export in connections/models/ConnectionNote.ts
-        const { ConnectionNote } = await import('@/connections/models/ConnectionNote');
-
+        // Check if ConnectionNote model is available
+        const { ConnectionNote } = await import('../models/mongodb/ConnectionNote');
+        
+        // Test database query - count notes (quick operation)
         const noteCount = await ConnectionNote.countDocuments({ status: 'active' }).limit(1);
-
+        
         noteServiceStatus = {
           available: true,
           modelLoaded: !!ConnectionNote,
@@ -475,12 +488,12 @@ class HealthController {
       };
 
       const statusCode = noteServiceStatus.available ? HTTP_STATUS.OK : HTTP_STATUS.SERVICE_UNAVAILABLE;
-      res.status(statusCode).json({
-        success: noteServiceStatus.available,
+      res.status(statusCode).json({ 
+        success: noteServiceStatus.available, 
         data: {
           status: noteServiceStatus.available ? 'OK' : 'ERROR',
-          message: noteServiceStatus.available
-            ? 'Note service is available and operational'
+          message: noteServiceStatus.available 
+            ? 'Note service is available and operational' 
             : 'Note service unavailable',
           noteService: noteServiceStatus,
           features: noteFeatures,
@@ -503,14 +516,15 @@ class HealthController {
       res.status(HTTP_STATUS.SERVICE_UNAVAILABLE).json({
         success: false,
         message: 'Note service status check failed',
-        noteService: {
-          available: false,
-          error: error.message,
-          timestamp: new Date().toISOString()
+        noteService: { 
+          available: false, 
+          error: error.message, 
+          timestamp: new Date().toISOString() 
         }
       });
     }
   }
+
 
   /**
    * Feature 10: Check Privacy Service Status
@@ -518,19 +532,22 @@ class HealthController {
   async checkPrivacyStatus(_req: Request, res: Response): Promise<void> {
     try {
       logger.info('Privacy service status requested', { category: LogCategory.SYSTEM });
-
+      
+      // Check if privacy service is available
       let privacyServiceStatus;
       try {
-        // ⚠️ confirm export name: named `{ privacyService }` vs default export in privacy.service.ts
-        const { privacyService } = await import('@/connections/services/privacy.service');
-
+        const { privacyService } = await import('../services/privacyService');
+        
+        // Test basic privacy operations
         const testUserId = 'health-check-test-user';
+        
+        // Try to get privacy settings (should return defaults if user doesn't exist)
         const settings = await privacyService.getPrivacySettings(testUserId);
-
-        // ⚠️ confirm default vs named export in ConnectionBlock model
-        const { default: ConnectionBlock } = await import('@/connections/models/ConnectionBlock');
+        
+        // Check if ConnectionBlock model is accessible
+        const { default: ConnectionBlock } = await import('../models/mongodb/ConnectionBlock');
         const blockCount = await ConnectionBlock.countDocuments().limit(1);
-
+        
         privacyServiceStatus = {
           available: true,
           serviceLoaded: !!privacyService,
@@ -567,12 +584,12 @@ class HealthController {
       };
 
       const statusCode = privacyServiceStatus.available ? HTTP_STATUS.OK : HTTP_STATUS.SERVICE_UNAVAILABLE;
-      res.status(statusCode).json({
-        success: privacyServiceStatus.available,
+      res.status(statusCode).json({ 
+        success: privacyServiceStatus.available, 
         data: {
           status: privacyServiceStatus.available ? 'OK' : 'ERROR',
-          message: privacyServiceStatus.available
-            ? 'Privacy service is available and operational'
+          message: privacyServiceStatus.available 
+            ? 'Privacy service is available and operational' 
             : 'Privacy service unavailable',
           privacyService: privacyServiceStatus,
           features: privacyFeatures,
@@ -596,33 +613,145 @@ class HealthController {
       res.status(HTTP_STATUS.SERVICE_UNAVAILABLE).json({
         success: false,
         message: 'Privacy service status check failed',
-        privacyService: {
-          available: false,
-          error: error.message,
-          timestamp: new Date().toISOString()
+        privacyService: { 
+          available: false, 
+          error: error.message, 
+          timestamp: new Date().toISOString() 
         }
       });
     }
   }
 
-  /**
-   * Feature 11: Check Kafka Service Status
-   * ⚠️ DISABLED - '../kafka/kafkaClient' does not exist anywhere in the project.
-   * Your actual Kafka setup lives in shared/kafka/producers/* (base.producer.ts etc.)
-   * with a totally different API. Rebuild this properly once you need Kafka health-check,
-   * pointing at the real producer/consumer instances instead of a fictional kafkaClient class.
-   */
-  async checkKafkaStatus(_req: Request, res: Response): Promise<void> {
+
+/**
+ * Feature 11: Check Kafka Service Status
+ */
+async checkKafkaStatus(_req: Request, res: Response): Promise<void> {
+  try {
+    logger.info('Kafka service status requested', { category: LogCategory.SYSTEM });
+    
+    let kafkaServiceStatus;
+    try {
+      // Import Kafka client
+      const kafkaClient = (await import('../kafka/kafkaClient')).default;
+      
+      // ✅ FIXED - Use correct method name
+      const connectionStatus = kafkaClient.getConnectionStatus();
+      
+      // ✅ FIXED - Use correct method name
+      const isHealthy = await kafkaClient.healthCheck();
+      
+      // Get admin client to check topics
+      let topicsInfo = { count: 0, topics: [] as string[] };
+      try {
+        const admin = await kafkaClient.getAdmin();
+        const topics = await admin.listTopics();
+        topicsInfo = {
+          count: topics.length,
+          topics: topics.slice(0, 10) // First 10 topics
+        };
+      } catch (adminError) {
+        logger.warn('Could not fetch Kafka topics', { 
+          error: adminError instanceof Error ? adminError.message : String(adminError) 
+        });
+      }
+      
+      kafkaServiceStatus = {
+        available: true,
+        connected: connectionStatus.connected,
+        healthy: isHealthy,
+        producer: connectionStatus.producer,
+        consumers: connectionStatus.consumers,
+        admin: connectionStatus.admin,
+        topicsCount: topicsInfo.count,
+        topics: topicsInfo.topics,
+        type: 'KafkaService',
+        timestamp: new Date().toISOString()
+      };
+    } catch (error: any) {
+      logger.error('Kafka status check failed', {
+        category: LogCategory.SYSTEM,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
+      kafkaServiceStatus = {
+        available: false,
+        connected: false,
+        healthy: false,
+        error: error.message,
+        type: 'KafkaService',
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    const kafkaFeatures = {
+      eventProduction: kafkaServiceStatus.connected,
+      eventConsumption: kafkaServiceStatus.connected,
+      connectionEvents: kafkaServiceStatus.connected,
+      requestEvents: kafkaServiceStatus.connected,
+      followEvents: kafkaServiceStatus.connected,
+      blockEvents: kafkaServiceStatus.connected,
+      networkEvents: kafkaServiceStatus.connected,
+      analyticsEvents: kafkaServiceStatus.connected,
+      notificationEvents: kafkaServiceStatus.connected,
+      cacheInvalidation: kafkaServiceStatus.connected,
+      deadLetterQueue: kafkaServiceStatus.connected,
+      retryMechanism: kafkaServiceStatus.connected,
+      batchProcessing: kafkaServiceStatus.connected,
+      messagePartitioning: kafkaServiceStatus.connected,
+      consumerGroups: kafkaServiceStatus.connected,
+      idempotentProducer: true,
+      compressionEnabled: true,
+      metricsCollection: true
+    };
+
+    const statusCode = kafkaServiceStatus.available && kafkaServiceStatus.healthy 
+      ? HTTP_STATUS.OK 
+      : HTTP_STATUS.SERVICE_UNAVAILABLE;
+      
+    res.status(statusCode).json({ 
+      success: kafkaServiceStatus.available && kafkaServiceStatus.healthy, 
+      data: {
+        status: (kafkaServiceStatus.available && kafkaServiceStatus.healthy) ? 'OK' : 'ERROR',
+        message: (kafkaServiceStatus.available && kafkaServiceStatus.healthy)
+          ? 'Kafka service is available and operational' 
+          : 'Kafka service unavailable or unhealthy',
+        kafkaService: kafkaServiceStatus,
+        features: kafkaFeatures,
+        capabilities: {
+          brokerCount: 1, // Development setup
+          replicationFactor: 1,
+          minInSyncReplicas: 1,
+          maxMessageSize: '1MB',
+          retentionPeriod: '7 days',
+          partitionsPerTopic: 3,
+          compressionType: 'gzip',
+          acks: 'all',
+          batchSize: 16384,
+          lingerMs: 10,
+          idempotentProducer: true,
+          maxInFlightRequests: 5
+        }
+      }
+    });
+  } catch (error: any) {
+    logger.error('Kafka service status check failed', {
+      category: LogCategory.SYSTEM,
+      error: error instanceof Error ? error.message : String(error)
+    });
     res.status(HTTP_STATUS.SERVICE_UNAVAILABLE).json({
       success: false,
-      message: 'Kafka health-check is not implemented yet (kafkaClient.ts does not exist in this project)',
-      kafkaService: {
-        available: false,
-        error: 'kafkaClient module not found - implement against shared/kafka/producers/*',
-        timestamp: new Date().toISOString()
+      message: 'Kafka service status check failed',
+      kafkaService: { 
+        available: false, 
+        error: error.message, 
+        timestamp: new Date().toISOString() 
       }
     });
   }
 }
+}
+
+
 
 export const healthController = new HealthController();

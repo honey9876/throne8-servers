@@ -3,20 +3,18 @@
  * Architecture: One document per user, posts[] array inside
  *
  * @module services/post.service
- * @version 2.4.0 (+ repostsCount/sendsCount in feed, + recordSend)
+ * @version 2.0.0
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import mongoose from 'mongoose';
 import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
 import sharp from 'sharp';
 import Constants from '@/shared/constants.util';
-import { Post, User } from '@/shared/models/index.models';
+import { Post, User, ProfilePhoto, Headline, Connection } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
 import { IPostEntry } from '@/Profile/models/Post.model';
 import NotificationService from '@/notifications/services/notification.service';
-import { AnalyticsService } from '@/shared/services/index.service';
-import redisService from '@/services/redis.service';
+import RepostService from './repost.service';
 
 // ==================== INTERFACES ====================
 
@@ -59,8 +57,6 @@ interface PostAnalysisResult {
     linkPreviewQuality: number;
 }
 
-type ConnectionStatus = 'self' | 'connected' | 'pending_sent' | 'pending_received' | 'none';
-
 // ==================== POST SERVICE ====================
 
 class PostService {
@@ -75,16 +71,17 @@ class PostService {
         videos: Express.Multer.File[] = [],
         documents: Express.Multer.File[] = []
     ): Promise<CreatePostResult> {
-        console.log('🔥🔥🔥 CREATE POST FUNCTION HIT 🔥🔥🔥', { userId, title: postData.title });
         const correlationId = uuidv4();
 
         try {
             LoggerUtil.info('Creating post', { userId, title: postData.title, correlationId });
 
+            // Step 1: Validate user
             const user = await User.findOne({ userId });
             if (!user) throw new Error('User not found');
             if (user.status !== 'active') throw new Error('User account is not active');
 
+            // Step 2: Validate media counts
             if (images.length > Constants.ACTIVITY_VALIDATION.POST.MAX_IMAGES_PER_POST) {
                 throw new Error(`Maximum ${Constants.ACTIVITY_VALIDATION.POST.MAX_IMAGES_PER_POST} images allowed`);
             }
@@ -95,6 +92,7 @@ class PostService {
                 throw new Error(`Maximum ${Constants.ACTIVITY_VALIDATION.POST.MAX_DOCUMENTS_PER_POST} documents allowed`);
             }
 
+            // Step 2.5: Process Poll Data
             let pollSetup = null;
             if (postData.pollData) {
                 const pollEndsAt = new Date();
@@ -114,6 +112,7 @@ class PostService {
                 };
             }
 
+            // Step 2.6: Process Scheduled Post
             let scheduledSetup: { scheduledFor: Date; isScheduled: boolean } | null = null;
             if (postData.scheduledFor) {
                 const scheduledTime = new Date(postData.scheduledFor);
@@ -124,6 +123,7 @@ class PostService {
                 scheduledSetup = { scheduledFor: scheduledTime, isScheduled: true };
             }
 
+            // Step 2.7: Process Event Data
             let eventSetup = null;
             if (postData.eventData) {
                 const eventStartDateTime = new Date(
@@ -143,8 +143,10 @@ class PostService {
                 };
             }
 
+            // Step 3: Analyze post
             const analysis = await this.analyzePost(postData, userId, images, videos, documents);
 
+            // Step 4: Upload media to Cloudinary
             const uploadedImages = await Promise.all(
                 images.map(async (file) => {
                     const metadata = await sharp(file.buffer).metadata();
@@ -224,6 +226,7 @@ class PostService {
                 })
             );
 
+            // Step 5: Build the new post entry
             const entryId = uuidv4();
             const postUrl = `/posts/${entryId}`;
             const accountType = user.accountType || 'personal';
@@ -236,18 +239,16 @@ class PostService {
                 mood: postData.mood || null,
                 isPublic: postData.isPublic !== false,
                 postUrl,
+                // ✅ AFTER
                 ...(uploadedImages.length > 0 && { images: uploadedImages }),
                 ...(uploadedVideos.length > 0 && { videos: uploadedVideos }),
                 ...(uploadedDocuments.length > 0 && { documents: uploadedDocuments }),
 
                 likesCount: 0,
                 commentsCount: 0,
-                // ✅ NEW
-                repostsCount: 0,
-                sendsCount: 0,
                 likedBy: [],
-                savedBy: [],
                 isPinned: false,
+                isSaved: false,
                 isArchived: false,
                 isDeleted: false,
 
@@ -275,14 +276,17 @@ class PostService {
                 isShadowbanned: false,
             };
 
+            // Step 6: Upsert — user ka document dhundo ya naya banao
             let userPostDoc = await Post.findOne({ userId });
 
             if (userPostDoc) {
+                // Existing document mein push karo
                 userPostDoc.posts.push(newEntry);
                 userPostDoc.totalPosts += 1;
                 userPostDoc.creatorModeEnabled = creatorModeEnabled;
                 await userPostDoc.save();
             } else {
+                // Pehli baar — naya document banao
                 userPostDoc = new Post({
                     postId: uuidv4(),
                     userId,
@@ -293,6 +297,7 @@ class PostService {
                 await userPostDoc.save();
             }
 
+            // Step 7: User stats update
             await User.findOneAndUpdate(
                 { userId },
                 {
@@ -302,51 +307,27 @@ class PostService {
                 { new: true }
             );
 
-            redisService.deleteByPattern(`feed:v1:${userId}:page:*`).catch(() => {});
-
-            const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
-            const mentionedUserIds = [...new Set(
-                Array.from((postData.content || '').matchAll(mentionRegex), m => m[2])
-            )].filter(id => id !== userId);
-
-            if (mentionedUserIds.length > 0) {
-                setTimeout(async () => {
-                    try {
-                        for (const mentionedUserId of mentionedUserIds) {
-                            await NotificationService.notifyMentioned(mentionedUserId, userId, entryId, postData.title, 'post');
-                        }
-                        console.log('✅ [NOTIF] Mentioned users notified for post:', entryId);
-                    } catch (err: any) {
-                        console.warn('⚠️ [NOTIF] Mention notification failed (non-blocking):', err.message);
-                    }
-                }, 0);
-            }
-
-            setTimeout(async () => {
+            setImmediate(async () => {
                 try {
-                    console.log('--- NOTIF TRACE: Post created ---');
-                    console.log(`--- NOTIF TRACE: Post author identified (userId: ${userId}) ---`);
-                    await NotificationService.notifyPostRecipients(
+                    await NotificationService.notifyConnectionsOnPost(
                         userId,
                         entryId,
                         postData.title
                     );
-                    console.log('✅ [NOTIF] Recipients notified for post:', entryId);
+                    console.log('✅ [NOTIF] Connections notified for post:', entryId);
                 } catch (err: any) {
-                    console.error('⚠️ [NOTIF] Notification failed:', {
-                        name: err?.name,
-                        message: err?.message,
-                        stack: err?.stack,
-                    });
+                    console.warn('⚠️ [NOTIF] Notification failed (non-blocking):', err.message);
                 }
-            }, 0);
+            });
 
             if (user.trackActivityTime) {
                 await user.trackActivityTime();
             }
 
+            // Get the saved entry (last pushed)
             const savedEntry = userPostDoc.posts[userPostDoc.posts.length - 1];
 
+            // Scheduled post response
             if (savedEntry.isScheduled && savedEntry.scheduledFor) {
                 LoggerUtil.info('Post scheduled', {
                     entryId,
@@ -378,14 +359,16 @@ class PostService {
                 mood: savedEntry.mood,
                 isPublic: savedEntry.isPublic,
                 postUrl: savedEntry.postUrl,
+                // ✅ AFTER
                 ...(savedEntry.images?.length > 0 && { images: savedEntry.images }),
                 ...(savedEntry.videos?.length > 0 && { videos: savedEntry.videos }),
                 ...(savedEntry.documents?.length > 0 && { documents: savedEntry.documents }),
                 isPinned: savedEntry.isPinned,
-                isSaved: (savedEntry.savedBy || []).includes(userId),
+                isSaved: savedEntry.isSaved,
                 isArchived: savedEntry.isArchived,
                 createdAt: savedEntry.createdAt,
             };
+
         } catch (error: any) {
             LoggerUtil.error('Post creation failed', {
                 error: error.message,
@@ -397,6 +380,9 @@ class PostService {
         }
     }
 
+    /**
+     * ✅ Upload buffer to Cloudinary
+     */
     private static async uploadToCloudinary(
         buffer: Buffer,
         userId: string,
@@ -423,6 +409,9 @@ class PostService {
         });
     }
 
+    /**
+     * ✅ Vote on a poll (entryId se dhundo)
+     */
     static async votePoll(entryId: string, userId: string, optionId: string): Promise<any> {
         const doc = await Post.findOne({ 'posts.entryId': entryId });
         if (!doc) throw new Error('Poll not found');
@@ -445,8 +434,6 @@ class PostService {
         entry.pollData.totalVotes++;
 
         await doc.save();
-
-        redisService.deleteByPattern(`feed:v1:${doc.userId}:page:*`).catch(() => {});
 
         return {
             entryId: entry.entryId,
@@ -471,17 +458,20 @@ class PostService {
                 return { posts: [], total: 0, pinnedPosts: [], savedPosts: [] };
             }
 
+            // Filter entries
             let entries = userPostDoc.posts.filter((p: IPostEntry) => !p.isDeleted);
             if (!includeArchived) {
                 entries = entries.filter((p: IPostEntry) => !p.isArchived);
             }
 
+            // Sort: pinned first, then by createdAt desc
             entries.sort((a: IPostEntry, b: IPostEntry) => {
                 if (a.isPinned && !b.isPinned) return -1;
                 if (!a.isPinned && b.isPinned) return 1;
                 return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
             });
 
+            // ✅ cleanPost helper — sirf non-empty / meaningful fields rakhta hai
             const cleanPost = (obj: any): any => {
                 if (!obj.images?.length) delete obj.images;
                 if (!obj.videos?.length) delete obj.videos;
@@ -510,20 +500,47 @@ class PostService {
                 });
             });
 
+            // ── NEW CODE: Merging Reposts ──
+            let userReposts: any[] = [];
+            try {
+                const repostsResult = await RepostService.getUserReposts(userId);
+                userReposts = (repostsResult?.reposts || []).map((r: any) => ({
+                    feedItemType: 'repost',
+                    repostId: r.repostId,
+                    repostType: r.repostType,
+                    thoughtText: r.thoughtText || null,
+                    repostedBy: r.repostedBy,
+                    createdAt: r.createdAt,
+                    originalPost: r.originalPost ? {
+                        ...cleanPost(r.originalPost),
+                        isLikedByCurrentUser: currentUserId ? (r.originalPost.likedBy || []).includes(currentUserId) : false,
+                    } : null,
+                })).filter((r: any) => r.originalPost !== null);
+            } catch (repostError: any) {
+                LoggerUtil.warn('Failed to fetch user reposts in getAllPosts (non-blocking)', { error: repostError.message });
+            }
+
+            // Combine both
+            const combinedFeed = [...postsWithLikeStatus, ...userReposts];
+
+            // Sort: pinned first, then by createdAt desc
+            combinedFeed.sort((a: any, b: any) => {
+                if (a.isPinned && !b.isPinned) return -1;
+                if (!a.isPinned && b.isPinned) return 1;
+                return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+            });
+
             LoggerUtil.info('Posts fetched successfully', {
                 userId,
-                count: postsWithLikeStatus.length,
+                count: combinedFeed.length,
                 correlationId,
             });
 
             return {
-                posts: postsWithLikeStatus,
-                total: postsWithLikeStatus.length,
-                pinnedPosts: postsWithLikeStatus.filter((p: any) => p.isPinned),
-                // NOTE: savedBy ab per-user array hai; "saved by anyone" ka
-                // concept nahi raha. Saved posts fetch karne ke liye
-                // Post.getSavedPostsByUser(currentUserId) use karo, ye field nahi.
-                savedPosts: [],
+                posts: combinedFeed,
+                total: combinedFeed.length,
+                pinnedPosts: combinedFeed.filter((p: any) => p.isPinned),
+                savedPosts: combinedFeed.filter((p: any) => p.isSaved),
             };
 
         } catch (error: any) {
@@ -532,281 +549,145 @@ class PostService {
         }
     }
 
-    // ==================== FEED SCORING (reach-based, LinkedIn style) ====================
-
-    private static calculateFeedScore(
-        post: any,
-        currentUserId: string,
-        connectionDegree: 1 | 2 | 3 | null = null
-    ): number {
-        const ageInHours = (Date.now() - new Date(post.createdAt).getTime()) / (1000 * 60 * 60);
-
-        const likes = post.likesCount ?? post.originalPost?.likesCount ?? 0;
-        const comments = post.commentsCount ?? post.originalPost?.commentsCount ?? 0;
-        const pollVotes = post.pollData?.totalVotes || 0;
-
-        const engagementScore = likes * 3 + comments * 5 + pollVotes * 2;
-        const decay = Math.pow(ageInHours + 2, 1.5);
-
-        let score = engagementScore / decay;
-
-        if (connectionDegree === 1) score += 40;
-        else if (connectionDegree === 2) score += 15;
-        else if (connectionDegree === 3) score += 5;
-
-        const alreadyViewed = post.analytics?.uniqueViewers?.includes(currentUserId);
-        if (alreadyViewed && ageInHours > 6) {
-            score = score * 0.05;
-        }
-
-        if (ageInHours < 1) {
-            score += 50;
-        }
-
-        return score;
-    }
-
-    private static async getConnectionStatusMap(
-        currentUserId: string,
-        authorIds: string[]
-    ): Promise<Record<string, ConnectionStatus>> {
-        const { Connection, ConnectionRequest } = await import('@/connections/models');
-
-        const uniqueAuthorIds = [...new Set(authorIds)].filter((id) => id !== currentUserId);
-        const statusMap: Record<string, ConnectionStatus> = {};
-
-        if (uniqueAuthorIds.length === 0) return statusMap;
-
-        const [connections, requests] = await Promise.all([
-            Connection.find({
-                $or: [
-                    { fromUserId: currentUserId, toUserId: { $in: uniqueAuthorIds } },
-                    { fromUserId: { $in: uniqueAuthorIds }, toUserId: currentUserId },
-                ],
-                status: 'active',
-            }).lean().select('fromUserId toUserId'),
-
-            ConnectionRequest.find({
-                $or: [
-                    { fromUserId: currentUserId, toUserId: { $in: uniqueAuthorIds } },
-                    { fromUserId: { $in: uniqueAuthorIds }, toUserId: currentUserId },
-                ],
-                status: 'pending',
-            }).lean().select('fromUserId toUserId'),
-        ]);
-
-        uniqueAuthorIds.forEach((id) => (statusMap[id] = 'none'));
-
-        connections.forEach((c: any) => {
-            const otherId = c.fromUserId === currentUserId ? c.toUserId : c.fromUserId;
-            statusMap[otherId] = 'connected';
-        });
-
-        requests.forEach((r: any) => {
-            const otherId = r.fromUserId === currentUserId ? r.toUserId : r.fromUserId;
-            if (statusMap[otherId] === 'connected') return;
-            statusMap[otherId] = r.fromUserId === currentUserId ? 'pending_sent' : 'pending_received';
-        });
-
-        return statusMap;
-    }
-
-    private static async getConnectionDegreeMap(
-        currentUserId: string,
-        authorIds: string[]
-    ): Promise<Record<string, 1 | 2 | 3 | null>> {
-        const { Connection } = await import('@/connections/models');
-
-        const uniqueAuthorIds = [...new Set(authorIds)].filter((id) => id !== currentUserId);
-        const degreeMap: Record<string, 1 | 2 | 3 | null> = {};
-        uniqueAuthorIds.forEach((id) => (degreeMap[id] = null));
-
-        if (uniqueAuthorIds.length === 0) return degreeMap;
-
-        const allConnections = await Connection.find({ status: 'active' })
-            .lean()
-            .select('fromUserId toUserId');
-
-        const adjacency: Record<string, Set<string>> = {};
-        allConnections.forEach((c: any) => {
-            if (!adjacency[c.fromUserId]) adjacency[c.fromUserId] = new Set();
-            if (!adjacency[c.toUserId]) adjacency[c.toUserId] = new Set();
-            adjacency[c.fromUserId].add(c.toUserId);
-            adjacency[c.toUserId].add(c.fromUserId);
-        });
-
-        const visited = new Set<string>([currentUserId]);
-        let frontier = new Set<string>([currentUserId]);
-
-        for (let depth = 1; depth <= 3; depth++) {
-            const nextFrontier = new Set<string>();
-
-            frontier.forEach((userId) => {
-                const neighbors = adjacency[userId] || new Set();
-                neighbors.forEach((neighborId) => {
-                    if (!visited.has(neighborId)) {
-                        visited.add(neighborId);
-                        nextFrontier.add(neighborId);
-                        if (uniqueAuthorIds.includes(neighborId)) {
-                            degreeMap[neighborId] = depth as 1 | 2 | 3;
-                        }
-                    }
-                });
-            });
-
-            frontier = nextFrontier;
-            if (frontier.size === 0) break;
-        }
-
-        return degreeMap;
-    }
-
     /**
-     * ✅ Get ALL posts from all users for home feed — reach-based + connection status
+     * ✅ Get ALL posts from all users for home feed
      */
     static async getAllPostsForHome(
-    currentUserId: string,
-    includeArchived: boolean = false,
-    page: number = 1,
-    limit: number = 20
-): Promise<any> {
-    const correlationId = uuidv4();
+        currentUserId: string,
+        includeArchived: boolean = false
+    ): Promise<any> {
+        const correlationId = uuidv4();
 
-    try {
-        LoggerUtil.info('Fetching all posts for home feed', { currentUserId, correlationId });
+        try {
+            LoggerUtil.info('Fetching all posts for home feed', { currentUserId, correlationId });
 
-        const allUserDocs = await Post.find({}).lean();
+            // 1. Fetch all posts documents
+            const allUserDocs = await Post.find({}).lean();
 
-        const cleanPost = (obj: any): any => {
-            if (!obj.images?.length) delete obj.images;
-            if (!obj.videos?.length) delete obj.videos;
-            if (!obj.documents?.length) delete obj.documents;
-            if (!obj.pollData?.question) delete obj.pollData;
-            if (!obj.eventData?.eventType) delete obj.eventData;
-            if (!obj.shadowbanReason) delete obj.shadowbanReason;
-            if (!obj.scheduledFor) delete obj.scheduledFor;
-            if (!obj.publishedAt) delete obj.publishedAt;
-            if (!obj.pinnedAt) delete obj.pinnedAt;
-            if (!obj.savedAt) delete obj.savedAt;
-            if (!obj.archivedAt) delete obj.archivedAt;
-            if (!obj.deletedAt) delete obj.deletedAt;
-            return obj;
-        };
+            // 2. Extract unique userIds form  the post documents
+            const userIds = [...new Set(allUserDocs.map((doc: any) => doc.userId))];
 
-        let allPosts: any[] = [];
-        const authorIds: string[] = [];
+            // 3. Fetch user details for all those userIds
+            const users = await User.find({ userId: { $in: userIds } })
+                .select('userId username firstName lastName profilePhotoId headlineId')
+                .lean();
 
-        allUserDocs.forEach((doc: any) => {
-            const entries = (doc.posts || [])
-                .filter((p: any) => !p.isDeleted && (includeArchived || !p.isArchived) && !p.isShadowbanned)
-                .map((p: any) => {
-                    authorIds.push(doc.userId);
-                    return cleanPost({
+            // Fetch Profile Photos and Headlines for the users
+            const profilePhotos = await ProfilePhoto.find({ userId: { $in: userIds }, isActive: true }).lean();
+            // 4. Create a fast lookup map for the users
+            const headlineIds = users.map((u: any) => u.headlineId).filter(Boolean);
+            const headlines = await Headline.find({ headlineId: { $in: headlineIds }, 'flags.isDeleted': false }).lean();
+
+            const photoMap = profilePhotos.reduce((acc: any, photo: any) => {
+                acc[photo.userId] = photo.cloudinarySecureUrl;
+                return acc;
+            }, {});
+
+            const headlineMap = headlines.reduce((acc: any, hl: any) => {
+                acc[hl.headlineId] = hl.title || hl.message || hl.headline;
+                return acc;
+            }, {});
+
+            // 5. Fetch Connections for the current user and the post authors
+            let connectionMap: Record<string, string> = {};
+            if (Connection) {
+                const connections = await Connection.find({
+                    $or: [
+                        { fromUserId: currentUserId, toUserId: { $in: userIds } },
+                        { fromUserId: { $in: userIds }, toUserId: currentUserId }
+                    ]
+                }).lean();
+
+                connectionMap = connections.reduce((acc: any, conn: any) => {
+                    const otherUserId = conn.fromUserId === currentUserId ? conn.toUserId : conn.fromUserId;
+                    acc[otherUserId] = conn.status;
+                    return acc;
+                }, {});
+            }
+
+            // 6. Create a fast lookup map for the users
+            const userMap = users.reduce((acc: any, user: any) => {
+                acc[user.userId] = {
+                    ...user,
+                    profileImage: photoMap[user.userId],
+                    headline: headlineMap[user.headlineId],
+                    connectionStatus: connectionMap[user.userId] || 'none'
+                };
+                return acc;
+            }, {});
+
+            // ✅ cleanPost helper — same logic, lean() use hota hai isliye plain objects milte hain
+            const cleanPost = (obj: any): any => {
+                if (!obj.images?.length) delete obj.images;
+                if (!obj.videos?.length) delete obj.videos;
+                if (!obj.documents?.length) delete obj.documents;
+                if (!obj.pollData?.question) delete obj.pollData;
+                if (!obj.eventData?.eventType) delete obj.eventData;
+                if (!obj.shadowbanReason) delete obj.shadowbanReason;
+                if (!obj.scheduledFor) delete obj.scheduledFor;
+                if (!obj.publishedAt) delete obj.publishedAt;
+                if (!obj.pinnedAt) delete obj.pinnedAt;
+                if (!obj.savedAt) delete obj.savedAt;
+                if (!obj.archivedAt) delete obj.archivedAt;
+                if (!obj.deletedAt) delete obj.deletedAt;
+                return obj;
+            };
+
+            let allPosts: any[] = [];
+
+            allUserDocs.forEach((doc: any) => {
+                //adding this 
+                const author = userMap[doc.userId] || {};
+
+                const entries = (doc.posts || [])
+                    .filter((p: any) => !p.isDeleted && (includeArchived || !p.isArchived))
+                    .map((p: any) => cleanPost({
                         ...p,
                         userId: doc.userId,
                         documentPostId: doc.postId,
                         isLikedByCurrentUser: (p.likedBy || []).includes(currentUserId),
-                    });
-                });
-            allPosts.push(...entries);
-        });
+                        //added this to get the users name avatar and headline
+                        authorName: author.firstName ? `${author.firstName} ${author.lastName || ''}`.trim() : (author.username || 'Throne8 User'),
+                        authorAvatar: author.profileImage || '',
+                        authorHeadline: author.headline || '',
+                        authorConnectionStatus: author.connectionStatus || 'none'
+                    }));
+                allPosts.push(...entries);
+            });
 
-        // ✅ Reposts bhi feed mein merge karo
-        const { default: Repost } = await import('@/Profile/models/Repost.model');
-        const allReposts = await Repost.find({ isDeleted: false }).lean();
+            // Sort by createdAt desc (latest first)
+            allPosts.sort(
+                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
 
-        const repostEntries = await Promise.all(
-    allReposts.map(async (repost: any) => {
-        const originalDoc = allUserDocs.find((d: any) =>
-            (d.posts || []).some((p: any) => p.entryId === repost.originalPostEntryId)
-        );
-        const originalEntry = originalDoc?.posts.find(
-            (p: any) => p.entryId === repost.originalPostEntryId && !p.isDeleted
-        );
-        if (!originalEntry || !originalDoc) return null;
+            LoggerUtil.info('All posts fetched for home feed', {
+                currentUserId,
+                totalPosts: allPosts.length,
+                correlationId,
+            });
 
-        authorIds.push(repost.repostedBy);
+            return { posts: allPosts, total: allPosts.length };
 
-        return cleanPost({
-            feedItemType: 'repost',
-            repostId: repost.repostId,
-            repostType: repost.repostType,
-            thoughtText: repost.thoughtText || null,
-            repostedBy: repost.repostedBy,
-            createdAt: repost.createdAt,
-            userId: repost.repostedBy,
-            originalPost: {
-                entryId: originalEntry.entryId,
-                title: originalEntry.title,
-                content: originalEntry.content,
-                userId: originalDoc.userId,
-                images: originalEntry.images || [],
-                videos: originalEntry.videos || [],
-                documents: originalEntry.documents || [],
-                likesCount: originalEntry.likesCount,
-                commentsCount: originalEntry.commentsCount,
-                // ✅ FIX: yeh do fields missing thi — isi wajah se feed pe
-                // "X reposts" / "X sends" kabhi nahi dikhta tha, kyunki
-                // frontend ko yeh data mil hi nahi raha tha.
-                repostsCount: originalEntry.repostsCount || 0,
-                sendsCount: originalEntry.sendsCount || 0,
-                isLikedByCurrentUser: (originalEntry.likedBy || []).includes(currentUserId),
-                createdAt: originalEntry.createdAt,
-            },
-        });
-    })
-);
-
-        allPosts.push(...repostEntries.filter(Boolean));
-
-        const connectionStatusMap = await this.getConnectionStatusMap(currentUserId, authorIds);
-        const connectionDegreeMap = await this.getConnectionDegreeMap(currentUserId, authorIds);
-
-        allPosts = allPosts.map((post) => {
-            const degree =
-                post.userId === currentUserId ? null : connectionDegreeMap[post.userId] ?? null;
-
-            return {
-                ...post,
-                feedScore: this.calculateFeedScore(post, currentUserId, degree),
-                connectionStatus:
-                    post.userId === currentUserId ? 'self' : connectionStatusMap[post.userId] || 'none',
-                connectionDegree: degree,
-            };
-        });
-
-        allPosts.sort((a, b) => b.feedScore - a.feedScore);
-
-        const total = allPosts.length;
-        const start = (page - 1) * limit;
-        const paginated = allPosts.slice(start, start + limit);
-
-        LoggerUtil.info('All posts fetched for home feed', {
-            currentUserId,
-            totalPosts: total,
-            page,
-            correlationId,
-        });
-
-        return { posts: paginated, total, page, hasMore: start + limit < total };
-
-    } catch (error: any) {
-        LoggerUtil.error('Get all posts for home failed', {
-            error: error.message,
-            currentUserId,
-            correlationId,
-        });
-        throw error;
+        } catch (error: any) {
+            LoggerUtil.error('Get all posts for home failed', {
+                error: error.message,
+                currentUserId,
+                correlationId,
+            });
+            throw error;
+        }
     }
-}
 
+    /**
+     * ✅ Get single post entry by entryId
+     */
     static async getPostById(entryId: string, userId: string): Promise<any> {
         const correlationId = uuidv4();
 
         try {
             LoggerUtil.info('Fetching post by entryId', { entryId, userId, correlationId });
 
-            const doc = await Post.findOne({ userId });
+            const doc = await Post.findOne({ 'posts.entryId': entryId });
             if (!doc) throw new Error('Post not found');
 
             const entry = doc.posts.find(
@@ -814,6 +695,7 @@ class PostService {
             );
             if (!entry) throw new Error('Post not found');
 
+            // Check if poll has expired
             if (entry.pollData && entry.pollData.isActive) {
                 if (new Date() > entry.pollData.endsAt) {
                     entry.pollData.isActive = false;
@@ -821,12 +703,47 @@ class PostService {
                 }
             }
 
+            // Fetch author user details
+            const authorUser = await User.findOne({ userId: doc.userId })
+                .select('userId username firstName lastName profilePhotoId headlineId')
+                .lean();
+            let authorName = 'Throne8 User';
+            let authorAvatar = '';
+            let authorHeadline = '';
+
+            if (authorUser) {
+                authorName = authorUser.firstName
+                    ? `${authorUser.firstName} ${authorUser.lastName || ''}`.trim()
+                    : (authorUser.username || 'Throne8 User');
+
+                const photo = await ProfilePhoto.findOne({ userId: doc.userId, isActive: true }).lean();
+                if (photo) {
+                    authorAvatar = photo.cloudinarySecureUrl;
+                }
+
+                if (authorUser.headlineId) {
+                    const headline = await Headline.findOne({
+                        headlineId: authorUser.headlineId,
+                        'flags.isDeleted': false,
+                    }).lean();
+                    if (headline) {
+                        authorHeadline = headline.title || headline.message || headline.headline || '';
+                    }
+                }
+            }
+
             LoggerUtil.info('Post fetched successfully', { entryId, userId, correlationId });
 
+            const entryObj = (entry as any).toObject ? (entry as any).toObject() : entry;
+
             return {
-                ...(entry as any).toObject ? (entry as any).toObject() : entry,
-                userId,
+                ...entryObj,
+                userId: doc.userId,
                 documentPostId: doc.postId,
+                isLikedByCurrentUser: (entryObj.likedBy || []).includes(userId),
+                authorName,
+                authorAvatar,
+                authorHeadline,
             };
 
         } catch (error: any) {
@@ -840,6 +757,9 @@ class PostService {
         }
     }
 
+    /**
+     * ✅ Update post entry
+     */
     static async updatePost(
         entryId: string,
         userId: string,
@@ -867,10 +787,6 @@ class PostService {
 
             await doc.save();
 
-
-
-            redisService.deleteByPattern(`feed:v1:${userId}:page:*`).catch(() => {});
-
             LoggerUtil.info('Post updated successfully', { entryId, userId, correlationId });
 
             return {
@@ -885,6 +801,9 @@ class PostService {
         }
     }
 
+    /**
+     * ✅ Delete post entry (soft or permanent)
+     */
     static async deletePost(
         entryId: string,
         userId: string,
@@ -906,6 +825,7 @@ class PostService {
             const entry = doc.posts[entryIndex];
 
             if (permanent) {
+                // Delete media from Cloudinary
                 const allMedia = [
                     ...(entry.images || []),
                     ...(entry.videos || []),
@@ -916,20 +836,18 @@ class PostService {
                     allMedia.map((media) => cloudinary.uploader.destroy(media.cloudinaryPublicId))
                 );
 
+                // Remove entry from array
                 doc.posts.splice(entryIndex, 1);
                 doc.totalPosts = Math.max(0, doc.totalPosts - 1);
                 await doc.save();
 
-                redisService.deleteByPattern(`feed:v1:${userId}:page:*`).catch(() => {});
-
                 LoggerUtil.info('Post permanently deleted', { entryId, userId, correlationId });
                 return { entryId, message: 'Post permanently deleted' };
             } else {
+                // Soft delete
                 entry.isDeleted = true;
                 entry.deletedAt = new Date();
                 await doc.save();
-
-                redisService.deleteByPattern(`feed:v1:${userId}:page:*`).catch(() => {});
 
                 LoggerUtil.info('Post soft deleted', { entryId, userId, correlationId });
                 return { entryId, deletedAt: entry.deletedAt, message: 'Post deleted successfully' };
@@ -941,6 +859,9 @@ class PostService {
         }
     }
 
+    /**
+     * ✅ Archive post entry
+     */
     static async archivePost(entryId: string, userId: string): Promise<any> {
         const correlationId = uuidv4();
 
@@ -958,8 +879,6 @@ class PostService {
             entry.archivedAt = new Date();
             await doc.save();
 
-            redisService.deleteByPattern(`feed:v1:${doc.userId}:page:*`).catch(() => {});
-
             LoggerUtil.info('Post archived', { entryId, userId, correlationId });
 
             return {
@@ -975,6 +894,9 @@ class PostService {
         }
     }
 
+    /**
+     * ✅ Restore post entry (archived or soft-deleted)
+     */
     static async restorePost(entryId: string, userId: string): Promise<any> {
         const correlationId = uuidv4();
 
@@ -982,6 +904,7 @@ class PostService {
             const doc = await Post.findOne({ userId });
             if (!doc) throw new Error('Post not found');
 
+            // Allow restoring even if isDeleted = true
             const entry = doc.posts.find((p: IPostEntry) => p.entryId === entryId);
             if (!entry) throw new Error('Post not found');
 
@@ -990,8 +913,6 @@ class PostService {
             entry.isDeleted = false;
             entry.deletedAt = undefined;
             await doc.save();
-
-            redisService.deleteByPattern(`feed:v1:${userId}:page:*`).catch(() => {});
 
             LoggerUtil.info('Post restored', { entryId, userId, correlationId });
 
@@ -1008,6 +929,9 @@ class PostService {
         }
     }
 
+    /**
+     * ✅ Pin/Unpin post entry
+     */
     static async pinPost(entryId: string, userId: string, isPinned: boolean): Promise<any> {
         const correlationId = uuidv4();
 
@@ -1029,6 +953,9 @@ class PostService {
         }
     }
 
+    /**
+     * ✅ Save/Unsave post entry
+     */
     static async savePost(entryId: string, userId: string, isSaved: boolean): Promise<any> {
         const correlationId = uuidv4();
 
@@ -1039,7 +966,8 @@ class PostService {
 
             return {
                 entryId: entry.entryId,
-                isSaved: (entry.savedBy || []).includes(userId),   // ✅ FIX — per-user check
+                isSaved: entry.isSaved,
+                savedAt: entry.savedAt,
                 message: `Post ${isSaved ? 'saved' : 'unsaved'} successfully`,
             };
 
@@ -1049,36 +977,9 @@ class PostService {
         }
     }
 
-    // ✅ NEW: current logged-in user ke saare saved posts fetch karo
-    static async getSavedPosts(userId: string): Promise<any> {
-        const correlationId = uuidv4();
-
-        try {
-            LoggerUtil.info('Fetching saved posts', { userId, correlationId });
-
-            const cleanPost = (obj: any): any => {
-                if (!obj.images?.length) delete obj.images;
-                if (!obj.videos?.length) delete obj.videos;
-                if (!obj.documents?.length) delete obj.documents;
-                if (!obj.pollData?.question) delete obj.pollData;
-                if (!obj.eventData?.eventType) delete obj.eventData;
-                return obj;
-            };
-
-            const rawPosts = await Post.getSavedPostsByUser(userId);
-            const posts = rawPosts.map(cleanPost);
-
-            LoggerUtil.info('Saved posts fetched successfully', {
-                userId, count: posts.length, correlationId,
-            });
-
-            return { posts, total: posts.length };
-
-        } catch (error: any) {
-            LoggerUtil.error('Get saved posts failed', { error: error.message, userId, correlationId });
-            throw error;
-        }
-    }    
+    /**
+     * ✅ Get recent posts performance for a user
+     */
     static async getRecentPostsPerformance(userId: string, limit: number = 10): Promise<any> {
         const correlationId = uuidv4();
 
@@ -1099,6 +1000,7 @@ class PostService {
                 };
             }
 
+            // Get active posts sorted by createdAt desc, limited
             const entries = doc.posts
                 .filter((p: IPostEntry) => !p.isDeleted && !p.isArchived)
                 .sort(
@@ -1154,6 +1056,9 @@ class PostService {
         }
     }
 
+    /**
+     * ✅ Track post view analytics
+     */
     static async trackPostView(
         entryId: string,
         userId: string,
@@ -1210,85 +1115,61 @@ class PostService {
         }
     }
 
+    /**
+     * ✅ Like a post entry
+     */
     static async likePost(entryId: string, userId: string): Promise<any> {
-    const correlationId = uuidv4();
+        const correlationId = uuidv4();
 
-    try {
-        LoggerUtil.info('Liking post', { entryId, userId, correlationId });
+        try {
+            LoggerUtil.info('Liking post', { entryId, userId, correlationId });
 
-        const doc = await Post.findOne({ 'posts.entryId': entryId });
-        if (!doc) throw new Error('Post not found');
+            const entry = await Post.incrementLikes(entryId, userId);
+            
+            // fetch the post owner
+            const doc = await Post.findOne({ 'posts.entryId': entryId }).lean();
+            if (doc && doc.userId !== userId) {
+                // Send notification
+                await NotificationService.sendNotification({
+                    recipientId: doc.userId,
+                    senderId: userId,
+                    type: 'post_liked',
+                    entityId: entryId,
+                    entityType: 'post',
+                    message: `liked your post.`,
+                });
+            }
 
-        const postEntry = doc.posts.find((p: IPostEntry) => p.entryId === entryId);
-        const postOwnerId = doc.userId;
-
-        const entry = await Post.incrementLikes(entryId, userId);
-
-        if (postOwnerId) {
-            redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
-        }
-
-        if (postOwnerId && postOwnerId !== userId) {
-            setImmediate(async () => {
-                try {
-                    await NotificationService.notifyPostLiked(
-                        postOwnerId,
-                        userId,
-                        entryId,
-                        postEntry?.title
-                    );
-                    console.log('✅ [NOTIF] Post owner notified of like:', entryId);
-                } catch (err: any) {
-                    console.warn('⚠️ [NOTIF] Like notification failed (non-blocking):', err.message);
-                }
+            LoggerUtil.info('Post liked successfully', {
+                entryId,
+                userId,
+                likesCount: entry.likesCount,
+                correlationId,
             });
 
-            setImmediate(async () => {
-                try {
-                    await AnalyticsService.recordEngagement(postOwnerId, {
-                        postId: entryId,
-                        viewerId: userId,
-                        engagementType: 'like',
-                    });
-                    console.log('✅ [ANALYTICS] Like engagement recorded:', entryId);
-                } catch (err: any) {
-                    console.warn('⚠️ [ANALYTICS] Engagement recording failed (non-blocking):', err.message);
-                }
-            });
-        
+            return {
+                entryId: entry.entryId,
+                likesCount: entry.likesCount,
+                liked: true,
+                message: 'Post liked successfully',
+            };
+
+        } catch (error: any) {
+            LoggerUtil.error('Like post failed', { error: error.message, entryId, userId, correlationId });
+            throw error;
         }
-
-        LoggerUtil.info('Post liked successfully', {
-            entryId, userId, likesCount: entry.likesCount, correlationId,
-        });
-
-        return {
-            entryId: entry.entryId,
-            likesCount: entry.likesCount,
-            liked: true,
-            message: 'Post liked successfully',
-        };
-
-    } catch (error: any) {
-        LoggerUtil.error('Like post failed', { error: error.message, entryId, userId, correlationId });
-        throw error;
     }
-}
 
+    /**
+     * ✅ Unlike a post entry
+     */
     static async unlikePost(entryId: string, userId: string): Promise<any> {
         const correlationId = uuidv4();
 
         try {
             LoggerUtil.info('Unliking post', { entryId, userId, correlationId });
 
-            const doc = await Post.findOne({ 'posts.entryId': entryId });
-            const postOwnerId = doc?.userId;
-
             const entry = await Post.decrementLikes(entryId, userId);
-
-            if (postOwnerId) {
-                redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
-            }
 
             LoggerUtil.info('Post unliked successfully', {
                 entryId,
@@ -1306,215 +1187,6 @@ class PostService {
 
         } catch (error: any) {
             LoggerUtil.error('Unlike post failed', { error: error.message, entryId, userId, correlationId });
-            throw error;
-        }
-    }
-
-    static async reactToPost(entryId: string, userId: string, type: string): Promise<any> {
-        const correlationId = uuidv4();
-        const validTypes = ['like', 'celebrate', 'support', 'love', 'insightful', 'funny'];
-
-        try {
-            if (!validTypes.includes(type)) {
-                throw new Error('Invalid reaction type');
-            }
-
-            LoggerUtil.info('Reacting to post', { entryId, userId, type, correlationId });
-
-            const doc = await Post.findOne({ 'posts.entryId': entryId });
-            if (!doc) throw new Error('Post not found');
-            const postEntry = doc.posts.find((p: IPostEntry) => p.entryId === entryId);
-            const postOwnerId = doc.userId;
-
-            const entry = await Post.addReaction(entryId, userId, type as any);
-
-            if (postOwnerId) {
-                redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
-            }
-
-            if (postOwnerId && postOwnerId !== userId) {
-                setImmediate(async () => {
-                    try {
-                        await NotificationService.notifyPostLiked(
-                            postOwnerId, userId, entryId, postEntry?.title
-                        );
-                    } catch (err: any) {
-                        console.warn('⚠️ [NOTIF] Reaction notification failed (non-blocking):', err.message);
-                    }
-                });
-            }
-
-            LoggerUtil.info('Reaction added successfully', { entryId, userId, type, correlationId });
-
-            return {
-                entryId: entry.entryId,
-                reactionCounts: entry.reactionCounts,
-                userReaction: type,
-                message: 'Reaction added successfully',
-            };
-
-        } catch (error: any) {
-            LoggerUtil.error('React to post failed', { error: error.message, entryId, userId, correlationId });
-            throw error;
-        }
-    }
-
-    static async removeReaction(entryId: string, userId: string): Promise<any> {
-        const correlationId = uuidv4();
-
-        try {
-            LoggerUtil.info('Removing reaction', { entryId, userId, correlationId });
-
-            const doc = await Post.findOne({ 'posts.entryId': entryId });
-            const postOwnerId = doc?.userId;
-
-            const entry = await Post.removeReaction(entryId, userId);
-
-            if (postOwnerId) {
-                redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
-            }
-
-            LoggerUtil.info('Reaction removed successfully', { entryId, userId, correlationId });
-
-            return {
-                entryId: entry.entryId,
-                reactionCounts: entry.reactionCounts,
-                userReaction: null,
-                message: 'Reaction removed successfully',
-            };
-
-        } catch (error: any) {
-            LoggerUtil.error('Remove reaction failed', { error: error.message, entryId, userId, correlationId });
-            throw error;
-        }
-    }
-
-    static async getUserReactions(userId: string): Promise<any> {
-        const correlationId = uuidv4();
-
-        try {
-            LoggerUtil.info('Fetching user reactions', { userId, correlationId });
-
-            const allDocs = await Post.find({ 'posts.reactions.userId': userId }).lean();
-
-            const results: any[] = [];
-
-            allDocs.forEach((doc: any) => {
-                (doc.posts || []).forEach((entry: any) => {
-                    if (entry.isDeleted) return;
-                    const userReaction = (entry.reactions || []).find((r: any) => r.userId === userId);
-                    if (!userReaction) return;
-
-                    results.push({
-                        entryId: entry.entryId,
-                        title: entry.title,
-                        content: entry.content,
-                        images: entry.images || [],
-                        videos: entry.videos || [],
-                        documents: entry.documents || [],
-                        likesCount: entry.likesCount,
-                        commentsCount: entry.commentsCount,
-                        reactionCounts: entry.reactionCounts || {},
-                        userId: doc.userId,
-                        createdAt: entry.createdAt,
-                        reactionType: userReaction.type,
-                        reactedAt: userReaction.reactedAt,
-                    });
-                });
-            });
-
-            results.sort((a, b) => new Date(b.reactedAt).getTime() - new Date(a.reactedAt).getTime());
-
-            LoggerUtil.info('User reactions fetched', { userId, count: results.length, correlationId });
-
-            return { reactions: results, total: results.length };
-
-        } catch (error: any) {
-            LoggerUtil.error('Get user reactions failed', { error: error.message, userId, correlationId });
-            throw error;
-        }
-    }
-    static async getPostReactors(entryId: string): Promise<any> {
-        const correlationId = uuidv4();
-
-        try {
-            const isObjectId = mongoose.Types.ObjectId.isValid(entryId);
-            const doc = await Post.findOne({
-                $or: [
-                    { 'posts.entryId': entryId },
-                    { 'posts.postId': entryId },
-                    { postId: entryId },
-                    ...(isObjectId ? [{ _id: entryId }] : []),
-                ]
-            }).lean();
-            if (!doc) throw new Error('Post not found');
-
-            const entry = (doc as any).posts?.find(
-                (p: any) => (p.entryId === entryId || p.postId === entryId || (isObjectId && String(p._id) === entryId)) && !p.isDeleted
-            ) || (doc as any).posts?.[0];
-            if (!entry) throw new Error('Post not found');
-
-            const reactions = entry.reactions || [];
-            const reactedUserIds = new Set(reactions.map((r: any) => r.userId));
-
-            const merged = [...reactions];
-            (entry.likedBy || []).forEach((uid: string) => {
-                if (!reactedUserIds.has(uid)) {
-                    merged.push({ userId: uid, type: 'like', reactedAt: entry.createdAt });
-                }
-            });
-
-            merged.sort(
-                (a: any, b: any) => new Date(b.reactedAt).getTime() - new Date(a.reactedAt).getTime()
-            );
-
-            LoggerUtil.info('Post reactors fetched', { entryId, count: merged.length, correlationId });
-
-            return {
-                total: merged.length,
-                countsByType: entry.reactionCounts || {},
-                reactions: merged,
-            };
-
-        } catch (error: any) {
-            LoggerUtil.error('Get post reactors failed', { error: error.message, entryId, correlationId });
-            throw error;
-        }
-    }
-
-    /**
-     * ✅ NEW: Record a "send" event — called when the SendPostModal sends a
-     * post link to one or more connections via chat. `recipientCount` is how
-     * many people it was sent to in this single action (so sending to 5
-     * people at once bumps sendsCount by 5, matching "total sent count").
-     */
-    static async recordSend(entryId: string, userId: string, recipientCount: number = 1): Promise<any> {
-        const correlationId = uuidv4();
-
-        try {
-            LoggerUtil.info('Recording post send', { entryId, userId, recipientCount, correlationId });
-
-            const doc = await Post.findOne({ 'posts.entryId': entryId });
-            if (!doc) throw new Error('Post not found');
-
-            const entry = await Post.incrementSendsCount(entryId, recipientCount);
-
-            // Post-owner feed cache invalidate — naya sendsCount unki apni
-            // feed pe turant dikhe
-            redisService.deleteByPattern(`feed:v1:${doc.userId}:page:*`).catch(() => {});
-
-            LoggerUtil.info('Post send recorded successfully', {
-                entryId, sendsCount: entry.sendsCount, correlationId,
-            });
-
-            return {
-                entryId: entry.entryId,
-                sendsCount: entry.sendsCount,
-                message: 'Send recorded successfully',
-            };
-
-        } catch (error: any) {
-            LoggerUtil.error('Record send failed', { error: error.message, entryId, userId, correlationId });
             throw error;
         }
     }

@@ -1,5 +1,4 @@
-
-console.log('🟢 STEP-0: base.repository.ts file STARTED loading');/**
+/**
  * ====================================
  * BASE REPOSITORY (GENERIC) - FINAL FIXED VERSION
  * ====================================

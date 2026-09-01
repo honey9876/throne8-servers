@@ -51,23 +51,6 @@ export enum CompanyType {
   NON_PROFIT = 'Non-Profit',
 }
 
-export enum OrganizationType {
-  PRIVATE = 'Private',
-  PUBLIC = 'Public',
-  NON_PROFIT = 'Non-Profit',
-  GOVERNMENT = 'Government',
-  PARTNERSHIP = 'Partnership',
-  SOLE_PROPRIETORSHIP = 'Sole Proprietorship',
-  OTHER = 'Other',
-}
-
-export enum OperatingStatus {
-  OPERATING = 'Operating',
-  CLOSED = 'Closed',
-  ACQUIRED = 'Acquired',
-  BANKRUPT = 'Bankrupt',
-}
-
 export enum CompanySize {
   TINY = '1-10',
   SMALL = '11-50',
@@ -250,16 +233,16 @@ interface IRelationships {
 }
 
 interface IGrowthMetrics {
-  employeeGrowthRate?: number;
-  revenueGrowth?: number;
-  fundingRaised?: number;
+  employeeGrowthRate?: number; // Year-over-year employee growth percentage
+  revenueGrowth?: number; // Revenue growth percentage (if available)
+  fundingRaised?: number; // Total funding raised
   lastFundingRound?: {
     amount: number;
     date: Date;
-    stage: string;
+    stage: string; // e.g., "Series A", "Seed", "IPO"
   };
-  yearOverYearGrowth?: number;
-  marketShare?: number;
+  yearOverYearGrowth?: number; // Overall growth metric
+  marketShare?: number; // Market share percentage
 }
 
 export interface ICompany extends Document {
@@ -293,6 +276,7 @@ export interface ICompany extends Document {
   updatedAt: Date;
 }
 
+// ==================== SEARCH & BULK UPDATE INTERFACES ====================
 export interface ICompanySearchFilters {
   industry?: IndustryType;
   companyType?: CompanyType;
@@ -314,21 +298,36 @@ export interface IStatsUpdate {
   stats: Partial<IStats>;
 }
 
+// Define interface for instance methods
 interface ICompanyMethods {
   softDelete(): Promise<Document & ICompany>;
   incrementStat(field: 'followersCount' | 'postsCount' | 'employeesCount'): Promise<Document & ICompany>;
   decrementStat(field: 'followersCount' | 'postsCount' | 'employeesCount'): Promise<Document & ICompany>;
 }
 
+// ==================== MODEL STATIC METHODS ====================
 interface ICompanyModel extends Model<ICompany, Record<string, never>, ICompanyMethods> {
-  findForListing(filters?: ICompanySearchFilters, options?: ISearchOptions): Promise<ICompany[]>;
+  findForListing(
+    filters?: ICompanySearchFilters,
+    options?: ISearchOptions
+  ): Promise<ICompany[]>;
+
   findProfile(identifier: string): Promise<ICompany | null>;
-  searchCompanies(searchQuery: string, filters?: ICompanySearchFilters, options?: ISearchOptions): Promise<ICompany[]>;
+
+  searchCompanies(
+    searchQuery: string,
+    filters?: ICompanySearchFilters,
+    options?: ISearchOptions
+  ): Promise<ICompany[]>;
+
   bulkUpdateStats(updates: IStatsUpdate[]): Promise<any>;
+
   findActive(): Query<ICompany[], ICompany>;
   findVerified(): Query<ICompany[], ICompany>;
   searchByText(searchTerm: string): Query<ICompany[], ICompany>;
   findNearby(longitude: number, latitude: number, maxDistance?: number): Query<ICompany[], ICompany>;
+
+  // New API methods
   getCompanyById(companyId: string, authToken?: string): Promise<ICompany>;
   getCompaniesByIds(companyIds: string[], authToken?: string): Promise<ICompany[]>;
   getCompanyProfile(companyId: string, authToken?: string): Promise<CompanyProfile>;
@@ -340,28 +339,6 @@ interface ICompanyModel extends Model<ICompany, Record<string, never>, ICompanyM
   clearExpiredCache(): void;
 }
 
-// ==================== GEOJSON POINT SCHEMA ====================
-const pointSchema = new Schema(
-  {
-    type: {
-      type: String,
-      enum: ['Point'],
-      required: true,
-    },
-    coordinates: {
-      type: [Number],
-      required: true,
-      validate: {
-        validator: function (v: number[]) {
-          return Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number' && !isNaN(v[0]) && !isNaN(v[1]) && v[0] >= -180 && v[0] <= 180 && v[1] >= -90 && v[1] <= 90;
-        },
-        message: 'Coordinates must be an array of [longitude, latitude]',
-      },
-    },
-  },
-  { _id: false }
-);
-
 // ==================== SCHEMA DEFINITION ====================
 const companySchema = new Schema<ICompany, ICompanyModel>(
   {
@@ -369,6 +346,7 @@ const companySchema = new Schema<ICompany, ICompanyModel>(
       type: String,
       required: true,
       unique: true,
+      index: true,
       maxlength: 36,
       default: uuidv4,
       validate: {
@@ -382,12 +360,14 @@ const companySchema = new Schema<ICompany, ICompanyModel>(
       trim: true,
       minlength: [2, 'Name must be at least 2 characters'],
       maxlength: [100, 'Name cannot exceed 100 characters'],
+      index: true,
     },
     companySlug: {
       type: String,
       unique: true,
       lowercase: true,
       trim: true,
+      index: true,
       required: true,
     },
     displayName: {
@@ -403,82 +383,90 @@ const companySchema = new Schema<ICompany, ICompanyModel>(
       type: String,
       required: true,
       enum: Object.values(IndustryType),
+      index: true,
     },
     subIndustry: {
       type: String,
       maxlength: 100,
+      trim: true,
+    },
+    companyType: {
+      type: String,
+      enum: Object.values(CompanyType),
+      default: CompanyType.SME,
+      index: true,
     },
     companySize: {
       type: String,
-      required: true,
       enum: Object.values(CompanySize),
-    },
-    organizationType: {
-      type: String,
-      enum: Object.values(OrganizationType),
-      default: OrganizationType.PRIVATE,
-    },
-    operatingStatus: {
-      type: String,
-      enum: Object.values(OperatingStatus),
-      default: OperatingStatus.OPERATING,
+      index: true,
     },
     foundedYear: {
       type: Number,
-      min: [1800, 'Founded year cannot be before 1800'],
-      max: [new Date().getFullYear(), 'Founded year cannot be in the future'],
+      min: 1800,
       validate: {
-        validator: Number.isInteger,
-        message: 'Founded year must be an integer',
+        validator: (v: number) => v <= new Date().getFullYear(),
+        message: 'Founded year cannot be in the future',
+      },
+      index: true,
+    },
+    email: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+      index: true,
+      validate: {
+        validator: (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+        message: 'Invalid email format',
       },
     },
-    contact: {
-      email: {
+    phone: {
+      country: { type: String, default: '+91', maxlength: 4 },
+      number: {
         type: String,
         required: true,
-        trim: true,
-        lowercase: true,
         validate: {
-          validator: (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
-          message: 'Invalid email format',
+          validator: (v: string) => /^\d{10,15}$/.test(v),
+          message: 'Invalid phone number',
         },
       },
-      phone: {
-        countryCode: { type: String, default: '+91', maxlength: 5 },
-        number: {
-          type: String,
-          required: true,
-          validate: {
-            validator: (v: string) => /^\d{7,15}$/.test(v),
-            message: 'Phone number must be between 7 and 15 digits',
-          },
-        },
-      },
-      website: {
-        type: String,
-        trim: true,
-        validate: {
-          validator: (v: string) => !v || /^https?:\/\/.+\..+/.test(v),
-          message: 'Invalid website URL',
-        },
+    },
+    website: {
+      type: String,
+      trim: true,
+      validate: {
+        validator: (v: string) => !v || /^https?:\/\/.+\..+/.test(v),
+        message: 'Invalid website URL',
       },
     },
     headquarters: {
       address: { type: String, required: true, maxlength: 200 },
-      city: { type: String, required: true, maxlength: 50 },
+      city: { type: String, required: true, maxlength: 50, index: true },
       state: { type: String, required: true, maxlength: 50 },
       country: { type: String, default: 'India', maxlength: 50 },
       pincode: { type: String, maxlength: 10 },
       coordinates: {
-        type: pointSchema,
-        required: false,
-        default: undefined,
+        type: { type: String, enum: ['Point'], default: 'Point' },
+        coordinates: { type: [Number], index: '2dsphere' },
       },
     },
     growthMetrics: {
-      employeeGrowthRate: { type: Number, min: -100, max: 1000, default: 0 },
-      revenueGrowth: { type: Number, min: -100, max: 1000 },
-      fundingRaised: { type: Number, min: 0 },
+      employeeGrowthRate: {
+        type: Number,
+        min: -100,
+        max: 1000,
+        default: 0,
+      },
+      revenueGrowth: {
+        type: Number,
+        min: -100,
+        max: 1000,
+      },
+      fundingRaised: {
+        type: Number,
+        min: 0,
+      },
       lastFundingRound: {
         amount: { type: Number, min: 0 },
         date: Date,
@@ -487,9 +475,18 @@ const companySchema = new Schema<ICompany, ICompanyModel>(
           enum: ['Seed', 'Series A', 'Series B', 'Series C', 'Series D+', 'IPO', 'Acquired', 'Bootstrap'],
         },
       },
-      yearOverYearGrowth: { type: Number, min: -100, max: 1000 },
-      marketShare: { type: Number, min: 0, max: 100 },
+      yearOverYearGrowth: {
+        type: Number,
+        min: -100,
+        max: 1000,
+      },
+      marketShare: {
+        type: Number,
+        min: 0,
+        max: 100,
+      },
     },
+
     descriptions: {
       short: {
         type: String,
@@ -536,13 +533,17 @@ const companySchema = new Schema<ICompany, ICompanyModel>(
         type: String,
         enum: Object.values(SubscriptionPlan),
         default: SubscriptionPlan.FREE,
+        index: true,
       },
       planId: {
         type: String,
         default: uuidv4,
-        validate: { validator: validId, message: 'Invalid plan UUID' },
+        validate: {
+          validator: validId,
+          message: 'Invalid plan UUID'
+        },
       },
-      isActive: { type: Boolean, default: true },
+      isActive: { type: Boolean, default: true, index: true },
       startDate: Date,
       endDate: Date,
       limits: {
@@ -556,8 +557,9 @@ const companySchema = new Schema<ICompany, ICompanyModel>(
         type: String,
         enum: Object.values(AccountStatus),
         default: AccountStatus.PENDING,
+        index: true,
       },
-      isVerified: { type: Boolean, default: false },
+      isVerified: { type: Boolean, default: false, index: true },
       verifiedAt: Date,
       verificationMethod: {
         type: String,
@@ -579,8 +581,14 @@ const companySchema = new Schema<ICompany, ICompanyModel>(
     preferences: {
       jobCategories: [{ type: String, maxlength: 50 }],
       skillsets: [{ type: String, maxlength: 50, index: 'text' }],
-      experienceLevels: [{ type: String, enum: Object.values(ExperienceLevel) }],
-      workTypes: [{ type: String, enum: Object.values(WorkType) }],
+      experienceLevels: [{
+        type: String,
+        enum: Object.values(ExperienceLevel),
+      }],
+      workTypes: [{
+        type: String,
+        enum: Object.values(WorkType),
+      }],
       remoteWork: {
         type: String,
         enum: Object.values(RemoteWorkType),
@@ -594,8 +602,8 @@ const companySchema = new Schema<ICompany, ICompanyModel>(
       slug: { type: String, unique: true, sparse: true },
     },
     features: {
-      isFeatured: { type: Boolean, default: false },
-      isPremium: { type: Boolean, default: false },
+      isFeatured: { type: Boolean, default: false, index: true },
+      isPremium: { type: Boolean, default: false, index: true },
       allowDirectContact: { type: Boolean, default: true },
       showSalaryRange: { type: Boolean, default: false },
       autoPostToSocial: { type: Boolean, default: false },
@@ -610,14 +618,20 @@ const companySchema = new Schema<ICompany, ICompanyModel>(
       createdBy: {
         type: String,
         required: true,
-        validate: { validator: validId, message: 'Invalid creator UUID' },
+        validate: {
+          validator: validId,
+          message: 'Invalid creator UUID'
+        },
       },
       updatedBy: {
         type: String,
-        validate: { validator: validId, message: 'Invalid updater UUID' },
+        validate: {
+          validator: validId,
+          message: 'Invalid updater UUID'
+        },
       },
       version: { type: Number, default: 1, min: 1 },
-      isDeleted: { type: Boolean, default: false },
+      isDeleted: { type: Boolean, default: false, index: true },
       deletedAt: Date,
       deletedBy: String,
     },
@@ -637,15 +651,11 @@ const companySchema = new Schema<ICompany, ICompanyModel>(
 );
 
 // ==================== OPTIMIZED INDEXES ====================
-// ✅ companyId, companySlug, companyName ke indexes REMOVE kiye
-// Kyunki field definition mein  already hai — duplicate tha
-// ❌ companySchema.index({ companyId: 1 });    REMOVED
-// ❌ companySchema.index({ companySlug: 1 });  REMOVED
-// ❌ companySchema.index({ companyName: 1 });  REMOVED
-
-// ✅ Sirf compound indexes yahan hain
+// companySchema.index({ companyId: 1 });
+// companySchema.index({ companySlug: 1 });
+// companySchema.index({ companyName: 1 });
 companySchema.index({ 'account.status': 1, 'account.isVerified': 1, industry: 1, 'audit.isDeleted': 1 });
-companySchema.index({ 'headquarters.coordinates': '2dsphere' }, { sparse: true });
+companySchema.index({ 'headquarters.coordinates': '2dsphere' });
 companySchema.index({ 'headquarters.city': 1, industry: 1, 'audit.isDeleted': 1 });
 companySchema.index({ 'stats.profileViews': -1, createdAt: -1 });
 companySchema.index({ 'features.isFeatured': 1, 'account.status': 1, 'audit.isDeleted': 1 });
@@ -662,25 +672,6 @@ companySchema.index({ createdAt: -1 });
 companySchema.index({ isVerified: 1, status: 1 });
 companySchema.index({ industry: 1, companySize: 1 });
 
-// ==================== PRE-VALIDATE MIDDLEWARE ====================
-companySchema.pre('validate', function (next) {
-  if (this.headquarters) {
-    const coords = (this.headquarters as any)?.coordinates?.coordinates;
-    const isValid = Array.isArray(coords) &&
-      coords.length === 2 &&
-      typeof coords[0] === 'number' &&
-      typeof coords[1] === 'number' &&
-      !isNaN(coords[0]) &&
-      !isNaN(coords[1]);
-    if (!isValid) {
-      (this.headquarters as any).coordinates = undefined;
-    } else {
-      (this.headquarters as any).coordinates.type = 'Point';
-    }
-  }
-  next();
-});
-
 // ==================== PRE-SAVE MIDDLEWARE ====================
 companySchema.pre('save', async function (next) {
   try {
@@ -695,24 +686,11 @@ companySchema.pre('save', async function (next) {
       const address = `${this.headquarters.address || ''}, ${this.headquarters.city}, ${this.headquarters.state}, ${this.headquarters.country}`;
       try {
         const result = await geocoder.geocode(address);
-        if (result.length > 0 && result[0].longitude && result[0].latitude) {
-          this.headquarters.coordinates = {
-            type: 'Point',
-            coordinates: [result[0].longitude, result[0].latitude],
-          };
+        if (result.length > 0) {
+          this.headquarters.coordinates.coordinates = [result[0].longitude || 0, result[0].latitude || 0];
         }
       } catch (geoError) {
         logger.error('Geocoding error', { companyId: this.companyId, error: geoError });
-      }
-    }
-
-    // Clean up coordinates if invalid GeoJSON
-    if (this.headquarters) {
-      const coords = this.headquarters.coordinates?.coordinates;
-      if (Array.isArray(coords) && coords.length === 2 && typeof coords[0] === 'number' && typeof coords[1] === 'number') {
-        this.headquarters.coordinates.type = 'Point';
-      } else {
-        this.headquarters.coordinates = undefined;
       }
     }
 
@@ -750,34 +728,22 @@ companySchema.methods.softDelete = async function (): Promise<Document & ICompan
 companySchema.methods.incrementStat = async function (
   field: 'followersCount' | 'postsCount' | 'employeesCount'
 ): Promise<Document & ICompany> {
-  const CompanyModel = this.constructor as any;
-  const updated = await CompanyModel.findByIdAndUpdate(
-    this._id,
-    { $inc: { [`stats.${field}`]: 1 } },
-    { new: true }
-  );
-  if (updated) {
-    this.stats = updated.stats;
-  }
-  return this;
+  this.stats[field] = (this.stats[field] || 0) + 1;
+  return await this.save();
 };
 
 companySchema.methods.decrementStat = async function (
   field: 'followersCount' | 'postsCount' | 'employeesCount'
 ): Promise<Document & ICompany> {
-  const CompanyModel = this.constructor as any;
-  const updated = await CompanyModel.findByIdAndUpdate(
-    this._id,
-    { $inc: { [`stats.${field}`]: -1 } },
-    { new: true }
-  );
-  if (updated) {
-    this.stats = updated.stats;
-  }
-  return this;
+  this.stats[field] = Math.max(0, (this.stats[field] || 0) - 1);
+  return await this.save();
 };
 
 // ==================== STATIC METHODS ====================
+
+/**
+ * Find companies for listing page (with projection)
+ */
 companySchema.statics.findForListing = function (
   filters: ICompanySearchFilters = {},
   options: ISearchOptions = {}
@@ -816,23 +782,34 @@ companySchema.statics.findForListing = function (
     .lean();
 };
 
+/**
+ * Find company profile by ID or slug
+ */
 companySchema.statics.findProfile = function (identifier: string) {
   const query =
     typeof identifier === 'string' && identifier.includes('-')
       ? { companySlug: identifier }
       : { companyId: identifier };
 
-  return this.findOne({ ...query, 'audit.isDeleted': false })
+  return this.findOne({
+    ...query,
+    'audit.isDeleted': false,
+  })
     .select('-audit -__v')
     .lean();
 };
 
+/**
+ * Search companies with text search (cached)
+ */
 companySchema.statics.searchCompanies = async function (
   searchQuery: string,
   filters: ICompanySearchFilters = {},
   options: ISearchOptions = {}
 ) {
-  const cacheKey = `search:${Buffer.from(JSON.stringify({ searchQuery, filters, options })).toString('base64')}`;
+  const cacheKey = `search:${Buffer.from(
+    JSON.stringify({ searchQuery, filters, options })
+  ).toString('base64')}`;
 
   try {
     const cached = await CacheUtil.get(cacheKey);
@@ -841,7 +818,9 @@ companySchema.statics.searchCompanies = async function (
       return JSON.parse(cached);
     }
   } catch (error: any) {
-    logger.warn('⚠️ [COMPANY] Cache retrieval failed', { error: error instanceof Error ? error.message : String(error) });
+    logger.warn('⚠️ [COMPANY] Cache retrieval failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   const query = {
@@ -851,8 +830,13 @@ companySchema.statics.searchCompanies = async function (
     ...filters,
   };
 
-  const results = await this.find(query, { score: { $meta: 'textScore' } })
-    .sort({ score: { $meta: 'textScore' }, 'stats.profileViews': -1 })
+  const results = await this.find(query, {
+    score: { $meta: 'textScore' }
+  })
+    .sort({
+      score: { $meta: 'textScore' },
+      'stats.profileViews': -1
+    })
     .limit(options.limit || 50)
     .lean();
 
@@ -860,19 +844,29 @@ companySchema.statics.searchCompanies = async function (
     await CacheUtil.set(cacheKey, JSON.stringify(results), 300);
     logger.debug('✅ [COMPANY] Search results cached', { cacheKey });
   } catch (error: any) {
-    logger.warn('⚠️ [COMPANY] Cache storage failed', { error: error instanceof Error ? error.message : String(error) });
+    logger.warn('⚠️ [COMPANY] Cache storage failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   return results;
 };
 
-companySchema.statics.bulkUpdateStats = async function (updates: IStatsUpdate[]) {
+/**
+ * Bulk update company stats
+ */
+
+companySchema.statics.bulkUpdateStats = async function (
+  updates: IStatsUpdate[]
+) {
   const bulkOps = updates.map(({ companyId, stats }) => {
+    // Build only the fields that need to be updated
     const updateFields: Record<string, any> = {
       'analytics.lastCalculated': new Date(),
       updatedAt: new Date(),
     };
 
+    // Add individual stat fields instead of whole stats object
     if (stats.totalJobs !== undefined) updateFields['stats.totalJobs'] = stats.totalJobs;
     if (stats.activeJobs !== undefined) updateFields['stats.activeJobs'] = stats.activeJobs;
     if (stats.totalApplications !== undefined) updateFields['stats.totalApplications'] = stats.totalApplications;
@@ -902,10 +896,12 @@ companySchema.statics.findActive = function () {
   return this.find({ 'account.status': AccountStatus.ACTIVE });
 };
 
+// Static method to find verified companies
 companySchema.statics.findVerified = function () {
   return this.find({ 'account.isVerified': true, 'account.status': AccountStatus.ACTIVE });
 };
 
+// Static method to search companies
 companySchema.statics.searchByText = function (searchTerm: string) {
   return this.find({
     $text: { $search: searchTerm },
@@ -913,11 +909,19 @@ companySchema.statics.searchByText = function (searchTerm: string) {
   }).sort({ score: { $meta: 'textScore' } });
 };
 
-companySchema.statics.findNearby = function (longitude: number, latitude: number, maxDistance = 50000) {
+// Static method to find nearby companies
+companySchema.statics.findNearby = function (
+  longitude: number,
+  latitude: number,
+  maxDistance = 50000
+) {
   return this.find({
     'headquarters.coordinates': {
       $near: {
-        $geometry: { type: 'Point', coordinates: [longitude, latitude] },
+        $geometry: {
+          type: 'Point',
+          coordinates: [longitude, latitude]
+        },
         $maxDistance: maxDistance
       }
     },
@@ -926,29 +930,52 @@ companySchema.statics.findNearby = function (longitude: number, latitude: number
 };
 
 // ==================== API CLIENT METHODS ====================
+// Initialize cache and client
 let apiCache: Map<string, { data: any; timestamp: number }> = new Map();
 let apiClient: ApiClient;
-const CACHE_TTL = 5 * 60 * 1000;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+// Initialize API client
 if (!config.COMPANY_SERVICE_URL) {
   logger.warn('COMPANY_SERVICE_URL not configured. Company service integration disabled.');
 }
 
 apiClient = new ApiClient(
-  { baseURL: config.COMPANY_SERVICE_URL || 'http://localhost:4001', timeout: 15000 },
+  {
+    baseURL: config.COMPANY_SERVICE_URL || 'http://localhost:4001',
+    timeout: 15000,
+  },
   'Company Service'
 );
 
+/**
+ * Get company by ID with caching
+ */
 companySchema.statics.getCompanyById = async function (companyId: string, authToken?: string): Promise<ICompany> {
   try {
     const cached = apiCache.get(companyId);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      logger.debug(`Cache hit for company: ${companyId}`);
       return cached.data;
     }
-    if (authToken) apiClient.setAuthToken(authToken);
-    const response = await apiClient.get<ApiResponse<ICompany>>(`/api/companies/${companyId}`);
-    if (!response.success || !response.data) throw new Error('Company not found');
-    apiCache.set(companyId, { data: response.data, timestamp: Date.now() });
+
+    if (authToken) {
+      apiClient.setAuthToken(authToken);
+    }
+
+    const response = await apiClient.get<ApiResponse<ICompany>>(
+      `/api/companies/${companyId}`
+    );
+
+    if (!response.success || !response.data) {
+      throw new Error('Company not found');
+    }
+
+    apiCache.set(companyId, {
+      data: response.data,
+      timestamp: Date.now(),
+    });
+
     return response.data;
   } catch (error: any) {
     logger.error(`Failed to fetch company: ${error}`);
@@ -956,14 +983,31 @@ companySchema.statics.getCompanyById = async function (companyId: string, authTo
   }
 };
 
+/**
+ * Get companies by IDs
+ */
 companySchema.statics.getCompaniesByIds = async function (companyIds: string[], authToken?: string): Promise<ICompany[]> {
   try {
-    if (authToken) apiClient.setAuthToken(authToken);
-    const response = await apiClient.post<ApiResponse<ICompany[]>>('/api/companies/bulk', { companyIds });
-    if (!response.success || !response.data) throw new Error('Failed to fetch companies');
+    if (authToken) {
+      apiClient.setAuthToken(authToken);
+    }
+
+    const response = await apiClient.post<ApiResponse<ICompany[]>>(
+      '/api/companies/bulk',
+      { companyIds }
+    );
+
+    if (!response.success || !response.data) {
+      throw new Error('Failed to fetch companies');
+    }
+
     response.data.forEach((company) => {
-      apiCache.set(company.companyId, { data: company, timestamp: Date.now() });
+      apiCache.set(company.companyId, {
+        data: company,
+        timestamp: Date.now(),
+      });
     });
+
     return response.data;
   } catch (error: any) {
     logger.error(`Failed to fetch companies: ${error}`);
@@ -971,11 +1015,23 @@ companySchema.statics.getCompaniesByIds = async function (companyIds: string[], 
   }
 };
 
+/**
+ * Get company profile
+ */
 companySchema.statics.getCompanyProfile = async function (companyId: string, authToken?: string): Promise<CompanyProfile> {
   try {
-    if (authToken) apiClient.setAuthToken(authToken);
-    const response = await apiClient.get<ApiResponse<CompanyProfile>>(`/api/companies/${companyId}/profile`);
-    if (!response.success || !response.data) throw new Error('Company profile not found');
+    if (authToken) {
+      apiClient.setAuthToken(authToken);
+    }
+
+    const response = await apiClient.get<ApiResponse<CompanyProfile>>(
+      `/api/companies/${companyId}/profile`
+    );
+
+    if (!response.success || !response.data) {
+      throw new Error('Company profile not found');
+    }
+
     return response.data;
   } catch (error: any) {
     logger.error(`Failed to fetch company profile: ${error}`);
@@ -983,19 +1039,31 @@ companySchema.statics.getCompanyProfile = async function (companyId: string, aut
   }
 };
 
+/**
+ * Verify company exists
+ */
 companySchema.statics.verifyCompanyExists = async function (companyId: string): Promise<boolean> {
   try {
     await this.getCompanyById(companyId);
     return true;
-  } catch {
+  } catch (error: any) {
     return false;
   }
 };
 
+/**
+ * Get company by slug
+ */
 companySchema.statics.getCompanyBySlug = async function (slug: string, authToken?: string): Promise<ICompany | null> {
   try {
-    if (authToken) apiClient.setAuthToken(authToken);
-    const response = await apiClient.get<ApiResponse<ICompany>>(`/api/companies/slug/${slug}`);
+    if (authToken) {
+      apiClient.setAuthToken(authToken);
+    }
+
+    const response = await apiClient.get<ApiResponse<ICompany>>(
+      `/api/companies/slug/${slug}`
+    );
+
     return response.success && response.data ? response.data : null;
   } catch (error: any) {
     logger.error(`Failed to fetch company by slug: ${error}`);
@@ -1003,6 +1071,9 @@ companySchema.statics.getCompanyBySlug = async function (slug: string, authToken
   }
 };
 
+/**
+ * Get all companies with pagination
+ */
 companySchema.statics.getAllCompanies = async function (
   page: number = 1,
   limit: number = 20,
@@ -1010,20 +1081,47 @@ companySchema.statics.getAllCompanies = async function (
   authToken?: string
 ): Promise<{ companies: ICompany[]; total: number }> {
   try {
-    if (authToken) apiClient.setAuthToken(authToken);
-    const response = await apiClient.get<ApiResponse<ICompany[]>>('/api/companies', { params: { page, limit, ...filters } });
-    if (!response.success) throw new Error('Failed to fetch companies');
-    return { companies: response.data || [], total: response.meta?.total || 0 };
+    if (authToken) {
+      apiClient.setAuthToken(authToken);
+    }
+
+    const response = await apiClient.get<ApiResponse<ICompany[]>>(
+      '/api/companies',
+      {
+        params: { page, limit, ...filters },
+      }
+    );
+
+    if (!response.success) {
+      throw new Error('Failed to fetch companies');
+    }
+
+    return {
+      companies: response.data || [],
+      total: response.meta?.total || 0,
+    };
   } catch (error: any) {
     logger.error(`Failed to fetch all companies: ${error}`);
     return { companies: [], total: 0 };
   }
 };
 
+/**
+ * Get top companies
+ */
 companySchema.statics.getTopCompanies = async function (limit: number = 10, authToken?: string): Promise<ICompany[]> {
   try {
-    if (authToken) apiClient.setAuthToken(authToken);
-    const response = await apiClient.get<ApiResponse<ICompany[]>>('/api/companies/top', { params: { limit } });
+    if (authToken) {
+      apiClient.setAuthToken(authToken);
+    }
+
+    const response = await apiClient.get<ApiResponse<ICompany[]>>(
+      '/api/companies/top',
+      {
+        params: { limit },
+      }
+    );
+
     return response.success && response.data ? response.data : [];
   } catch (error: any) {
     logger.error(`Failed to fetch top companies: ${error}`);
@@ -1031,106 +1129,191 @@ companySchema.statics.getTopCompanies = async function (limit: number = 10, auth
   }
 };
 
+/**
+ * Clear cache
+ */
 companySchema.statics.clearCache = function (companyId?: string): void {
   if (companyId) {
     apiCache.delete(companyId);
+    logger.debug(`Cleared cache for company: ${companyId}`);
   } else {
     apiCache.clear();
+    logger.debug('Cleared all company cache');
   }
 };
 
+/**
+ * Clear expired cache entries
+ */
 companySchema.statics.clearExpiredCache = function (): void {
   const now = Date.now();
   let cleared = 0;
+
   apiCache.forEach((value, key) => {
     if (now - value.timestamp >= CACHE_TTL) {
       apiCache.delete(key);
       cleared++;
     }
   });
-  if (cleared > 0) logger.debug(`Cleared ${cleared} expired cache entries`);
+
+  if (cleared > 0) {
+    logger.debug(`Cleared ${cleared} expired cache entries`);
+  }
 };
 
-mongoose.set('maxTimeMS', 30000);
-mongoose.set('bufferCommands', true);
+mongoose.set('maxTimeMS', 30000); // 30 seconds query timeout
+mongoose.set('bufferCommands', true); // Enable command buffering
 
-// ==================== SERVICES ====================
+// ==================== SERVICES (WITHOUT VECTOR DB) ====================
+
+/**
+ * Company Stats Service
+ */
 export class CompanyStatsService {
   static async updateAnalytics(companyId: string): Promise<void> {
     try {
       const stats = await this.calculateStats(companyId);
+
       await Company.updateOne(
         { companyId },
-        { $set: { analytics: stats, 'analytics.lastCalculated': new Date() } }
+        {
+          $set: {
+            analytics: stats,
+            'analytics.lastCalculated': new Date(),
+          },
+        }
       );
+
+      // Invalidate cache
       await CacheUtil.del(`company:${companyId}`);
+
       logger.info('✅ [COMPANY] Analytics updated', { companyId });
     } catch (error: any) {
-      logger.error('❌ [COMPANY] Stats update failed', { companyId, error: error instanceof Error ? error.message : String(error) });
+      logger.error('❌ [COMPANY] Stats update failed', {
+        companyId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw error;
     }
   }
 
   static async calculateStats(companyId: string): Promise<IAnalytics> {
-    return { viewCount: 0, applicationCount: 0, engagementScore: 0, lastCalculated: new Date() };
+    // Implement your stats calculation logic here
+    return {
+      viewCount: 0,
+      applicationCount: 0,
+      engagementScore: 0,
+      lastCalculated: new Date(),
+    };
   }
 }
 
+/**
+ * Company Event Service (Simple Logging)
+ */
 export class CompanyEventService {
-  static async logEvent(companyId: string, eventType: string, data: Record<string, any> = {}): Promise<void> {
+  static async logEvent(
+    companyId: string,
+    eventType: string,
+    data: Record<string, any> = {}
+  ): Promise<void> {
     try {
-      logger.info('📊 [COMPANY EVENT]', { companyId, eventType, data, timestamp: new Date() });
+      logger.info('📊 [COMPANY EVENT]', {
+        companyId,
+        eventType,
+        data,
+        timestamp: new Date(),
+      });
     } catch (error: any) {
-      logger.error('❌ [COMPANY] Event logging failed', { companyId, eventType, error: error instanceof Error ? error.message : String(error) });
+      logger.error('❌ [COMPANY] Event logging failed', {
+        companyId,
+        eventType,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }
 
+/**
+ * Company Index Monitoring Service
+ */
 export class CompanyIndexMonitoringService {
   static async monitorIndexUsage(): Promise<void> {
     try {
       const db = mongoose.connection.db;
-      if (!db) { logger.warn('⚠️ [COMPANY] Database not connected'); return; }
+      if (!db) {
+        logger.warn('⚠️ [COMPANY] Database not connected');
+        return;
+      }
+
       const stats = await db.collection('companies').aggregate([{ $indexStats: {} }]).toArray();
       logger.info('📊 [COMPANY] Index usage stats', { stats });
+
       stats.forEach((index: any) => {
         if (index.accesses.ops < 100 && index.name !== '_id_') {
-          logger.warn('⚠️ [COMPANY] Low index usage detected', { index: index.name, usage: index.accesses.ops });
+          logger.warn('⚠️ [COMPANY] Low index usage detected', {
+            index: index.name,
+            usage: index.accesses.ops,
+          });
         }
       });
     } catch (error: any) {
-      logger.error('❌ [COMPANY] Index monitoring failed', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('❌ [COMPANY] Index monitoring failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }
 
+/**
+ * Company Maintenance Service
+ */
 export class CompanyMaintenanceService {
+  /**
+   * Cleanup soft-deleted records older than 30 days
+   */
   static async cleanupDeletedRecords(): Promise<void> {
     try {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
       const result = await Company.deleteMany({
         'audit.isDeleted': true,
         'audit.deletedAt': { $lt: thirtyDaysAgo },
       });
-      logger.info('✅ [COMPANY] Cleanup completed', { deletedCount: result.deletedCount });
+
+      logger.info('✅ [COMPANY] Cleanup completed', {
+        deletedCount: result.deletedCount,
+      });
     } catch (error: any) {
-      logger.error('❌ [COMPANY] Cleanup failed', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('❌ [COMPANY] Cleanup failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
+  /**
+   * Optimize indexes (run during maintenance window)
+   */
   static async optimizeIndexes(): Promise<void> {
     try {
       const db = mongoose.connection.db;
-      if (!db) throw new Error('Database not connected');
+      if (!db) {
+        throw new Error('Database not connected');
+      }
+
       const collection = db.collection('companies');
       await collection.dropIndexes();
       logger.info('✅ [COMPANY] Index optimization completed');
     } catch (error: any) {
-      logger.error('❌ [COMPANY] Index optimization failed', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('❌ [COMPANY] Index optimization failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }
-
 // ==================== MODEL EXPORT ====================
-const Company = mongoose.model<ICompany, ICompanyModel>('Company', companySchema);
+const Company = mongoose.model<ICompany, ICompanyModel>(
+  'Company',
+  companySchema
+);
 export default Company;

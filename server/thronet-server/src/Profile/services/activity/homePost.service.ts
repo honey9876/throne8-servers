@@ -1,12 +1,15 @@
-// src/Profile/services/activity/homePost.service.ts
+/**
+ * HomePost Service
+ * Handles mood-based, public/private posts from home feed
+ */
 
 import { v4 as uuidv4 } from 'uuid';
 import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
 import sharp from 'sharp';
 import Constants from '@/shared/constants.util';
-import { Post, User, ProfilePhoto, Comment } from '@/shared/models/index.models';
+import { Post, User, ProfilePhoto, Headline, Connection } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
-import redisService from '@/services/redis.service';
+import RepostService from './repost.service';
 
 interface HomePostData {
     title: string;
@@ -24,19 +27,6 @@ interface HomePostData {
 
 class HomePostService {
 
-    // ==================== ✅ CANDIDATE GENERATION CONFIG ====================
-    // LinkedIn ke "10,000 posts -> 500 candidates" step ka equivalent.
-    private static readonly MAX_CANDIDATE_AUTHORS = 300;
-    private static readonly MAX_CANDIDATE_POSTS = 500;
-    private static readonly DISCOVERY_SLOT_RATIO = 0.15; // 15% discovery, 85% network
-    private static readonly DISCOVERY_WINDOW_DAYS = 3;
-
-    // ==================== ✅ INTEREST / TOPIC MATCHING CONFIG ====================
-    // User.skills ko interest-proxy ki tarah use kar rahe hain jab tak
-    // contentClassification.topics NLP se populate nahi hoti.
-    private static readonly INTEREST_MATCH_WEIGHT = 10;
-    private static readonly MAX_INTEREST_MATCHES = 4;
-
     static async createHomePost(
         userId: string,
         postData: HomePostData,
@@ -49,10 +39,12 @@ class HomePostService {
         try {
             LoggerUtil.info('Creating home post', { userId, correlationId });
 
+            // Step 1: Validate user
             const user = await User.findOne({ userId });
             if (!user) throw new Error('User not found');
             if (user.status !== 'active') throw new Error('User account is not active');
 
+            // Step 2: Validate media counts
             if (images.length > Constants.ACTIVITY_VALIDATION.POST.MAX_IMAGES_PER_POST)
                 throw new Error(`Maximum ${Constants.ACTIVITY_VALIDATION.POST.MAX_IMAGES_PER_POST} images allowed`);
             if (videos.length > Constants.ACTIVITY_VALIDATION.POST.MAX_VIDEOS_PER_POST)
@@ -60,6 +52,7 @@ class HomePostService {
             if (documents.length > Constants.ACTIVITY_VALIDATION.POST.MAX_DOCUMENTS_PER_POST)
                 throw new Error(`Maximum ${Constants.ACTIVITY_VALIDATION.POST.MAX_DOCUMENTS_PER_POST} documents allowed`);
 
+            // Step 3: Process poll
             let pollSetup = null;
             if (postData.pollData) {
                 const pollEndsAt = new Date();
@@ -79,6 +72,7 @@ class HomePostService {
                 };
             }
 
+            // Step 4: Process scheduled post
             let scheduledSetup = null;
             if (postData.scheduledFor) {
                 const scheduledTime = new Date(postData.scheduledFor);
@@ -88,6 +82,7 @@ class HomePostService {
                 scheduledSetup = { scheduledFor: scheduledTime, isScheduled: true };
             }
 
+            // Step 5: Process event
             let eventSetup = null;
             if (postData.eventData) {
                 const eventStartDateTime = new Date(
@@ -106,6 +101,7 @@ class HomePostService {
                 };
             }
 
+            // Step 6: Upload images
             const uploadedImages = await Promise.all(
                 images.map(async (file) => {
                     const metadata = await sharp(file.buffer).metadata();
@@ -137,6 +133,7 @@ class HomePostService {
                 })
             );
 
+            // Step 7: Upload videos
             const uploadedVideos = await Promise.all(
                 videos.map(async (file) => {
                     const uploadResult = await this.uploadToCloudinary(
@@ -159,6 +156,7 @@ class HomePostService {
                 })
             );
 
+            // Step 8: Upload documents
             const uploadedDocuments = await Promise.all(
                 documents.map(async (file) => {
                     const uploadResult = await this.uploadToCloudinary(
@@ -181,6 +179,7 @@ class HomePostService {
                 })
             );
 
+            // Step 9: Build entry
             const entryId = uuidv4();
             const newEntry: any = {
                 entryId,
@@ -225,6 +224,7 @@ class HomePostService {
                 isShadowbanned: false,
             };
 
+            // Step 10: Upsert document
             let userPostDoc = await Post.findOne({ userId });
             if (userPostDoc) {
                 userPostDoc.posts.push(newEntry);
@@ -241,6 +241,7 @@ class HomePostService {
                 await userPostDoc.save();
             }
 
+            // Step 11: Update user stats
             await User.findOneAndUpdate(
                 { userId },
                 {
@@ -252,8 +253,7 @@ class HomePostService {
 
             const savedEntry = userPostDoc.posts[userPostDoc.posts.length - 1];
 
-            await redisService.deleteByPattern(`feed:v1:${userId}:page:*`);
-
+            // Scheduled response
             if (savedEntry.isScheduled && savedEntry.scheduledFor) {
                 return {
                     success: true,
@@ -267,26 +267,16 @@ class HomePostService {
                 };
             }
 
-             LoggerUtil.info('Home post created successfully', { entryId, userId, correlationId });
+            LoggerUtil.info('Home post created successfully', { entryId, userId, correlationId });
 
-            // ✅ FIX: userId, likesCount, commentsCount, likedBy explicitly add kiye.
-            // Pehle ye missing the, isliye jab frontend is response ko turant feed
-            // mein prepend karta tha, author identify nahi ho pata tha aur post
-            // "Unknown User" ke naam se dikhti thi ya prepend hi silently fail ho
-            // jaata tha.
             return {
                 success: true,
                 entryId: savedEntry.entryId,
-                userId,
                 title: savedEntry.title,
                 content: savedEntry.content,
                 mood: savedEntry.mood,
                 isPublic: savedEntry.isPublic,
                 postUrl: savedEntry.postUrl,
-                likesCount: savedEntry.likesCount || 0,
-                commentsCount: savedEntry.commentsCount || 0,
-                likedBy: savedEntry.likedBy || [],
-                isLikedByCurrentUser: false,
                 ...(savedEntry.images?.length > 0 && { images: savedEntry.images }),
                 ...(savedEntry.videos?.length > 0 && { videos: savedEntry.videos }),
                 ...(savedEntry.documents?.length > 0 && { documents: savedEntry.documents }),
@@ -304,593 +294,233 @@ class HomePostService {
         }
     }
 
-    // ==================== ✅ CANDIDATE AUTHOR POOL ====================
-    private static async getCandidateAuthorIds(
-        currentUserId: string
-    ): Promise<{ networkAuthorIds: string[]; discoveryAuthorIds: string[] }> {
-        const { Connection, Follow } = await import('@/connections/models');
-
-        const directConnections = await Connection.find({
-            status: 'active',
-            $or: [{ fromUserId: currentUserId }, { toUserId: currentUserId }],
-        }).lean().select('fromUserId toUserId');
-
-        const firstDegreeIds = new Set<string>();
-        directConnections.forEach((c: any) => {
-            firstDegreeIds.add(c.fromUserId === currentUserId ? c.toUserId : c.fromUserId);
-        });
-
-        const follows = await Follow.find({ followerId: currentUserId })
-            .lean()
-            .select('followingId')
-            .limit(200);
-        follows.forEach((f: any) => firstDegreeIds.add(f.followingId));
-
-        const secondDegreeIds = new Set<string>();
-        if (firstDegreeIds.size > 0) {
-            const secondDegreeConnections = await Connection.find({
-                status: 'active',
-                $or: [
-                    { fromUserId: { $in: [...firstDegreeIds] } },
-                    { toUserId: { $in: [...firstDegreeIds] } },
-                ],
-            }).lean().select('fromUserId toUserId').limit(1000);
-
-            secondDegreeConnections.forEach((c: any) => {
-                const otherId = firstDegreeIds.has(c.fromUserId) ? c.toUserId : c.fromUserId;
-                if (otherId !== currentUserId && !firstDegreeIds.has(otherId)) {
-                    secondDegreeIds.add(otherId);
-                }
-            });
-        }
-
-        const networkAuthorIds = [...firstDegreeIds, ...secondDegreeIds]
-            .slice(0, this.MAX_CANDIDATE_AUTHORS);
-
-        const discoverySlots = Math.max(
-            0,
-            Math.floor(this.MAX_CANDIDATE_AUTHORS * this.DISCOVERY_SLOT_RATIO)
-        );
-
-        let discoveryAuthorIds: string[] = [];
-        if (discoverySlots > 0) {
-            const excludeIds = [currentUserId, ...networkAuthorIds];
-            const windowStart = new Date(Date.now() - this.DISCOVERY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-
-            const discoveryDocs = await Post.aggregate([
-                { $match: { userId: { $nin: excludeIds } } },
-                { $unwind: '$posts' },
-                {
-                    $match: {
-                        'posts.isDeleted': false,
-                        'posts.isArchived': false,
-                        'posts.isScheduled': { $ne: true },
-                        'posts.isPublic': { $ne: false },
-                        'posts.isShadowbanned': { $ne: true },
-                        'posts.createdAt': { $gte: windowStart },
-                    },
-                },
-                {
-                    $addFields: {
-                        engagement: {
-                            $add: ['$posts.likesCount', { $multiply: ['$posts.commentsCount', 2] }],
-                        },
-                    },
-                },
-                { $sort: { engagement: -1 } },
-                { $group: { _id: '$userId' } },
-                { $limit: discoverySlots },
-            ]);
-            discoveryAuthorIds = discoveryDocs.map((d: any) => d._id);
-        }
-
-        return { networkAuthorIds, discoveryAuthorIds };
-    }
-
-    // ==================== ✅ USER INTEREST KEYWORDS ====================
-    private static async getUserInterestKeywords(userId: string): Promise<string[]> {
-        const { default: Skill } = await import('@/Profile/models/Skill.model');
-        const skills = await Skill.find({ userId, isDeleted: false, isArchived: false })
-            .lean()
-            .select('skillName');
-        return skills
-            .map((s: any) => (s.skillName || '').trim().toLowerCase())
-            .filter((s: string) => s.length > 0);
-    }
-
-    private static getMatchedInterests(post: any, interestKeywords: string[]): string[] {
-        if (interestKeywords.length === 0) return [];
-
-        const textSource = post.feedItemType === 'repost' ? post.originalPost : post;
-        const text = `${textSource?.title || ''} ${textSource?.content || ''}`.toLowerCase();
-        if (!text.trim()) return [];
-
-        const matched: string[] = [];
-        for (const keyword of interestKeywords) {
-            if (matched.length >= this.MAX_INTEREST_MATCHES) break;
-            const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
-            if (regex.test(text)) matched.push(keyword);
-        }
-        return matched;
-    }
-
-    // ==================== MERGED CONNECTION DATA ====================
-    private static async getConnectionData(
-        currentUserId: string,
-        authorIds: string[]
-    ): Promise<{
-        statusMap: Record<string, string>;
-        degreeMap: Record<string, 1 | 2 | 3 | null>;
-        connectionIdsSet: Set<string>;
-    }> {
-        const { Connection, ConnectionRequest } = await import('@/connections/models');
-
-        const uniqueAuthorIds = [...new Set(authorIds)].filter((id) => id !== currentUserId);
-        const statusMap: Record<string, string> = {};
-        const degreeMap: Record<string, 1 | 2 | 3 | null> = {};
-        uniqueAuthorIds.forEach((id) => {
-            statusMap[id] = 'none';
-            degreeMap[id] = null;
-        });
-
-        const [allConnections, pendingRequests] = await Promise.all([
-            Connection.find({ status: 'active' }).lean().select('fromUserId toUserId'),
-            uniqueAuthorIds.length > 0
-                ? ConnectionRequest.find({
-                    $or: [
-                        { fromUserId: currentUserId, toUserId: { $in: uniqueAuthorIds } },
-                        { fromUserId: { $in: uniqueAuthorIds }, toUserId: currentUserId },
-                    ],
-                    status: 'pending',
-                }).lean().select('fromUserId toUserId')
-                : Promise.resolve([]),
-        ]);
-
-        const adjacency: Record<string, Set<string>> = {};
-        const connectionIdsSet = new Set<string>();
-
-        allConnections.forEach((c: any) => {
-            if (!adjacency[c.fromUserId]) adjacency[c.fromUserId] = new Set();
-            if (!adjacency[c.toUserId]) adjacency[c.toUserId] = new Set();
-            adjacency[c.fromUserId].add(c.toUserId);
-            adjacency[c.toUserId].add(c.fromUserId);
-
-            if (c.fromUserId === currentUserId) connectionIdsSet.add(c.toUserId);
-            if (c.toUserId === currentUserId) connectionIdsSet.add(c.fromUserId);
-        });
-
-        connectionIdsSet.forEach((id) => {
-            if (statusMap[id] !== undefined) statusMap[id] = 'connected';
-        });
-
-        const visited = new Set<string>([currentUserId]);
-        let frontier = new Set<string>([currentUserId]);
-
-        for (let depth = 1; depth <= 3; depth++) {
-            const nextFrontier = new Set<string>();
-            frontier.forEach((userId) => {
-                const neighbors = adjacency[userId] || new Set();
-                neighbors.forEach((neighborId) => {
-                    if (!visited.has(neighborId)) {
-                        visited.add(neighborId);
-                        nextFrontier.add(neighborId);
-                        if (uniqueAuthorIds.includes(neighborId) && degreeMap[neighborId] === null) {
-                            degreeMap[neighborId] = depth as 1 | 2 | 3;
-                        }
-                    }
-                });
-            });
-            frontier = nextFrontier;
-            if (frontier.size === 0) break;
-        }
-
-        pendingRequests.forEach((r: any) => {
-            const otherId = r.fromUserId === currentUserId ? r.toUserId : r.fromUserId;
-            if (statusMap[otherId] === 'connected') return;
-            statusMap[otherId] = r.fromUserId === currentUserId ? 'pending_sent' : 'pending_received';
-        });
-
-        return { statusMap, degreeMap, connectionIdsSet };
-    }
-
-    // ✅ NEW: dwell time config — LinkedIn doc point #7 (engagement/dwell signals)
-    private static readonly DWELL_TIME_CAP_SECONDS = 30;
-    private static readonly DWELL_TIME_MAX_BONUS = 20;
-
-    // ✅ NEW: negative signal (previous behaviour) config
-    private static readonly IGNORE_SIGNAL_PENALTY_PER_COUNT = 3;
-    private static readonly IGNORE_SIGNAL_MAX_PENALTY = 15;
-
-    // ✅ CHANGED: ignoreCount naya param add hua
-    private static calculateFeedScore(
-        post: any,
-        connectionDegree: 1 | 2 | 3 | null,
-        knownLikersCount: number = 0,
-        knownCommentersCount: number = 0,
-        interestMatchCount: number = 0,
-        avgDwellTime: number = 0,
-        ignoreCount: number = 0 // ✅ NEW — is author ko viewer ne kitni baar "ignore" kiya
-    ): number {
-        const ageInHours = (Date.now() - new Date(post.createdAt).getTime()) / (1000 * 60 * 60);
-        const ageInDays = ageInHours / 24;
-
-        const likes = post.likesCount ?? post.originalPost?.likesCount ?? 0;
-        const comments = post.commentsCount ?? post.originalPost?.commentsCount ?? 0;
-        const pollVotes = post.pollData?.totalVotes || 0;
-
-        const engagementScore = (likes * 3 + comments * 5 + pollVotes * 2) * 10;
-        const decay = Math.pow(ageInDays + 1, 1.8);
-
-        let score = engagementScore / decay;
-
-        if (connectionDegree === 1) score += 15;
-        else if (connectionDegree === 2) score += 8;
-        else if (connectionDegree === 3) score += 3;
-
-        score += knownLikersCount * 5;
-        score += knownCommentersCount * 8;
-
-        score += Math.min(interestMatchCount, this.MAX_INTEREST_MATCHES) * this.INTEREST_MATCH_WEIGHT;
-
-        const dwellRatio = Math.min(avgDwellTime, this.DWELL_TIME_CAP_SECONDS) / this.DWELL_TIME_CAP_SECONDS;
-        score += dwellRatio * this.DWELL_TIME_MAX_BONUS;
-
-        // ✅ NEW: negative signal penalty — jitna zyada is author ko viewer
-        // ne ignore kiya hai, utna neeche jaayega (capped, taaki ek author
-        // permanently feed se gayab na ho jaaye)
-        const ignorePenalty = Math.min(ignoreCount, this.IGNORE_SIGNAL_MAX_PENALTY / this.IGNORE_SIGNAL_PENALTY_PER_COUNT)
-            * this.IGNORE_SIGNAL_PENALTY_PER_COUNT;
-        score -= ignorePenalty;
-
-        if (ageInHours < 1) score += 25;
-
-        return score;
-    }
-
-    // ✅ NEW: viewer ke against candidate authors ka ignore-count batch fetch karta hai
-    private static async getIgnoreSignalsForAuthors(
-        viewerId: string,
-        authorIds: string[]
-    ): Promise<Record<string, number>> {
-        const map: Record<string, number> = {};
-        const uniqueAuthorIds = [...new Set(authorIds)];
-        if (uniqueAuthorIds.length === 0) return map;
-
-        await Promise.all(
-            uniqueAuthorIds.map(async (authorId) => {
-                try {
-                    const raw = await redisService.get(`feed:ignore:${viewerId}:${authorId}`);
-                    map[authorId] = raw ? parseInt(raw, 10) || 0 : 0;
-                } catch {
-                    map[authorId] = 0;
-                }
-            })
-        );
-
-        return map;
-    }
-
+    // ✅ Get home feed posts (all users, public only)
     static async getHomeFeedPosts(
         currentUserId: string,
         page: number = 1,
         limit: number = 20
     ): Promise<any> {
         const correlationId = uuidv4();
-        const cacheKey = `feed:v1:${currentUserId}:page:${page}:limit:${limit}`;
 
         try {
             LoggerUtil.info('Fetching home feed posts', { currentUserId, page, limit, correlationId });
 
-            const cached = await redisService.get(cacheKey);
+            // 1. Fetch all posts documents
+            const allUserDocs = await Post.find({}).lean();
 
-            if (cached) {
-                LoggerUtil.info('Home feed served from cache', { currentUserId, page, correlationId });
-                return JSON.parse(cached);
+            // 2. Extract unique userIds form the post documents
+            const userIds = [...new Set(allUserDocs.map((doc: any) => doc.userId))];
+
+            // 3. Fetch user details for all those userIds
+            const users = await User.find({ userId: { $in: userIds } })
+                .select('userId username firstName lastName profilePhotoId headlineId')
+                .lean();
+
+            // Fetch Profile Photos and Headlines for the users
+            const profilePhotos = await ProfilePhoto.find({ userId: { $in: userIds }, isActive: true }).lean();
+            const headlineIds = users.map((u: any) => u.headlineId).filter(Boolean);
+            const headlines = await Headline.find({ headlineId: { $in: headlineIds }, 'flags.isDeleted': false }).lean();
+
+            const photoMap = profilePhotos.reduce((acc: any, photo: any) => {
+                acc[photo.userId] = photo.cloudinarySecureUrl;
+                return acc;
+            }, {});
+
+            const headlineMap = headlines.reduce((acc: any, hl: any) => {
+                acc[hl.headlineId] = hl.title || hl.message || hl.headline;
+                return acc;
+            }, {});
+
+            // 5. Fetch Connections for the current user and the post authors
+            let connectionMap: Record<string, string> = {};
+            if (Connection) {
+                const connections = await Connection.find({
+                    $or: [
+                        { fromUserId: currentUserId, toUserId: { $in: userIds } },
+                        { fromUserId: { $in: userIds }, toUserId: currentUserId }
+                    ]
+                }).lean();
+
+                connectionMap = connections.reduce((acc: any, conn: any) => {
+                    const otherUserId = conn.fromUserId === currentUserId ? conn.toUserId : conn.fromUserId;
+                    acc[otherUserId] = conn.status;
+                    return acc;
+                }, {});
             }
 
-            const { networkAuthorIds, discoveryAuthorIds } =
-                await this.getCandidateAuthorIds(currentUserId);
+            // 6. Create a fast lookup map for the users
+            const userMap = users.reduce((acc: any, user: any) => {
+                acc[user.userId] = {
+                    ...user,
+                    profileImage: photoMap[user.userId],
+                    headline: headlineMap[user.headlineId],
+                    connectionStatus: connectionMap[user.userId] || 'none'
+                };
+                return acc;
+            }, {});
 
-            const candidateAuthorIds = [
-                ...new Set([currentUserId, ...networkAuthorIds, ...discoveryAuthorIds]),
-            ];
-
-            // interest keywords ek baar fetch kar lo
-            const interestKeywords = await this.getUserInterestKeywords(currentUserId);
-
-            const allUserDocs = await Post.find({ userId: { $in: candidateAuthorIds } })
-                .lean()
-                .limit(this.MAX_CANDIDATE_AUTHORS + 50);
+            const cleanPost = (obj: any): any => {
+                if (!obj.images?.length) delete obj.images;
+                if (!obj.videos?.length) delete obj.videos;
+                if (!obj.documents?.length) delete obj.documents;
+                if (!obj.pollData?.question) delete obj.pollData;
+                if (!obj.eventData?.eventType) delete obj.eventData;
+                if (!obj.shadowbanReason) delete obj.shadowbanReason;
+                if (!obj.scheduledFor) delete obj.scheduledFor;
+                if (!obj.publishedAt) delete obj.publishedAt;
+                if (!obj.pinnedAt) delete obj.pinnedAt;
+                if (!obj.savedAt) delete obj.savedAt;
+                if (!obj.archivedAt) delete obj.archivedAt;
+                if (!obj.deletedAt) delete obj.deletedAt;
+                return obj;
+            };
 
             let allPosts: any[] = [];
-            const authorIds: string[] = [];
 
             allUserDocs.forEach((doc: any) => {
+                const author = userMap[doc.userId] || {};
+
                 const entries = (doc.posts || [])
                     .filter((p: any) =>
                         !p.isDeleted &&
                         !p.isArchived &&
-                        !p.isScheduled &&
-                        p.isPublic !== false &&
-                        !p.isShadowbanned // ✅ FIX: pehle ye check missing tha — shadowbanned posts normal feed mein dikh rahe the
+                        !p.isScheduled &&        // scheduled posts skip
+                        p.isPublic !== false     // sirf public posts
                     )
-                    .map((p: any) => {
-                        authorIds.push(doc.userId);
-                        return {
-                            ...p,
-                            userId: doc.userId,
-                            documentPostId: doc.postId,
-                            isLikedByCurrentUser: (p.likedBy || []).includes(currentUserId),
-                        };
-                    });
+                    .map((p: any) => cleanPost({
+                        ...p,
+                        userId: doc.userId,
+                        documentPostId: doc.postId,
+                        isLikedByCurrentUser: (p.likedBy || []).includes(currentUserId),
+                        authorName: author.firstName ? `${author.firstName} ${author.lastName || ''}`.trim() : (author.username || 'Throne8 User'),
+                        authorAvatar: author.profileImage || '',
+                        authorHeadline: author.headline || '',
+                        authorConnectionStatus: author.connectionStatus || 'none'
+                    }));
                 allPosts.push(...entries);
             });
 
-            if (allPosts.length > this.MAX_CANDIDATE_POSTS) {
-                allPosts = allPosts
-                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                    .slice(0, this.MAX_CANDIDATE_POSTS);
-            }
-
-            const { default: Repost } = await import('@/Profile/models/Repost.model');
-            const allReposts = await Repost.find({
-                isDeleted: false,
-                repostedBy: { $in: candidateAuthorIds },
-            }).lean();
-
-            const repostEntries = await Promise.all(
-                allReposts.map(async (repost: any) => {
-                    const originalDoc = allUserDocs.find((d: any) =>
-                        (d.posts || []).some((p: any) => p.entryId === repost.originalPostEntryId)
-                    );
-                    const originalEntry = originalDoc?.posts.find(
-                        (p: any) => p.entryId === repost.originalPostEntryId && !p.isDeleted
-                    );
-                    if (!originalEntry || !originalDoc) return null;
-
-                    authorIds.push(repost.repostedBy);
-                    authorIds.push(originalDoc.userId);
-
-                    return {
-                        feedItemType: 'repost',
-                        entryId: repost.repostId,
-                        repostId: repost.repostId,
-                        repostType: repost.repostType,
-                        thoughtText: repost.thoughtText || null,
-                        repostedBy: repost.repostedBy,
-                        createdAt: repost.createdAt,
-                        userId: repost.repostedBy,
-                        likesCount: originalEntry.likesCount || 0,
-                        commentsCount: originalEntry.commentsCount || 0,
-                        likedBy: originalEntry.likedBy || [],
-                        isLikedByCurrentUser: (originalEntry.likedBy || []).includes(currentUserId),
-                        originalPost: {
-                            entryId: originalEntry.entryId,
-                            title: originalEntry.title,
-                            content: originalEntry.content,
-                            userId: originalDoc.userId,
-                            images: originalEntry.images || [],
-                            videos: originalEntry.videos || [],
-                            documents: originalEntry.documents || [],
-                            likesCount: originalEntry.likesCount,
-                            commentsCount: originalEntry.commentsCount,
-                            repostsCount: originalEntry.repostsCount || 0,   // ✅ FIX: missing tha
-                            sendsCount: originalEntry.sendsCount || 0,       // ✅ FIX: missing tha
-                            isLikedByCurrentUser: (originalEntry.likedBy || []).includes(currentUserId),
-                            createdAt: originalEntry.createdAt,
-                            analytics: originalEntry.analytics || null, // ✅ NEW: dwell time score ke liye chahiye
-                        },
-                    };
-                })
+            // ── NEW CODE: Merging Reposts ──
+            const repostsResult = await RepostService.getFeedReposts(currentUserId, limit, (page - 1) * limit);
+            const feedReposts = repostsResult.reposts || [];
+            // Build a set of entryIds the current user has reposted so we can tag them in the feed
+            const myRepostsResult = await RepostService.getUserReposts(currentUserId);
+            const myRepostedEntryIds = new Set(
+                (myRepostsResult.reposts || [])
+                    .filter((r: any) => r.repostedBy === currentUserId)
+                    .map((r: any) => r.originalPost?.entryId)
+                    .filter(Boolean)
             );
 
-            allPosts.push(...repostEntries.filter(Boolean));
+            // Tag regular posts with whether the current user has already reposted them
+            allPosts = allPosts.map((p: any) => ({
+                ...p,
+                currentUserHasReposted: myRepostedEntryIds.has(p.entryId),
+            }));
 
-            const {
-                statusMap: connectionStatusMap,
-                degreeMap: connectionDegreeMap,
-                connectionIdsSet,
-            } = await this.getConnectionData(currentUserId, authorIds);
+            // Combine both
+            const rawCombinedFeed = [...allPosts, ...feedReposts];
 
-            const likedByConnectionsMap: Record<string, string[]> = {};
-            const allKnownLikerIds = new Set<string>();
+            // ── Deduplication and Aggregation ──
+            const aggregatedMap = new Map<string, any>();
+            let combinedFeed: any[] = [];
 
-            allPosts.forEach((post) => {
-                const likedBy: string[] = post.likedBy || [];
-                const knownLikers = likedBy.filter((id) => connectionIdsSet.has(id));
-                likedByConnectionsMap[post.entryId] = knownLikers;
-                knownLikers.forEach((id) => allKnownLikerIds.add(id));
-            });
-
-            let likerNamesMap: Record<string, string> = {};
-            let likerAvatarsMap: Record<string, string | null> = {};
-            if (allKnownLikerIds.size > 0) {
-                const likerUsers = await User.find({ userId: { $in: [...allKnownLikerIds] } })
-                    .lean()
-                    .select('userId firstName lastName profilePhotoId');
-                likerNamesMap = likerUsers.reduce((acc: Record<string, string>, u: any) => {
-                    acc[u.userId] = `${u.firstName} ${u.lastName}`.trim();
-                    return acc;
-                }, {});
-
-                const photoIds = likerUsers.map((u: any) => u.profilePhotoId).filter(Boolean);
-                let photoMap: Record<string, string> = {};
-                if (photoIds.length > 0) {
-                    const photos = await ProfilePhoto.find({ photoId: { $in: photoIds } })
-                        .lean()
-                        .select('photoId cloudinarySecureUrl');
-                    photoMap = photos.reduce((acc: Record<string, string>, p: any) => {
-                        acc[p.photoId] = p.cloudinarySecureUrl;
-                        return acc;
-                    }, {});
+            for (const item of rawCombinedFeed) {
+                // If it's a quote repost (has thoughtText), don't aggregate it
+                if (item.feedItemType === 'repost' && item.thoughtText) {
+                    combinedFeed.push(item);
+                    continue;
                 }
-                likerAvatarsMap = likerUsers.reduce((acc: Record<string, string | null>, u: any) => {
-                    acc[u.userId] = u.profilePhotoId ? (photoMap[u.profilePhotoId] || null) : null;
-                    return acc;
-                }, {});
-            }
 
-            const entryIds = allPosts.map((post) => post.entryId);
-            const commentedByConnectionsMap: Record<string, string[]> = {};
-            const allKnownCommenterIds = new Set<string>();
+                const targetEntryId = item.feedItemType === 'repost' ? item.originalPost?.entryId : item.entryId;
+                if (!targetEntryId) {
+                    combinedFeed.push(item);
+                    continue;
+                }
 
-            if (entryIds.length > 0) {
-                const comments = await Comment.find({
-                    postId: { $in: entryIds },
-                    isDeleted: false,
-                }).lean().select('postId userId');
-
-                const commentersByPost: Record<string, Set<string>> = {};
-                comments.forEach((c: any) => {
-                    if (!commentersByPost[c.postId]) commentersByPost[c.postId] = new Set();
-                    if (connectionIdsSet.has(c.userId)) {
-                        commentersByPost[c.postId].add(c.userId);
+                if (aggregatedMap.has(targetEntryId)) {
+                    const existing = aggregatedMap.get(targetEntryId);
+                    
+                    if (item.feedItemType === 'repost') {
+                        if (!existing.reposters) existing.reposters = [];
+                        if (existing.feedItemType === 'repost' && existing.repostedBy) {
+                            if (!existing.reposters.some((r: any) => r.id === existing.repostedBy)) {
+                                existing.reposters.push({ id: existing.repostedBy, name: existing.repostedByName, createdAt: existing.createdAt });
+                            }
+                        }
+                        if (!existing.reposters.some((r: any) => r.id === item.repostedBy)) {
+                            existing.reposters.push({ id: item.repostedBy, name: item.repostedByName, createdAt: item.createdAt });
+                        }
+                        // Update createdAt to the most recent repost
+                        if (new Date(item.createdAt) > new Date(existing.createdAt)) {
+                            existing.createdAt = item.createdAt;
+                        }
+                    } else {
+                        // This is the original post coming in, we already have a repost of it.
+                        // We should retain the existing repost structure but ensure the originalPost object is fresh.
+                        if (existing.feedItemType === 'repost') {
+                            existing.originalPost = { ...item, currentUserHasReposted: existing.originalPost?.currentUserHasReposted || item.currentUserHasReposted };
+                        } else {
+                            Object.assign(existing, item);
+                        }
                     }
-                });
-
-                Object.keys(commentersByPost).forEach((postId) => {
-                    const ids = [...commentersByPost[postId]];
-                    commentedByConnectionsMap[postId] = ids;
-                    ids.forEach((id) => allKnownCommenterIds.add(id));
-                });
-            }
-
-            let commenterNamesMap: Record<string, string> = {};
-            let commenterAvatarsMap: Record<string, string | null> = {};
-            if (allKnownCommenterIds.size > 0) {
-                const commenterUsers = await User.find({ userId: { $in: [...allKnownCommenterIds] } })
-                    .lean()
-                    .select('userId firstName lastName profilePhotoId');
-                commenterNamesMap = commenterUsers.reduce((acc: Record<string, string>, u: any) => {
-                    acc[u.userId] = `${u.firstName} ${u.lastName}`.trim();
-                    return acc;
-                }, {});
-
-                const commenterPhotoIds = commenterUsers.map((u: any) => u.profilePhotoId).filter(Boolean);
-                let commenterPhotoMap: Record<string, string> = {};
-                if (commenterPhotoIds.length > 0) {
-                    const commenterPhotos = await ProfilePhoto.find({ photoId: { $in: commenterPhotoIds } })
-                        .lean()
-                        .select('photoId cloudinarySecureUrl');
-                    commenterPhotoMap = commenterPhotos.reduce((acc: Record<string, string>, p: any) => {
-                        acc[p.photoId] = p.cloudinarySecureUrl;
-                        return acc;
-                    }, {});
+                } else {
+                    if (item.feedItemType === 'repost') {
+                        item.reposters = [{ id: item.repostedBy, name: item.repostedByName, createdAt: item.createdAt }];
+                    } else {
+                        item.reposters = [];
+                    }
+                    aggregatedMap.set(targetEntryId, item);
+                    combinedFeed.push(item);
                 }
-                commenterAvatarsMap = commenterUsers.reduce((acc: Record<string, string | null>, u: any) => {
-                    acc[u.userId] = u.profilePhotoId ? (commenterPhotoMap[u.profilePhotoId] || null) : null;
-                    return acc;
-                }, {});
             }
 
-            // ✅ NEW: is user ke against candidate authors ka ignore-count fetch karo,
-            // score penalty ke liye
-            const authorIdsForIgnoreCheck = [...new Set(authorIds)];
-            const ignoreSignalsMap = await this.getIgnoreSignalsForAuthors(
-                currentUserId,
-                authorIdsForIgnoreCheck
+            // Post-process the aggregated posts to format the repost header
+            for (const item of combinedFeed) {
+                if (item.reposters && item.reposters.length > 0) {
+                    item.feedItemType = 'repost';
+                    if (!item.originalPost) {
+                        const { reposters, feedItemType, currentUserHasReposted, ...originalData } = item;
+                        item.originalPost = { ...originalData, currentUserHasReposted };
+                    }
+                    
+                    const currentUserReposter = item.reposters.find((r: any) => r.id === currentUserId);
+                    const otherReposters = item.reposters.filter((r: any) => r.id !== currentUserId);
+                    
+                    if (currentUserReposter && otherReposters.length === 0) {
+                        item.repostedByName = "You";
+                    } else if (currentUserReposter && otherReposters.length === 1) {
+                        item.repostedByName = `You and ${otherReposters[0].name}`;
+                    } else if (currentUserReposter && otherReposters.length > 1) {
+                        item.repostedByName = `You, ${otherReposters[0].name} and ${otherReposters.length - 1} others`;
+                    } else if (!currentUserReposter && otherReposters.length === 1) {
+                        item.repostedByName = otherReposters[0].name;
+                    } else if (!currentUserReposter && otherReposters.length === 2) {
+                        item.repostedByName = `${otherReposters[0].name} and ${otherReposters[1].name}`;
+                    } else if (!currentUserReposter && otherReposters.length > 2) {
+                        item.repostedByName = `${otherReposters[0].name} and ${otherReposters.length - 1} others`;
+                    }
+                }
+            }
+
+            // Sort by latest
+            combinedFeed.sort(
+                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
             );
 
-            allPosts = allPosts.map((post) => {
-                const knownLikerIds = likedByConnectionsMap[post.entryId] || [];
-                const likedByConnections = knownLikerIds
-                    .slice(0, 3)
-                    .map((id) => likerNamesMap[id])
-                    .filter(Boolean);
-                const likedByConnectionsAvatars = knownLikerIds
-                    .slice(0, 3)
-                    .map((id) => likerAvatarsMap[id] || null);
+            // Pagination
+            const total = combinedFeed.length;
+            const startIndex = (page - 1) * limit;
+            const paginatedPosts = combinedFeed.slice(startIndex, startIndex + limit);
 
-                const knownCommenterIds = commentedByConnectionsMap[post.entryId] || [];
-                const commentedByConnections = knownCommenterIds
-                    .slice(0, 3)
-                    .map((id) => commenterNamesMap[id])
-                    .filter(Boolean);
-                const commentedByConnectionsAvatars = knownCommenterIds
-                    .slice(0, 3)
-                    .map((id) => commenterAvatarsMap[id] || null);
-                const commentedByConnectionsFull = knownCommenterIds
-                    .map((id) => ({
-                        userId: id,
-                        name: commenterNamesMap[id],
-                        avatar: commenterAvatarsMap[id] || null,
-                    }))
-                    .filter((x) => x.name);
-                const likedByConnectionsFull = knownLikerIds
-                    .map((id) => ({
-                        userId: id,
-                        name: likerNamesMap[id],
-                        avatar: likerAvatarsMap[id] || null,
-                    }))
-                    .filter((x) => x.name);
-
-                const connectionSubjectUserId =
-                    post.feedItemType === 'repost' ? post.originalPost.userId : post.userId;
-
-                const degree =
-                    connectionSubjectUserId === currentUserId
-                        ? null
-                        : connectionDegreeMap[connectionSubjectUserId] ?? null;
-
-                const connectionStatus =
-                    connectionSubjectUserId === currentUserId
-                        ? 'self'
-                        : connectionStatusMap[connectionSubjectUserId] || 'none';
-
-                // is post ke against interest match nikaalo, score mein pass karo
-                const matchedInterests = this.getMatchedInterests(post, interestKeywords);
-
-                // original post ka analytics.avgDwellTime nikaalo (repost ke case
-                // mein original post ka dwell time use hota hai, reposter ka nahi)
-                const dwellSource = post.feedItemType === 'repost' ? post.originalPost : post;
-                const avgDwellTime = dwellSource?.analytics?.avgDwellTime || 0;
-
-                // ✅ NEW: is post ke actual author (original author, reposter nahi) ka
-                // ignore-count nikaalo — connectionSubjectUserId already yahi represent karta hai
-                const ignoreCount = connectionSubjectUserId
-                    ? (ignoreSignalsMap[connectionSubjectUserId] || 0)
-                    : 0;
-
-                return {
-                    ...post,
-                    connectionStatus,
-                    connectionDegree: degree,
-                    matchedInterests, // debugging/UI ke liye bhi expose kar diya (e.g. "matches your skill: React")
-                    feedScore: this.calculateFeedScore(
-                        post,
-                        degree,
-                        knownLikerIds.length,
-                        knownCommenterIds.length,
-                        matchedInterests.length,
-                        avgDwellTime,
-                        ignoreCount // ✅ NEW
-                    ),
-                    likedByConnections,
-                    likedByConnectionsAvatars,
-                    likedByConnectionsCount: knownLikerIds.length,
-                    commentedByConnections,
-                    commentedByConnectionsAvatars,
-                    commentedByConnectionsCount: knownCommenterIds.length,
-                    commentedByConnectionsFull,
-                    likedByConnectionsFull,
-                    ...(post.feedItemType === 'repost' && {
-                        originalPost: {
-                            ...post.originalPost,
-                            connectionStatus,
-                            connectionDegree: degree,
-                        },
-                    }),
-                };
+            LoggerUtil.info('Home feed posts fetched', {
+                currentUserId,
+                total,
+                page,
+                correlationId,
             });
 
-            allPosts.sort((a, b) => b.feedScore - a.feedScore);
-
-            const total = allPosts.length;
-            const startIndex = (page - 1) * limit;
-            const paginatedPosts = allPosts.slice(startIndex, startIndex + limit);
-
-            const result = {
+            return {
                 posts: paginatedPosts,
                 pagination: {
                     total,
@@ -902,19 +532,6 @@ class HomePostService {
                 },
             };
 
-            await redisService.set(cacheKey, JSON.stringify(result), { ttl: 180 });
-
-            LoggerUtil.info('Home feed posts fetched (DB, cached)', {
-                currentUserId,
-                total,
-                page,
-                candidateAuthorCount: candidateAuthorIds.length,
-                interestKeywordCount: interestKeywords.length,
-                correlationId,
-            });
-
-            return result;
-
         } catch (error: any) {
             LoggerUtil.error('Get home feed posts failed', {
                 error: error.message,
@@ -925,6 +542,7 @@ class HomePostService {
         }
     }
 
+    // ✅ Private helper
     private static async uploadToCloudinary(
         buffer: Buffer,
         userId: string,

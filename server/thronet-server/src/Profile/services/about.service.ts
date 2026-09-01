@@ -2,15 +2,13 @@
  * About Service - Business Logic with Video, Media, Formatting
  * 
  * @module services/about.service
- * @version 2.0.1 - Added auth cache invalidation fix
+ * @version 2.0.0
  */
 
 import { About, User } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
 import { v4 as uuidv4 } from 'uuid';
 import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
-// ✅ NEW IMPORT — needed to clear stale auth cache after aboutId changes
-import { AuthCacheRepository } from '@/auth/repository/auth.repository';
 
 // ==================== INTERFACES ====================
 
@@ -96,11 +94,6 @@ class AboutService {
                 { $set: { aboutId } },
                 { new: true }
             );
-
-            // ✅ FIX: Invalidate stale auth cache so getUserById() 
-            // returns the fresh aboutId immediately, instead of
-            // waiting for the 15-min cache TTL to expire
-            await AuthCacheRepository.invalidateUserCaches(data.userId);
 
             LoggerUtil.info('About created successfully', {
                 aboutId,
@@ -375,17 +368,12 @@ class AboutService {
 
     /**
      * ✅ Get About by ID
-     * NOTE: Ye public read hai — profile pe koi bhi (owner ya visitor) is
-     * about ko dekh sakta hai. Isliye yahan userId se ownership match nahi
-     * karte — sirf aboutId se seedha dhoondhte hain. Edit/Delete/Archive
-     * jaisi actions mein ownership check (findActiveById with userId)
-     * abhi bhi lagi rahegi.
      */
-    static async getAboutById(aboutId: string, userId?: string): Promise<any> {
+    static async getAboutById(aboutId: string, userId: string): Promise<any> {
         const correlationId = uuidv4();
 
         try {
-            const about = await About.findOne({ aboutId, isDeleted: false });
+            const about = await About.findActiveById(aboutId, userId);
 
             if (!about) {
                 throw new Error('About not found');
@@ -524,9 +512,6 @@ class AboutService {
                     { $unset: { aboutId: 1 } },
                     { new: true }
                 );
-
-                // ✅ FIX: Invalidate stale auth cache
-                await AuthCacheRepository.invalidateUserCaches(userId);
 
                 return {
                     aboutId,

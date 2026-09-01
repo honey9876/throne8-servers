@@ -1,4 +1,5 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
+
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
@@ -12,6 +13,8 @@ import { IUserBadge } from '@/StudyGroup/interfaces/IBadge';
 
 const logger = LoggerUtil;
 
+// ==================== INTERFACES ====================
+
 export interface IUser extends Document {
     userId: string;
     email: string;
@@ -20,12 +23,7 @@ export interface IUser extends Document {
     passwordSalt?: string;
     firstName: string;
     lastName?: string;
-    dateOfBirth?: Date;
     location?: string;
-    currentPosition?: string;
-    company?: string;
-    education?: string;
-    pronouns?: string;
     analyticsId?: string;
     profilePhotoId?: string;
     coverPhotoId?: string;
@@ -58,20 +56,21 @@ export interface IUser extends Document {
         totalDocuments: number;
     };
     activityPattern?: {
-        activeHours: number[];
-        peakEngagementTime: string;
+        activeHours: number[];         // [9, 10, 14, 18, 20]
+        peakEngagementTime: string;    // "18:00-20:00"
         lastUpdated: Date;
     };
     accountType: 'personal' | 'company' | 'creator';
     companyDetails: {
-        companyName: string;
-        industry: string;
-        size: string;
-        verified: boolean;
-    };
+        companyName: String,
+        industry: String,
+        size: String,
+        verified: { type: Boolean, default: false }
+    },
     skillIds: string[];
     contactId?: string;
     aboutId?: string;
+    // Onboarding data
     onboarding?: {
         userType: 'working' | 'student' | 'fresher';
         completedAt: Date;
@@ -103,7 +102,7 @@ export interface IUser extends Document {
     phoneVerified: boolean;
     aadhaarVerified: boolean;
     aadhaarVerifiedAt?: Date;
-    aadhaarLast4?: string;
+    aadhaarLast4?: string;          // Store only last 4 digits
     companyEmailVerified: boolean;
     companyEmailVerifiedAt?: Date;
     companyEmail?: string;
@@ -140,11 +139,16 @@ export interface IUser extends Document {
         engagementPattern?: string;
         followerGrowthRate: number;
     };
-    badges?: IUserBadge[];
     createdAt: Date;
     updatedAt: Date;
+
+    // Virtuals
     fullName: string;
     isLocked: boolean;
+    // IUser interface mein add karo
+    badges?: IUserBadge[];
+
+    // Methods
     incrementLoginAttempts(): Promise<any>;
     resetLoginAttempts(): Promise<any>;
     trackActivityTime(): Promise<void>;
@@ -153,11 +157,12 @@ export interface IUser extends Document {
     verifyEmail(): Promise<IUser>;
     updateLastLogin(ipAddress: string): Promise<IUser>;
     softDelete(deletedBy?: string): Promise<IUser>;
+
     findByUsername(username: string): Promise<(IUser & Document) | null>;
 }
 
 interface IUserJSON {
-    [key: string]: any;
+    [key: string]: any;  // This allows deletion of properties
 }
 
 interface IOAuthProvider {
@@ -177,10 +182,6 @@ interface IUserPreferences {
         sms: boolean;
     };
     theme: 'light' | 'dark' | 'auto';
-    // Controls whether "who viewed your profile" notifications name the viewer
-    // ('named'), hide identity but still track ('public'/'connections' — reserved
-    // for future granularity), or disable view tracking entirely ('private').
-    profileViewVisibility?: 'named' | 'public' | 'connections' | 'private';
 }
 
 interface IUserMetadata {
@@ -189,8 +190,8 @@ interface IUserMetadata {
     lastActiveAt?: Date;
     totalLogins: number;
     failedLoginAttempts: number;
-    deactivatedAt?: Date;
-    deactivationReason?: string;
+    deactivatedAt?: Date;  // ✅ ADD THIS
+    deactivationReason?: string;  // ✅ ADD THIS
 }
 
 interface IUserFlags {
@@ -199,17 +200,7 @@ interface IUserFlags {
     deletedBy?: string;
 }
 
-// 🔧 NAYA — search result ke return shape ke liye
-interface IPaginatedUsersResult {
-    data: any[];
-    totalCount: number;
-    currentPage: number;
-    totalPages: number;
-    hasNextPage: boolean;
-    hasPreviousPage: boolean;
-    estimatedTotal?: number;
-}
-
+// Static methods interface
 export interface IUserModel extends Model<IUser> {
     generateAccessToken(payload: TokenPayload): string;
     generateRefreshToken(payload: TokenPayload): string;
@@ -221,15 +212,6 @@ export interface IUserModel extends Model<IUser> {
     findByUsername(username: string): Promise<(IUser & Document) | null>;
     findByUserId(userId: string): Promise<IUser | null>;
     getActiveUserCount(): Promise<number>;
-    // 🔧 NAYA — search ke liye
-    findUsersPaginated(options: {
-        page: number;
-        limit: number;
-        query: string;
-        region?: string;
-        useEstimatedCount?: boolean;
-        projection?: string;
-    }): Promise<IPaginatedUsersResult>;
 }
 
 interface TokenPayload {
@@ -240,6 +222,8 @@ interface TokenPayload {
     iat?: number;
     exp?: number;
 }
+
+// ==================== JWT CONFIG ====================
 
 const JWT_CONFIG = {
     accessToken: {
@@ -252,6 +236,8 @@ const JWT_CONFIG = {
     },
 } as const;
 
+// ==================== SCHEMA ====================
+
 const UserSchema = new Schema<IUser, IUserModel>(
     {
         userId: {
@@ -259,6 +245,7 @@ const UserSchema = new Schema<IUser, IUserModel>(
             required: [true, 'User ID is required'],
             unique: true,
             default: () => uuidv4(),
+            // index: true,
             immutable: true,
         },
         email: {
@@ -268,6 +255,7 @@ const UserSchema = new Schema<IUser, IUserModel>(
             lowercase: true,
             trim: true,
             validate: [validator.isEmail, 'Invalid email format'],
+            index: true,
         },
         username: {
             type: String,
@@ -278,10 +266,12 @@ const UserSchema = new Schema<IUser, IUserModel>(
             minlength: [3, 'Username must be at least 3 characters'],
             maxlength: [30, 'Username cannot exceed 30 characters'],
             match: [/^[a-z0-9_]+$/, 'Username can only contain lowercase letters, numbers, and underscores'],
+            index: true,
         },
         passwordHash: {
             type: String,
             required: function (this: IUser) {
+                // ✅ Password NOT required for OAuth users
                 return !this.oauthProviders || this.oauthProviders.length === 0;
             },
             select: false,
@@ -294,7 +284,7 @@ const UserSchema = new Schema<IUser, IUserModel>(
         firstName: {
             type: String,
             trim: true,
-            required: true,
+            required: true,           // ✅ ADD THIS
             minlength: [2, 'First name must be at least 2 characters'],
             maxlength: [50, 'First name cannot exceed 50 characters'],
         },
@@ -303,61 +293,29 @@ const UserSchema = new Schema<IUser, IUserModel>(
             trim: true,
             maxlength: [50, 'Last name cannot exceed 50 characters'],
         },
-        dateOfBirth: {
-            type: Date,
-            default: null,
-        },
+        // ✅ ADD AFTER lastName:
         location: {
             type: String,
             trim: true,
-            required: false,
+            required: true,
             minlength: [2, 'Location must be at least 2 characters'],
             maxlength: [50, 'Location cannot exceed 50 characters'],
             validate: {
                 validator: function (v: string) {
-                    return !v || /^[A-Z][a-zA-Z\s\-]{1,49}$/.test(v);
+                    // First letter must be capital
+                    return /^[A-Z][a-zA-Z\s\-]{1,49}$/.test(v);
                 },
-                message: 'Location must start with a capital letter',
+                message: 'Location must start with a capital letter'
             },
+            index: true,
         },
-
-
-
-        currentPosition: {
-            type: String,
-            trim: true,
-            default: null,
-            maxlength: [100, 'Current position cannot exceed 100 characters'],
-        },
-        company: {
-            type: String,
-            trim: true,
-            default: null,
-            maxlength: [100, 'Company name cannot exceed 100 characters'],
-        },
-        education: {
-            type: String,
-            trim: true,
-            default: null,
-            maxlength: [150, 'Education cannot exceed 150 characters'],
-        },
-        pronouns: {
-            type: String,
-            trim: true,
-            default: null,
-            enum: {
-                values: ['He/Him', 'She/Her', 'They/Them', 'Other', null],
-                message: 'Pronouns must be one of: He/Him, She/Her, They/Them, Other',
-            },
-        },
-
-
-
         profilePhotoId: {
             type: String,
             default: null,
+            index: true,
             validate: {
                 validator: function (v: string) {
+                    // Allow null or valid UUID format
                     return !v || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
                 },
                 message: 'Invalid Profile Photo ID format',
@@ -366,8 +324,10 @@ const UserSchema = new Schema<IUser, IUserModel>(
         coverPhotoId: {
             type: String,
             default: null,
+            index: true,
             validate: {
                 validator: function (v: string) {
+                    // Allow null or valid UUID format
                     return !v || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
                 },
                 message: 'Invalid Cover Photo ID format',
@@ -376,6 +336,7 @@ const UserSchema = new Schema<IUser, IUserModel>(
         experienceIds: {
             type: [String],
             default: [],
+            index: true,
             validate: {
                 validator: function (v: string[]) {
                     return v.every(id => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
@@ -386,6 +347,7 @@ const UserSchema = new Schema<IUser, IUserModel>(
         careerBreakIds: {
             type: [String],
             default: [],
+            index: true,
             validate: {
                 validator: function (v: string[]) {
                     return v.every(id => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
@@ -396,6 +358,7 @@ const UserSchema = new Schema<IUser, IUserModel>(
         testScoreIds: {
             type: [String],
             default: [],
+            index: true,
             validate: {
                 validator: function (v: string[]) {
                     return v.every(id => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
@@ -407,11 +370,13 @@ const UserSchema = new Schema<IUser, IUserModel>(
             type: [String],
             default: [],
             validate: {
-                validator: (arr: string[]) =>
-                    arr.every(id => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)),
+                validator: (arr: string[]) => arr.every(id =>
+                    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+                ),
                 message: 'Invalid skill ID format in addSkillsIds',
             },
         },
+        // After coursesIds field
         volunteerIds: {
             type: [String],
             default: [],
@@ -422,9 +387,12 @@ const UserSchema = new Schema<IUser, IUserModel>(
                 message: 'Invalid volunteer ID format in array',
             },
         },
+
+        // Add this field after educationIds
         positionIds: {
             type: [String],
             default: [],
+            index: true,
             validate: {
                 validator: function (v: string[]) {
                     return v.every(id => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
@@ -432,16 +400,18 @@ const UserSchema = new Schema<IUser, IUserModel>(
                 message: 'Invalid Position ID format',
             },
         },
+
+        // Add this field for total experience calculation
         totalExperienceYears: {
             type: Number,
             default: 0,
+            index: true,
         },
         patentId: {
             type: String,
             default: null,
             validate: {
-                validator: (v: string) =>
-                    !v || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
+                validator: (v: string) => !v || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid Patent ID format',
             },
         },
@@ -449,14 +419,14 @@ const UserSchema = new Schema<IUser, IUserModel>(
             type: String,
             default: null,
             validate: {
-                validator: (v: string) =>
-                    !v || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
+                validator: (v: string) => !v || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid Honor ID format',
             },
         },
         companyId: {
             type: String,
             default: null,
+            index: true,
             validate: {
                 validator: function (v: string) {
                     return !v || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
@@ -468,8 +438,7 @@ const UserSchema = new Schema<IUser, IUserModel>(
             type: String,
             default: null,
             validate: {
-                validator: (v: string) =>
-                    !v || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
+                validator: (v: string) => !v || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid Publication ID format',
             },
         },
@@ -483,15 +452,20 @@ const UserSchema = new Schema<IUser, IUserModel>(
                 message: 'Invalid course ID format in array',
             },
         },
-        projects: [{ type: String, ref: 'Project' }],
+        projects: [{
+            type: String,
+            ref: 'Project',
+        }],
         headlineId: {
             type: String,
             default: null,
-            ref: 'Headline',
+            index: true,
+            ref: 'Headline'
         },
         analyticsId: {
             type: String,
             default: null,
+            index: true,
             validate: {
                 validator: function (v: string) {
                     return !v || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
@@ -500,11 +474,11 @@ const UserSchema = new Schema<IUser, IUserModel>(
             },
         },
         activityIds: {
-            postIds: [{ type: String }],
-            commentIds: [{ type: String }],
-            videoIds: [{ type: String }],
-            imageIds: [{ type: String }],
-            documentIds: [{ type: String }],
+            postIds: [{ type: String, index: true }],
+            commentIds: [{ type: String, index: true }],
+            videoIds: [{ type: String, index: true }],
+            imageIds: [{ type: String, index: true }],
+            documentIds: [{ type: String, index: true }],
         },
         activityStats: {
             totalPosts: { type: Number, default: 0 },
@@ -519,26 +493,22 @@ const UserSchema = new Schema<IUser, IUserModel>(
                 default: [],
                 validate: {
                     validator: (v: number[]) => v.every(h => h >= 0 && h < 24),
-                    message: 'Invalid hour value',
-                },
+                    message: 'Invalid hour value'
+                }
             },
-            peakEngagementTime: { type: String, default: 'not-set' },
-            lastUpdated: { type: Date, default: Date.now },
-        },
-        accountType: {
-            type: String,
-            enum: ['personal', 'company', 'creator'],
-            default: 'personal',
-        },
-        companyDetails: {
-            companyName: { type: String, default: null },
-            industry: { type: String, default: null },
-            size: { type: String, default: null },
-            verified: { type: Boolean, default: false },
+            peakEngagementTime: {
+                type: String,
+                default: 'not-set'
+            },
+            lastUpdated: {
+                type: Date,
+                default: Date.now
+            }
         },
         skillIds: {
             type: [String],
             default: [],
+            index: true,
             validate: {
                 validator: function (v: string[]) {
                     return v.every(id => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id));
@@ -549,6 +519,7 @@ const UserSchema = new Schema<IUser, IUserModel>(
         contactId: {
             type: String,
             default: null,
+            index: true,
             ref: 'Contact',
             validate: {
                 validator: function (v: string) {
@@ -560,50 +531,84 @@ const UserSchema = new Schema<IUser, IUserModel>(
         aboutId: {
             type: String,
             default: null,
-            ref: 'About',
+            index: true,
+            ref: 'About'
         },
         onboarding: {
             userType: {
                 type: String,
                 enum: ['working', 'student', 'fresher'],
+                required: true,
+                index: true,
             },
-            completedAt: { type: Date, default: Date.now },
+            completedAt: {
+                type: Date,
+                default: Date.now,
+            },
             workingProfile: {
-                jobTitle: { type: String },
-                companyName: { type: String },
+                jobTitle: {
+                    type: String,
+                    index: true,
+                },
+                companyName: {
+                    type: String,
+                },
                 startDate: Date,
                 endDate: Date,
             },
             studentProfile: {
-                collegeName: { type: String },
-                degree: { type: String },
-                fieldOfStudy: { type: String },
-                graduationYear: { type: String },
+                collegeName: {
+                    type: String,
+                },
+                degree: {
+                    type: String,
+                    index: true,
+                },
+                fieldOfStudy: {
+                    type: String,
+                    index: true,
+                },
+                graduationYear: {
+                    type: String,
+                    index: true,
+                },
             },
             fresherProfile: {
-                highestEducation: { type: String },
-                preferredRole: { type: String },
+                highestEducation: {
+                    type: String,
+                    index: true,
+                },
+                preferredRole: {
+                    type: String,
+                },
                 cgpa: String,
             },
         },
         role: {
             type: String,
-            enum: ['user', 'admin', 'moderator', 'mentor'],
+            enum: ['user', 'admin', 'moderator'],
             default: 'user',
+            index: true,
         },
         status: {
             type: String,
             enum: ['active', 'inactive', 'suspended', 'deleted'],
             default: 'active',
+            index: true,
         },
-        accountStatus: {
+        emailVerified: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+        emailVerificationToken: {
             type: String,
-            enum: ['active', 'locked', 'disabled'],
-            default: 'active',
+            select: false,
         },
-        emailVerified: { type: Boolean, default: false },
-        emailVerificationToken: { type: String, select: false },
-        emailVerificationExpires: { type: Date, select: false },
+        emailVerificationExpires: {
+            type: Date,
+            select: false,
+        },
         phoneNumber: {
             type: String,
             validate: {
@@ -613,16 +618,38 @@ const UserSchema = new Schema<IUser, IUserModel>(
                 message: 'Invalid phone number format',
             },
         },
-        phoneVerified: { type: Boolean, default: false },
-        twoFactorEnabled: { type: Boolean, default: false },
-        twoFactorSecret: { type: String, select: false },
-        backupCodes: { type: [String], select: false },
-        passwordResetToken: { type: String, select: false },
-        passwordResetExpires: { type: Date, select: false },
+        phoneVerified: {
+            type: Boolean,
+            default: false,
+        },
+        twoFactorEnabled: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+        twoFactorSecret: {
+            type: String,
+            select: false,
+        },
+        backupCodes: {
+            type: [String],
+            select: false,
+        },
+        passwordResetToken: {
+            type: String,
+            select: false,
+        },
+        passwordResetExpires: {
+            type: Date,
+            select: false,
+        },
         passwordChangedAt: Date,
         lastLoginAt: Date,
         lastLoginIp: String,
-        loginAttempts: { type: Number, default: 0 },
+        loginAttempts: {
+            type: Number,
+            default: 0,
+        },
         lockUntil: Date,
         accountLockedReason: {
             type: String,
@@ -630,23 +657,60 @@ const UserSchema = new Schema<IUser, IUserModel>(
         },
         oauthProviders: [
             {
-                provider: { type: String, enum: ['google', 'facebook', 'github', 'apple'] },
+                provider: {
+                    type: String,
+                    enum: ['google', 'facebook', 'github', 'apple'],
+                },
                 providerId: String,
                 accessToken: { type: String, select: false },
                 refreshToken: { type: String, select: false },
                 connectedAt: { type: Date, default: Date.now },
             },
         ],
-        emailVerifiedAt: { type: Date },
-        phoneVerifiedAt: { type: Date },
-        lastPasswordReVerificationAt: { type: Date },
-        lastIdentityReCheckAt: { type: Date },
-        aadhaarVerified: { type: Boolean, default: false },
-        aadhaarVerifiedAt: { type: Date },
-        aadhaarLast4: { type: String, select: false, maxlength: 4 },
-        companyEmailVerified: { type: Boolean, default: false },
-        companyEmailVerifiedAt: { type: Date },
-        companyEmail: { type: String, lowercase: true, trim: true },
+        emailVerifiedAt: {
+            type: Date,
+            index: true,
+        },
+        phoneVerifiedAt: {
+            type: Date,
+            index: true,
+        },
+        lastPasswordReVerificationAt: {
+            type: Date,
+            index: true,
+        },
+        lastIdentityReCheckAt: {
+            type: Date,
+            index: true,
+        },
+        aadhaarVerified: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+        aadhaarVerifiedAt: {
+            type: Date,
+            index: true,
+        },
+        aadhaarLast4: {
+            type: String,
+            select: false, // sensitive
+            maxlength: 4,
+        },
+        companyEmailVerified: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+        companyEmailVerifiedAt: {
+            type: Date,
+            index: true,
+        },
+        companyEmail: {
+            type: String,
+            lowercase: true,
+            trim: true,
+        },
         jobStatus: {
             type: String,
             enum: [
@@ -664,21 +728,31 @@ const UserSchema = new Schema<IUser, IUserModel>(
                 'not-set',
             ],
             default: 'not-set',
+            index: true,
         },
-        jobProfileLastUpdated: { type: Date },
+        jobProfileLastUpdated: {
+            type: Date,
+            index: true,
+        },
         preferences: {
-            language: { type: String, default: 'en', enum: ['en', 'es', 'fr', 'de', 'hi', 'ja', 'zh'] },
-            timezone: { type: String, default: 'UTC' },
+            language: {
+                type: String,
+                default: 'en',
+                enum: ['en', 'es', 'fr', 'de', 'hi', 'ja', 'zh'],
+            },
+            timezone: {
+                type: String,
+                default: 'UTC',
+            },
             notifications: {
                 email: { type: Boolean, default: true },
                 push: { type: Boolean, default: true },
                 sms: { type: Boolean, default: false },
             },
-            theme: { type: String, enum: ['light', 'dark', 'auto'], default: 'auto' },
-            profileViewVisibility: {
+            theme: {
                 type: String,
-                enum: ['named', 'public', 'connections', 'private'],
-                default: 'named',
+                enum: ['light', 'dark', 'auto'],
+                default: 'auto',
             },
         },
         metadata: {
@@ -689,9 +763,10 @@ const UserSchema = new Schema<IUser, IUserModel>(
             failedLoginAttempts: { type: Number, default: 0 },
             deactivatedAt: Date,
             deactivationReason: String,
+
         },
         flags: {
-            isDeleted: { type: Boolean, default: false },
+            isDeleted: { type: Boolean, default: false, index: true },
             deletedAt: Date,
             deletedBy: String,
         },
@@ -700,19 +775,34 @@ const UserSchema = new Schema<IUser, IUserModel>(
             seniority: String,
             companySize: String,
             location: String,
-            ageGroup: String,
+            ageGroup: String
         },
         audienceInsights: {
             primaryAudience: String,
             engagementPattern: String,
-            followerGrowthRate: { type: Number, default: 0 },
+            followerGrowthRate: { type: Number, default: 0 }
         },
+        // User.model.ts — badges field add karo
         badges: [
             {
-                badge: { type: Schema.Types.ObjectId, ref: 'Badge', required: true },
-                earnedAt: { type: Date, default: Date.now },
-                progress: { type: Number, default: 0 },
-                isCompleted: { type: Boolean, default: false },
+                badge: {
+                    type: Schema.Types.ObjectId,
+                    ref: 'Badge',
+                    required: true,
+                },
+                earnedAt: {
+                    type: Date,
+                    default: Date.now,
+                },
+                progress: {
+                    type: Number,
+                    default: 0,
+                },
+                isCompleted: {
+                    type: Boolean,
+                    default: false,
+                    index: true,
+                },
             },
         ],
     },
@@ -733,32 +823,38 @@ const UserSchema = new Schema<IUser, IUserModel>(
                 return ret;
             },
         },
-        toObject: { virtuals: true },
+        toObject: {
+            virtuals: true,
+        },
     }
 );
 
-// ==================== INDEXES ====================
-// NOTE: Sirf compound aur unique indexes yahan hain
-// Single-field indexes upar field definition mein  se handle hote hain
+// ==================== INDEXES (MINIMAL) ====================
+// Detailed indexes moved to database/indexes/user.indexes.ts
 
-UserSchema.index({ dateOfBirth: 1, status: 1 });
-UserSchema.index({ 'onboarding.workingProfile.startDate': 1, status: 1 });
 UserSchema.index({ email: 1, status: 1 });
 UserSchema.index({ userId: 1, emailVerified: 1 });
 UserSchema.index({ createdAt: -1 });
+
+// Location-based queries
 UserSchema.index({ location: 1, status: 1 });
 UserSchema.index({ location: 1, 'onboarding.userType': 1 });
-UserSchema.index({ 'onboarding.userType': 1, createdAt: -1 });
-UserSchema.index({ location: 1, 'onboarding.userType': 1, status: 1, createdAt: -1 });
 
-// 🔧 NAYA — full-text search index (name, username, email, company, location)
-UserSchema.index(
-    { firstName: 'text', lastName: 'text', username: 'text', email: 'text', company: 'text', location: 'text' },
-    {
-        name: 'user_search_text_index',
-        weights: { firstName: 10, lastName: 8, username: 6, company: 4, location: 3, email: 2 },
-    }
-);
+// Onboarding-based queries
+UserSchema.index({ 'onboarding.userType': 1, createdAt: -1 });
+UserSchema.index({ 'onboarding.workingProfile.companyName': 1 });
+UserSchema.index({ 'onboarding.studentProfile.collegeName': 1 });
+UserSchema.index({ 'onboarding.fresherProfile.preferredRole': 1 });
+
+// Compound indexes for analytics (1M+ users)
+UserSchema.index({
+    location: 1,
+    'onboarding.userType': 1,
+    status: 1,
+    createdAt: -1
+});
+
+// ==================== VIRTUALS ====================
 
 UserSchema.virtual('fullName').get(function (this: IUser) {
     return this.firstName && this.lastName ? `${this.firstName} ${this.lastName}` : this.email;
@@ -768,13 +864,21 @@ UserSchema.virtual('isLocked').get(function (this: IUser) {
     return !!(this.lockUntil && this.lockUntil > new Date());
 });
 
+// ==================== PRE-SAVE HOOK ====================
+
 UserSchema.pre('save', async function (next) {
     if (!this.isModified('passwordHash')) return next();
+
     try {
-        if (this.passwordHash && this.passwordHash.startsWith('$2')) return next();
+        if (this.passwordHash && this.passwordHash.startsWith('$2')) {
+            return next();
+        }
+
         const salt = await bcrypt.genSalt(12);
         this.passwordSalt = salt;
         this.passwordHash = await bcrypt.hash(this.passwordHash, salt);
+
+        logger.debug('Password hashed successfully', { userId: this.userId });
         next();
     } catch (error: any) {
         logger.error('Password hashing failed', { error: (error as Error).message });
@@ -782,9 +886,15 @@ UserSchema.pre('save', async function (next) {
     }
 });
 
+// ==================== STATIC METHODS ====================
+
 UserSchema.statics.generateAccessToken = function (payload: TokenPayload): string {
     try {
-        return jwt.sign(payload, JWT_CONFIG.accessToken.secret, { expiresIn: JWT_CONFIG.accessToken.expiresIn });
+        const token = jwt.sign(payload, JWT_CONFIG.accessToken.secret, {
+            expiresIn: JWT_CONFIG.accessToken.expiresIn,
+        });
+        logger.debug('Access token generated', { userId: payload.userId });
+        return token;
     } catch (error: any) {
         logger.error('Access token generation failed', { error: (error as Error).message });
         throw new Error('Token generation failed');
@@ -793,7 +903,11 @@ UserSchema.statics.generateAccessToken = function (payload: TokenPayload): strin
 
 UserSchema.statics.generateRefreshToken = function (payload: TokenPayload): string {
     try {
-        return jwt.sign(payload, JWT_CONFIG.refreshToken.secret, { expiresIn: JWT_CONFIG.refreshToken.expiresIn });
+        const token = jwt.sign(payload, JWT_CONFIG.refreshToken.secret, {
+            expiresIn: JWT_CONFIG.refreshToken.expiresIn,
+        });
+        logger.debug('Refresh token generated', { userId: payload.userId });
+        return token;
     } catch (error: any) {
         logger.error('Refresh token generation failed', { error: (error as Error).message });
         throw new Error('Token generation failed');
@@ -803,7 +917,9 @@ UserSchema.statics.generateRefreshToken = function (payload: TokenPayload): stri
 UserSchema.statics.verifyToken = function (token: string, tokenType: 'access' | 'refresh' = 'access'): TokenPayload {
     try {
         const config = tokenType === 'refresh' ? JWT_CONFIG.refreshToken : JWT_CONFIG.accessToken;
-        return jwt.verify(token, config.secret) as TokenPayload;
+        const decoded = jwt.verify(token, config.secret) as TokenPayload;
+        logger.debug(`Token verified (${tokenType})`, { userId: decoded.userId });
+        return decoded;
     } catch (error: any) {
         logger.warn(`Token verification failed (${tokenType})`, { error: (error as Error).message });
         throw new Error(`Invalid or expired ${tokenType} token`);
@@ -814,10 +930,13 @@ UserSchema.statics.lockAccount = async function (userId: string, reason: string 
     try {
         const user = await this.findOne({ userId });
         if (!user) throw new Error('User not found');
+
         user.lockUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
         user.accountLockedReason = reason as any;
         await user.save();
+
         userEmitter.emit('user:locked', { userId, reason, timestamp: new Date() });
+        logger.info('User account locked', { userId, reason });
         return user;
     } catch (error: any) {
         logger.error('Account lock failed', { error: (error as Error).message, userId });
@@ -829,11 +948,17 @@ UserSchema.statics.unlockAccount = async function (userId: string): Promise<IUse
     try {
         const user = await this.findOneAndUpdate(
             { userId },
-            { $set: { loginAttempts: 0 }, $unset: { lockUntil: 1, accountLockedReason: 1 } },
+            {
+                $set: { loginAttempts: 0 },
+                $unset: { lockUntil: 1, accountLockedReason: 1 },
+            },
             { new: true }
         );
+
         if (!user) throw new Error('User not found');
+
         userEmitter.emit('user:unlocked', { userId, timestamp: new Date() });
+        logger.info('User account unlocked', { userId });
         return user;
     } catch (error: any) {
         logger.error('Account unlock failed', { error: (error as Error).message, userId });
@@ -845,8 +970,14 @@ UserSchema.statics.syncJobStatus = async function (userId: string, jobStatus: st
     try {
         await this.findOneAndUpdate(
             { userId },
-            { $set: { jobStatus, jobProfileLastUpdated: new Date() } }
+            {
+                $set: {
+                    jobStatus: jobStatus,
+                    jobProfileLastUpdated: new Date(),
+                },
+            }
         );
+        logger.info('User job status synced', { userId, jobStatus });
     } catch (error: any) {
         logger.error('Job status sync failed', { error: (error as Error).message, userId });
     }
@@ -856,6 +987,9 @@ UserSchema.statics.findByEmail = async function (email: string): Promise<IUser |
     return this.findOne({ email: email.toLowerCase(), 'flags.isDeleted': false });
 };
 
+/**
+ * Find user by username
+ */
 UserSchema.statics.findByUsername = function (username: string) {
     return this.findOne({ username: username.toLowerCase() });
 };
@@ -868,73 +1002,7 @@ UserSchema.statics.getActiveUserCount = async function (): Promise<number> {
     return this.countDocuments({ status: 'active', 'flags.isDeleted': false });
 };
 
-// 🔧 NAYA — Feature 40: paginated user search
-// Query string ko firstName/lastName/username/company/location ke against
-// case-insensitive partial (regex) match karta hai. Deleted/inactive users
-// exclude hote hain.
-UserSchema.statics.findUsersPaginated = async function (options: {
-    page: number;
-    limit: number;
-    query: string;
-    region?: string;
-    useEstimatedCount?: boolean;
-    projection?: string;
-}): Promise<IPaginatedUsersResult> {
-    const { page = 1, limit = 20, query, useEstimatedCount = true, projection } = options;
-
-    if (!query || !query.trim()) {
-        return {
-            data: [],
-            totalCount: 0,
-            currentPage: page,
-            totalPages: 0,
-            hasNextPage: false,
-            hasPreviousPage: false,
-            estimatedTotal: 0,
-        };
-    }
-
-    const skip = (page - 1) * limit;
-    const trimmedQuery = query.trim();
-
-    // Case-insensitive partial match. MongoDB ka $text sirf whole-word match
-    // karta hai, isliye "kas" jaisi partial typing ke liye regex use kar rahe hain.
-    // Special regex characters escape kiye hain taaki user input crash na kare.
-    const escapedQuery = trimmedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const searchRegex = new RegExp(escapedQuery, 'i');
-
-    const filter: any = {
-        'flags.isDeleted': false,
-        status: 'active',
-        $or: [
-            { firstName: searchRegex },
-            { lastName: searchRegex },
-            { username: searchRegex },
-            { company: searchRegex },
-            { location: searchRegex },
-        ],
-    };
-
-    const selectFields =
-        projection || 'userId username firstName lastName location company profilePhotoId';
-
-    const [data, totalCount] = await Promise.all([
-        this.find(filter).select(selectFields).skip(skip).limit(limit).lean(),
-        this.countDocuments(filter),
-    ]);
-
-    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
-
-    return {
-        data,
-        totalCount,
-        currentPage: page,
-        totalPages,
-        hasNextPage: page < totalPages,
-        hasPreviousPage: page > 1,
-        estimatedTotal: totalCount,
-    };
-};
+// ==================== INSTANCE METHODS ====================
 
 UserSchema.methods.incrementLoginAttempts = async function (): Promise<any> {
     if (this.lockUntil && this.lockUntil < new Date()) {
@@ -943,15 +1011,18 @@ UserSchema.methods.incrementLoginAttempts = async function (): Promise<any> {
             $unset: { lockUntil: 1, accountLockedReason: 1 },
         });
     }
+
     const updates: any = { $inc: { loginAttempts: 1 } };
     const MAX_LOGIN_ATTEMPTS = 5;
     const LOCK_TIME = 15 * 60 * 1000;
+
     if (this.loginAttempts + 1 >= MAX_LOGIN_ATTEMPTS && !this.isLocked) {
         updates.$set = {
             lockUntil: new Date(Date.now() + LOCK_TIME),
             accountLockedReason: 'too_many_attempts',
         };
     }
+
     return this.updateOne(updates);
 };
 
@@ -981,9 +1052,17 @@ UserSchema.methods.verifyEmail = async function (this: IUser): Promise<IUser> {
     this.emailVerificationToken = undefined;
     this.emailVerificationExpires = undefined;
     await this.save();
-    userEmitter.emit('user:email_verified', { userId: this.userId, email: this.email, timestamp: new Date() });
+
+    userEmitter.emit('user:email_verified', {
+        userId: this.userId,
+        email: this.email,
+        timestamp: new Date(),
+    });
+
     return this;
 };
+
+
 
 UserSchema.methods.updateLastLogin = async function (this: IUser, ipAddress: string): Promise<IUser> {
     this.lastLoginAt = new Date();
@@ -991,12 +1070,15 @@ UserSchema.methods.updateLastLogin = async function (this: IUser, ipAddress: str
     this.metadata.lastActiveAt = new Date();
     this.metadata.totalLogins = (this.metadata.totalLogins || 0) + 1;
     await this.save();
+
+    // ✅ ADD: Cache में emailVerified preserve करो, overwrite मत करो
     const cacheKey = `${Constants.CACHE_PREFIXES.USER}${this.userId}`;
     await CacheUtil.set(
         cacheKey,
         JSON.stringify({ userId: this.userId, emailVerified: this.emailVerified }),
         Constants.CACHE_TTLS.USER
     );
+
     return this;
 };
 
@@ -1006,26 +1088,40 @@ UserSchema.methods.softDelete = async function (this: IUser, deletedBy: string =
     this.flags.deletedAt = new Date();
     this.flags.deletedBy = deletedBy;
     await this.save();
-    userEmitter.emit('user:deleted', { userId: this.userId, deletedBy, timestamp: new Date() });
+
+    userEmitter.emit('user:deleted', {
+        userId: this.userId,
+        deletedBy,
+        timestamp: new Date(),
+    });
+
+    logger.info('User soft deleted', { userId: this.userId, deletedBy });
     return this;
 };
 
 UserSchema.methods.trackActivityTime = async function () {
     const hour = new Date().getHours();
+
     if (!this.activityPattern.activeHours.includes(hour)) {
         this.activityPattern.activeHours.push(hour);
     }
+
+    // Calculate peak time (most frequent hour)
     const hourCounts: { [key: number]: number } = {};
     this.activityPattern.activeHours.forEach((h: number) => {
         hourCounts[h] = (hourCounts[h] || 0) + 1;
     });
-    const peakHour = Object.keys(hourCounts).reduce((a, b) =>
-        hourCounts[parseInt(a)] > hourCounts[parseInt(b)] ? a : b
-    );
+
+    const peakHour = Object.keys(hourCounts)
+        .reduce((a, b) => hourCounts[parseInt(a)] > hourCounts[parseInt(b)] ? a : b);
+
     this.activityPattern.peakEngagementTime = `${peakHour}:00-${parseInt(peakHour) + 1}:00`;
     this.activityPattern.lastUpdated = new Date();
+
     await this.save();
 };
+
+// ==================== EXPORT ====================
 
 const User = mongoose.model<IUser, IUserModel>('User', UserSchema);
 export default User;

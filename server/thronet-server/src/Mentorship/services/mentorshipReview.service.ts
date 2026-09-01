@@ -4,7 +4,6 @@ import { logger } from "@/shared/logger.util";
 import { Mentor, MentorshipReview, SessionMentor } from "../models";
 import reviewRepository from "../repositories/review.repository";
 import { generateSecureId } from "@/shared/security";
-import { TrustScoreEvents } from '../events/trustScore.events';
 
 
 
@@ -64,12 +63,6 @@ class ReviewService {
 
       // Update mentor stats
       await this.updateMentorRating(input.mentorId);
-
-      TrustScoreEvents.emit('ReviewCreated', {
-        mentorId: input.mentorId,
-        reviewId: review.reviewId,
-        timestamp: new Date()
-      });
 
       logger.info(`✅ Review submitted: ${review._id}`);
 
@@ -193,12 +186,6 @@ class ReviewService {
       // Update mentor rating
       await this.updateMentorRating(review.mentorId);
 
-      TrustScoreEvents.emit('ReviewUpdated', {
-        mentorId: review.mentorId,
-        reviewId: review.reviewId,
-        timestamp: new Date()
-      });
-
       logger.info(`✅ Review updated: ${reviewId}`);
 
       return review;
@@ -230,12 +217,6 @@ class ReviewService {
 
       // Update mentor rating
       await this.updateMentorRating(review.mentorId);
-
-      TrustScoreEvents.emit('ReviewDeleted', {
-        mentorId: review.mentorId,
-        reviewId: review.reviewId,
-        timestamp: new Date()
-      });
 
       logger.info(`✅ Review deleted: ${reviewId}`);
     } catch (error: any) {

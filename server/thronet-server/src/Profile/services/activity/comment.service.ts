@@ -3,16 +3,13 @@
  * Handles comment operations on posts
  * 
  * @module services/comment.service
- * @version 1.2.0 (feed cache invalidation + @mentions)
+ * @version 1.0.0
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Comment, Post, User } from '@/shared/models/index.models';
+import { Comment, Post, User, ProfilePhoto } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
-import redisService from '@/services/redis.service';
 
-////////////////////changed modified
-import NotificationService from '@/notifications/services/notification.service';
 // ==================== INTERFACES ====================
 
 interface CreateCommentResult {
@@ -22,6 +19,7 @@ interface CreateCommentResult {
     content: string;
     likesCount: number;
     createdAt: Date;
+    imageUrl?: string;
 }
 
 // ==================== COMMENT SERVICE ====================
@@ -31,16 +29,21 @@ class CommentService {
     /**
      * ✅ Create new comment
      */
-   static async createComment(
+    static async createComment(
         userId: string,
         postId: string,
         content: string,
-        parentCommentId?: string
+        parentCommentId?: string,
+        imageUrl?: string
     ): Promise<CreateCommentResult> {
         const correlationId = uuidv4();
 
         try {
-            LoggerUtil.info('Creating comment', { userId, postId, correlationId });
+            LoggerUtil.info('Creating comment', {
+                userId,
+                postId,
+                correlationId,
+            });
 
             // Step 1: Validate post exists
             const post = await Post.findOne({ 'posts.entryId': postId, });
@@ -63,6 +66,7 @@ class CommentService {
 
             let threadDepth = 0;
 
+            // ✅ IF REPLY TO ANOTHER COMMENT
             if (parentCommentId) {
                 const parentComment = await Comment.findOne({
                     commentId: parentCommentId,
@@ -79,25 +83,61 @@ class CommentService {
                     throw new Error('Maximum thread depth reached');
                 }
 
+                // Increment reply count
                 parentComment.replyCount++;
                 await parentComment.save();
             }
 
+            // Step 3: Create comment
             const commentId = uuidv4();
 
             const comment = new Comment({
                 commentId,
                 postId,
                 userId,
-                content,
+                content: content ? content : undefined,
                 parentCommentId,
-                threadDepth
+                threadDepth,
+                imageUrl
             });
 
             await comment.save();
 
+            // Step 4: Increment post comment count
             await Post.incrementComments(comment.postId);
 
+            if (post && post.userId !== userId) {
+                const NotificationService = (await import('@/notifications/services/notification.service')).default;
+                await NotificationService.sendNotification({
+                    recipientId: post.userId,
+                    senderId: userId,
+                    type: 'post_commented',
+                    entityId: postId,
+                    entityType: 'post',
+                    message: `commented on your post.`,
+                });
+            }
+
+            if (parentCommentId) {
+                const parentComment = await Comment.findOne({
+                    commentId: parentCommentId,
+                    isDeleted: false
+                });
+
+                if (parentComment && parentComment.userId !== userId && parentComment.userId !== post?.userId) {
+                    const NotificationService = (await import('@/notifications/services/notification.service')).default;
+                    await NotificationService.sendNotification({
+                        recipientId: parentComment.userId,
+                        senderId: userId,
+                        type: 'post_commented',
+                        entityId: postId,
+                        entityType: 'post',
+                        message: `replied to your comment.`,
+                    });
+                }
+            }
+
+            // Step 5: Update user's activity stats
             await User.findOneAndUpdate(
                 { userId },
                 {
@@ -107,54 +147,11 @@ class CommentService {
                 { new: true }
             );
 
-            // ✅ Post-owner ka feed cache invalidate karo — nayi comment count
-            // unki apni feed mein turant dikhe. Non-blocking rakha hai taaki
-            // cache clear fail ho to bhi comment-creation flow fail na ho.
-            const postOwnerId = post.userId;
-            if (postOwnerId) {
-                redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
-            }
-
-            // ✅ Notify post owner (non-blocking, skip if commenting on own post)
-            if (postOwnerId && postOwnerId !== userId) {
-                setImmediate(async () => {
-                    try {
-                        await NotificationService.notifyPostCommented(
-                            postOwnerId,
-                            userId,
-                            postId,
-                            entry?.title,
-                            content
-                        );
-                        console.log('✅ [NOTIF] Post owner notified of comment:', postId);
-                    } catch (err: any) {
-                        console.warn('⚠️ [NOTIF] Comment notification failed (non-blocking):', err.message);
-                    }
-                });
-            }
-
-            // ✅ @mentions — comment content se mentioned userIds nikalo aur notify karo
-            // Format: @[Display Name](userId) — regex se sirf userId (group 2) extract hota hai
-            const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
-            const mentionedUserIds = [...new Set(
-                Array.from((content || '').matchAll(mentionRegex), m => m[2])
-            )].filter(id => id !== userId);
-
-            if (mentionedUserIds.length > 0) {
-                setImmediate(async () => {
-                    try {
-                        for (const mentionedUserId of mentionedUserIds) {
-                            await NotificationService.notifyMentioned(mentionedUserId, userId, postId, entry?.title, 'comment');
-                        }
-                        console.log('✅ [NOTIF] Mentioned users notified for comment:', commentId);
-                    } catch (err: any) {
-                        console.warn('⚠️ [NOTIF] Mention notification failed (non-blocking):', err.message);
-                    }
-                });
-            }
-
             LoggerUtil.info('Comment created successfully', {
-                commentId, postId, userId, correlationId,
+                commentId,
+                postId,
+                userId,
+                correlationId,
             });
 
             return {
@@ -164,19 +161,19 @@ class CommentService {
                 content: comment.content,
                 likesCount: comment.likesCount,
                 createdAt: comment.createdAt,
+                imageUrl: comment.imageUrl,
             };
 
-       } catch (error: any) {
-    console.error('🔴 RAW COMMENT ERROR:', error); // ✅ TEMPORARY DEBUG LINE
-    LoggerUtil.error('Comment creation failed', {
-        error: error.message,
-        stack: error.stack,
-        userId,
-        postId,
-        correlationId,
-    });
-    throw error;
-}
+        } catch (error: any) {
+            LoggerUtil.error('Comment creation failed', {
+                error: error.message,
+                stack: error.stack,
+                userId,
+                postId,
+                correlationId,
+            });
+            throw error;
+        }
     }
 
     /**
@@ -191,17 +188,49 @@ class CommentService {
                 correlationId,
             });
 
-            const comments = await Comment.findByPostId(postId);
+            let comments = await Comment.findByPostId(postId);
+            comments = JSON.parse(JSON.stringify(comments)); // convert to plain objects if not already lean
+
+            // Extract user IDs to fetch dynamic user data
+            const userIds = [...new Set(comments.map((c: any) => c.userId))];
+
+            // Fetch Users and ProfilePhotos
+            const users = await User.find({ userId: { $in: userIds } }).lean();
+            const profilePhotos = await ProfilePhoto.find({ userId: { $in: userIds }, isActive: true }).lean();
+
+            const userMap = users.reduce((acc: any, user: any) => {
+                acc[user.userId] = user;
+                return acc;
+            }, {});
+
+            const photoMap = profilePhotos.reduce((acc: any, photo: any) => {
+                acc[photo.userId] = photo.cloudinarySecureUrl;
+                return acc;
+            }, {});
+
+            // Map user details to comments
+            const mappedComments = comments.map((comment: any) => {
+                const userObj = userMap[comment.userId];
+                const authorName = userObj 
+                    ? (userObj.firstName ? `${userObj.firstName} ${userObj.lastName || ''}`.trim() : userObj.username)
+                    : 'Unknown User';
+                
+                return {
+                    ...comment,
+                    authorName,
+                    avatar: photoMap[comment.userId] || null,
+                };
+            });
 
             LoggerUtil.info('Comments fetched successfully', {
                 postId,
-                count: comments.length,
+                count: mappedComments.length,
                 correlationId,
             });
 
             return {
-                comments,
-                total: comments.length,
+                comments: mappedComments,
+                total: mappedComments.length,
             };
 
         } catch (error: any) {
@@ -241,43 +270,6 @@ class CommentService {
 
         } catch (error: any) {
             LoggerUtil.error('Get my comments failed', {
-                error: error.message,
-                userId,
-                correlationId,
-            });
-            throw error;
-        }
-    }
-
-    /**
-     * ✅ Get all comments by a SPECIFIC user (public profile view)
-     * Same as getMyComments but for any given userId, not just the
-     * authenticated user — used when viewing someone else's profile.
-     */
-    static async getCommentsByUserId(userId: string): Promise<any> {
-        const correlationId = uuidv4();
-
-        try {
-            LoggerUtil.info('Fetching comments for specific user', {
-                userId,
-                correlationId,
-            });
-
-            const comments = await Comment.findByUserId(userId);
-
-            LoggerUtil.info('User comments fetched successfully', {
-                userId,
-                count: comments.length,
-                correlationId,
-            });
-
-            return {
-                comments,
-                total: comments.length,
-            };
-
-        } catch (error: any) {
-            LoggerUtil.error('Get comments by userId failed', {
                 error: error.message,
                 userId,
                 correlationId,
@@ -405,12 +397,6 @@ class CommentService {
                 // Decrement post comment count
                 await Post.decrementComments(comment.postId);
 
-                // ✅ Feed cache invalidate — comment count updated feed mein turant reflect ho
-                const ownerDoc = await Post.findOne({ 'posts.entryId': comment.postId });
-                if (ownerDoc?.userId) {
-                    redisService.deleteByPattern(`feed:v1:${ownerDoc.userId}:page:*`).catch(() => {});
-                }
-
                 LoggerUtil.info('Comment permanently deleted', {
                     commentId,
                     userId,
@@ -429,12 +415,6 @@ class CommentService {
 
                 // Decrement post comment count
                 await Post.decrementComments(comment.postId);
-
-                // ✅ Feed cache invalidate
-                const ownerDoc = await Post.findOne({ 'posts.entryId': comment.postId });
-                if (ownerDoc?.userId) {
-                    redisService.deleteByPattern(`feed:v1:${ownerDoc.userId}:page:*`).catch(() => {});
-                }
 
                 LoggerUtil.info('Comment soft deleted', {
                     commentId,
@@ -489,12 +469,6 @@ class CommentService {
             // Increment post comment count
             await Post.incrementComments(comment.postId);
 
-            // ✅ Feed cache invalidate
-            const ownerDoc = await Post.findOne({ 'posts.entryId': comment.postId });
-            if (ownerDoc?.userId) {
-                redisService.deleteByPattern(`feed:v1:${ownerDoc.userId}:page:*`).catch(() => {});
-            }
-
             LoggerUtil.info('Comment restored successfully', {
                 commentId,
                 userId,
@@ -547,6 +521,18 @@ class CommentService {
             comment.likedBy.push(userId);
             comment.likesCount++;
             await comment.save();
+
+            if (comment.userId !== userId) {
+                const NotificationService = (await import('@/notifications/services/notification.service')).default;
+                await NotificationService.sendNotification({
+                    recipientId: comment.userId,
+                    senderId: userId,
+                    type: 'post_liked',
+                    entityId: comment.postId,
+                    entityType: 'post',
+                    message: `liked your comment.`,
+                });
+            }
 
             LoggerUtil.info('Comment liked successfully', {
                 commentId,

@@ -1,4 +1,4 @@
-﻿import mongoose, { Model, Document, Schema } from 'mongoose';
+import mongoose, { Model, Document, Schema } from 'mongoose';
 
 // =====================================================
 // INTERFACES
@@ -73,15 +73,18 @@ export const FollowerSchema = new Schema(
       type: String,      // userId string hai tumhare system mein
       ref: 'User',       // ✅ User model
       required: true,
+      index: true,
     },
     following: {
       type: String,       // companyId UUID string hai
       ref: 'Company',
       required: true,
+      index: true,
     },
     followedAt: {
       type: Date,
       default: Date.now,
+      index: true,
     },
     isActive: {
       type: Boolean,

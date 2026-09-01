@@ -71,7 +71,7 @@ class RepostController {
     }
 
     /**
-     * DELETE /api/v1/profile/activity/posts/reposts/:repostId
+     * DELETE /api/v1/profile/activity/reposts/:repostId
      */
     static async deleteRepost(
         req: Request<{ repostId: string }> & { user?: UserPayload },
@@ -119,9 +119,7 @@ class RepostController {
     }
 
     /**
-     * GET /api/v1/profile/activity/posts/reposts/my-reposts
-     * ✅ FIX: viewerId (= khud req.user.userId) pass kiya, taaki quote-repost
-     * ka like-status sahi calculate ho
+     * GET /api/v1/profile/activity/reposts/my-reposts
      */
     static async getMyReposts(
         req: Request & { user?: UserPayload },
@@ -133,7 +131,7 @@ class RepostController {
                 return;
             }
 
-            const result = await RepostService.getUserReposts(req.user.userId, req.user.userId);
+            const result = await RepostService.getUserReposts(req.user.userId);
             ResponseUtil.success(res, result, 'Your reposts fetched successfully');
         } catch (error: any) {
             ResponseUtil.internalError(res, error.message, error);
@@ -159,48 +157,6 @@ class RepostController {
             );
 
             ResponseUtil.success(res, result, 'Repost status fetched');
-        } catch (error: any) {
-            ResponseUtil.internalError(res, error.message, error);
-        }
-    }
-
-    /**
-     * ✅ NEW: POST /api/v1/profile/activity/posts/reposts/:repostId/react
-     */
-    static async likeRepost(
-        req: Request<{ repostId: string }> & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-            const result = await RepostService.likeRepost(req.params.repostId, req.user.userId);
-            ResponseUtil.success(res, result, 'Repost liked');
-        } catch (error: any) {
-            if (error.message === 'Repost not found') {
-                ResponseUtil.notFound(res, 'Repost not found');
-                return;
-            }
-            ResponseUtil.badRequest(res, error.message);
-        }
-    }
-
-    /**
-     * ✅ NEW: DELETE /api/v1/profile/activity/posts/reposts/:repostId/react
-     */
-    static async unlikeRepost(
-        req: Request<{ repostId: string }> & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-            const result = await RepostService.unlikeRepost(req.params.repostId, req.user.userId);
-            ResponseUtil.success(res, result, 'Repost unliked');
         } catch (error: any) {
             ResponseUtil.internalError(res, error.message, error);
         }

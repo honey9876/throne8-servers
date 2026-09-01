@@ -98,12 +98,12 @@ class GroupRepository extends BaseRepository<IGroup> {
   /**
    * Increment member count
    */
-  async incrementMemberCount(groupId: string): Promise<IGroup | null> {
+  async incrementMemberCount(groupId: string, amount: number = 1): Promise<IGroup | null> {
     try {
       return await this.model
-        .findByIdAndUpdate(
-          groupId,
-          { $inc: { currentMemberCount: 1 } },
+        .findOneAndUpdate(
+          { groupId, isActive: true },
+          { $inc: { currentMemberCount: amount } },
           { new: true }
         )
         .exec();
@@ -118,8 +118,8 @@ class GroupRepository extends BaseRepository<IGroup> {
   async decrementMemberCount(groupId: string): Promise<IGroup | null> {
     try {
       return await this.model
-        .findByIdAndUpdate(
-          groupId,
+        .findOneAndUpdate(
+          { groupId, isActive: true, currentMemberCount: { $gt: 0 } },
           { $inc: { currentMemberCount: -1 } },
           { new: true }
         )
@@ -232,22 +232,22 @@ class GroupRepository extends BaseRepository<IGroup> {
     return group.toObject();
   }
 
-  async softDeleteById(groupId: string): Promise<boolean> {
+  async softDeleteById(groupId: string, session?: mongoose.ClientSession): Promise<boolean> {
     const group = await this.model.findOne({ groupId, isActive: true });
     if (!group) return false;
     group.isActive = false;
-    await group.save();
+    await group.save({ session });
     return true;
   }
 
   async findAll(query: any, sortQuery: any, skip: number, limit: number): Promise<IGroup[]> {
     return await this.model
       .find(query)
-      // .populate('leaderId', 'name email avatar')  // was: 'leader'
+      .populate('leader', 'firstName lastName') // Uncomment and use 'leader' virtual once added
       .sort(sortQuery)
       .skip(skip)
       .limit(limit)
-      // .lean();
+      .lean();
   }
 
   async count(query: any): Promise<number> {

@@ -6,7 +6,7 @@
  */
 
 import { Router } from 'express';
-import  taskController from '../controllers/task.controller';
+import { taskController } from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 import { validateJoi, validateParamsJoi, validateQueryJoi, validation } from '@/shared/middlewares/validation.middleware';
 import {

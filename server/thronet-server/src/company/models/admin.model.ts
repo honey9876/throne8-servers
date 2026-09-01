@@ -1,4 +1,4 @@
-﻿import { model, Schema } from 'mongoose';
+import { model, Schema } from 'mongoose';
 
 export interface IAdmin {
   _id?: string;
@@ -38,6 +38,7 @@ export const AdminSchema = new Schema(
       unique: true,
       lowercase: true,
       match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Please provide valid email'],
+      index: true,
     },
     password: {
       type: String,
@@ -49,6 +50,7 @@ export const AdminSchema = new Schema(
       type: String,
       enum: ['SuperAdmin', 'Admin', 'Moderator'],
       default: 'Admin',
+      index: true,
     },
     permissions: [
       {
@@ -66,6 +68,7 @@ export const AdminSchema = new Schema(
     isActive: {
       type: Boolean,
       default: true,
+      index: true,
     },
     lastLogin: Date,
     loginAttempts: {

@@ -17,7 +17,7 @@ import {
   markAsRead,
   getReadStatus,
   searchMessages,
-} from '../controllers/chat.controller';
+} from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 import { isMember } from '../middleware/groupAccess.middleware';
 

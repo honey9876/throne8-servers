@@ -5,7 +5,7 @@
  */
 
 import express from 'express';
-import  doubtController  from '../controllers/doubt.controller';
+import { doubtController } from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 import { isMember } from '../middleware/groupAccess.middleware';
 import { validation } from '@/shared/middlewares/validation.middleware';

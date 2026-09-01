@@ -3,7 +3,6 @@
 import { body, param, query, ValidationChain } from 'express-validator';
 import { BlockReason, BlockType, BlockSeverity } from '../models/index';
 import environmentConfig from '@/config/environment/environment';
-import expressValidator from 'express-validator';
 
 // Technologies: Express-validator, TypeScript validation, Input sanitization, Business rule validation
 // Features: Complete validation for all 12 block controller features with security, rate limiting, and business rule enforcement
@@ -699,7 +698,7 @@ export const createValidationMiddleware = (validations: ValidationChain[]) => {
   return [
     ...validations,
     (req: any, res: any, next: any) => {
-      const errors = expressValidator.validationResult(req);
+      const errors = require('express-validator').validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({
           success: false,

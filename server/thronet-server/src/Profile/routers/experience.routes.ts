@@ -19,6 +19,9 @@ const logger = LoggerUtil;
 
 // ==================== VALIDATION SCHEMAS ====================
 
+/**
+ * Create Experience Validation Schema
+ */
 const createExperienceSchema = Joi.object({
     currentPosition: Joi.string()
         .min(2)
@@ -50,9 +53,26 @@ const createExperienceSchema = Joi.object({
         .trim()
         .required()
         .custom((value, helpers) => {
+            const wordCount = value.trim().split(/\s+/).length;
+            // if (wordCount < 15) {
+            //     return helpers.error('any.invalid', {
+            //         message: 'Description must be at least 15 words',
+            //     });
+            // }
+            // if (wordCount > 100) {
+            //     return helpers.error('any.invalid', {
+            //         message: 'Description cannot exceed 100 words',
+            //     });
+            // }
             return value;
         })
-        .messages({}),
+        .messages({
+            // 'string.min': 'Description must be at least 15 characters',
+            // 'string.max': 'Description cannot exceed 500 characters',
+            // 'string.empty': 'Description is required',
+            // 'any.required': 'Description is required',
+            // 'any.invalid': 'Description must be 15-100 words',
+        }),
 
     startDate: Joi.date()
         .iso()
@@ -102,6 +122,9 @@ const createExperienceSchema = Joi.object({
         }),
 });
 
+/**
+ * Update Experience Validation Schema
+ */
 const updateExperienceSchema = Joi.object({
     currentPosition: Joi.string()
         .min(2)
@@ -123,6 +146,17 @@ const updateExperienceSchema = Joi.object({
         .trim()
         .message('Description cannot be empty')
         .optional(),
+    // .custom((value, helpers) => {
+    //     // const wordCount = value.trim().split(/\s+/).length;
+    //     // if (wordCount < 15 || wordCount > 100) {
+    //     //     return helpers.error('any.invalid');
+    //     // }
+    //     return value;
+    // })
+    // .messages({
+    //     // 'any.invalid': 'Description must be 15-100 words',
+    // }),
+
 
     startDate: Joi.date()
         .iso()
@@ -205,7 +239,7 @@ router.post(
     '/create-experience',
     AuthMiddleware.authenticate as any,
     validateCreate,
-    rateLimitMiddleware({ maxRequests: 10, windowMs: 60000 }),
+    rateLimitMiddleware({ maxRequests: 10, windowMs: 60000 }), // 10 per minute
     async (req: Request, res: Response, next: NextFunction) => {
         try {
             logger.info('CREATE EXPERIENCE ROUTE HIT');
@@ -227,7 +261,7 @@ router.post(
 router.get(
     '/get-all-experiences',
     AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
+    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }), // 50 per minute
     async (req: Request, res: Response, next: NextFunction) => {
         try {
             logger.info('GET ALL EXPERIENCES ROUTE HIT');
@@ -235,26 +269,6 @@ router.get(
             logger.info('✅ GET ALL EXPERIENCES ROUTE COMPLETED');
         } catch (error: any) {
             console.error('❌ GET ALL EXPERIENCES ROUTE ERROR:', error);
-            next(error);
-        }
-    }
-);
-
-/**
- * @route   GET /api/v1/experience/get-all-experiences/:userId
- * @desc    Get all experiences for a specific user (public profile view)
- * @access  Public
- */
-router.get(
-    '/get-all-experiences/:userId',
-    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
-    async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            logger.info('GET ALL EXPERIENCES BY USERID ROUTE HIT');
-            await ExperienceController.getAllExperiencesByUserId(req as any, res);
-            logger.info('✅ GET ALL EXPERIENCES BY USERID ROUTE COMPLETED');
-        } catch (error: any) {
-            console.error('❌ GET ALL EXPERIENCES BY USERID ROUTE ERROR:', error);
             next(error);
         }
     }
@@ -292,7 +306,7 @@ router.put(
     '/update-experience/:experienceId',
     AuthMiddleware.authenticate as any,
     validateUpdate,
-    rateLimitMiddleware({ maxRequests: 20, windowMs: 60000 }),
+    rateLimitMiddleware({ maxRequests: 20, windowMs: 60000 }), // 20 per minute
     async (req: Request, res: Response, next: NextFunction) => {
         try {
             logger.info('UPDATE EXPERIENCE ROUTE HIT', {

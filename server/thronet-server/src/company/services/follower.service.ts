@@ -1,5 +1,4 @@
 import { Company, Employee } from '../models';
-import CompanyActivity from '../models/CompanyActivity.model';
 import logger from '@/shared/logger.util';
 import { PaginationMeta } from '../interfaces';
 import { Types } from 'mongoose';
@@ -110,31 +109,6 @@ class FollowerService {
       await (company as any).incrementStat('followersCount');
       await this.clearFollowerCaches(employeeObjectId, companyObjectId);
 
-      // Save Activity record in DB for real persistent feed
-      try {
-        const followerName = `${employee.firstName || ''} ${employee.lastName || ''}`.trim() || 'New Follower';
-        const targetId = `follow-${companyUUID}-${employeeUUID}`;
-        const initials = followerName.split(' ').map((p: string) => p[0]).join('').toUpperCase().slice(0, 2) || 'FL';
-        await CompanyActivity.findOneAndUpdate(
-          { targetId },
-          {
-            activityId: `act-follow-${Date.now()}`,
-            companyId: companyUUID,
-            type: 'follow',
-            user: followerName,
-            avatar: initials,
-            color: 'bg-purple-500',
-            action: 'started following your company',
-            read: false,
-            targetId,
-            createdAt: new Date(),
-          },
-          { upsert: true, new: true }
-        );
-      } catch (actErr: any) {
-        logger.warn('Failed to save follow activity:', actErr?.message || actErr);
-      }
-
       logger.info(`Followed: employee ${employeeUUID} → company ${companyUUID}`);
       return { success: true, message: 'Successfully followed company', follower };
     } catch (error: any) {
@@ -171,19 +145,7 @@ class FollowerService {
       await (follower as any).save();
 
       const company = await Company.findById(companyObjectId);
-      if (company) {
-        await (company as any).decrementStat('followersCount');
-        try {
-          await CompanyActivity.deleteOne({
-            $or: [
-              { targetId: `follow-${(company as any).companyId}-${employeeUUID}` },
-              { targetId: `follow-${companyObjectId}-${employeeObjectId}` },
-            ]
-          });
-        } catch (actErr: any) {
-          logger.warn('Failed to delete follow activity:', actErr?.message || actErr);
-        }
-      }
+      if (company) await (company as any).decrementStat('followersCount');
 
       await this.clearFollowerCaches(employeeObjectId, companyObjectId);
 

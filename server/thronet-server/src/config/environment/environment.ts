@@ -621,11 +621,11 @@ if (environmentConfig.NODE_ENV === 'production' && process.env.SKIP_ENV_VALIDATI
     });
 
     // Kafka production validation
-    // if (environmentConfig.KAFKA.enabled) {
-    //     if (!environmentConfig.KAFKA.brokers || environmentConfig.KAFKA.brokers === 'localhost:9092') {
-    //         console.warn('⚠️  Warning: Using localhost Kafka broker in production');
-    //     }
-    // }
+    if (environmentConfig.KAFKA.enabled) {
+        if (!environmentConfig.KAFKA.brokers || environmentConfig.KAFKA.brokers === 'localhost:9092') {
+            console.warn('⚠️  Warning: Using localhost Kafka broker in production');
+        }
+    }
 }
 
 export default environmentConfig;

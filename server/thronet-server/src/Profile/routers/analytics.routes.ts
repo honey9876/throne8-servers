@@ -104,10 +104,6 @@ router.put(
  * @access  Private
  * @query   dateRange=90 (optional, default: 90 days)
  */
-
-
-
-
 router.get(
     '/profile-views/count',
     AuthMiddleware.authenticate as any,
@@ -632,52 +628,6 @@ router.get(
     }
 );
 
-
-
-/**
- * @route   GET /api/v1/analytics/post-impressions/change
- * @desc    Get post impressions % change vs previous period
- * @access  Private
- * @query   days=30
- */
-router.get(
-    '/post-impressions/change',
-    AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
-    async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            console.log('🎯 GET POST IMPRESSIONS CHANGE ROUTE HIT');
-            await AnalyticsController.getPostImpressionsChange(req as any, res);
-            console.log('✅ GET POST IMPRESSIONS CHANGE COMPLETED');
-        } catch (error: any) {
-            console.error('❌ GET POST IMPRESSIONS CHANGE ERROR:', error);
-            next(error);
-        }
-    }
-);
-
-/**
- * @route   GET /api/v1/analytics/search-appearances/change
- * @desc    Get search appearances % change vs previous period
- * @access  Private
- * @query   days=30
- */
-router.get(
-    '/search-appearances/change',
-    AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
-    async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            console.log('🎯 GET SEARCH APPEARANCES CHANGE ROUTE HIT');
-            await AnalyticsController.getSearchAppearancesChange(req as any, res);
-            console.log('✅ GET SEARCH APPEARANCES CHANGE COMPLETED');
-        } catch (error: any) {
-            console.error('❌ GET SEARCH APPEARANCES CHANGE ERROR:', error);
-            next(error);
-        }
-    }
-);
-
 /**
  * @route   GET /api/v1/analytics/engagements/total
  * @desc    Get total engagements (Feature 3)
@@ -872,22 +822,6 @@ router.post(
     AnalyticsController.recordUniqueVisitor as any
 );
 
-
-/**
- * @route   POST /api/v1/analytics/record-engagement
- * @desc    Record engagement (like/comment/share/save) on a post
- * @access  Private
- * @body    { postId, postOwnerId, engagementType }
- * Kam: Like/comment/share hone par analytics update karta hai
- */
-router.post(
-    '/record-engagement',
-    AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 200, windowMs: 60000 }),
-    AnalyticsController.recordEngagement as any
-);
-
-
 /**
  * @route   GET /api/v1/analytics/clicks/count
  * @desc    Get clicks count with breakdown
@@ -959,11 +893,11 @@ router.get(
  * @access  Private
  * @query   days? (optional)
  */
-router.get(
-    '/discovery-stats',
-    AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
-    AnalyticsController.getDiscoveryStats as any
-);
+// router.get(
+//     '/discovery-stats',
+//     AuthMiddleware.authenticate as any,
+//     rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
+//     AnalyticsController.getDiscoveryStats as any
+// );
 
 export default router;

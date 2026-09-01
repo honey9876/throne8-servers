@@ -979,10 +979,12 @@ export const validateUpdatePost = (req: Request, res: Response, next: NextFuncti
         title: Joi.string()
             .min(Constants.ACTIVITY_VALIDATION.POST.TITLE_MIN_LENGTH)
             .max(Constants.ACTIVITY_VALIDATION.POST.TITLE_MAX_LENGTH)
+            .pattern(Constants.ACTIVITY_VALIDATION.POST.TITLE_PATTERN)
             .optional()
             .messages({
                 'string.min': `Title must be at least ${Constants.ACTIVITY_VALIDATION.POST.TITLE_MIN_LENGTH} character`,
                 'string.max': `Title cannot exceed ${Constants.ACTIVITY_VALIDATION.POST.TITLE_MAX_LENGTH} characters`,
+                'string.pattern.base': 'Title must start with a capital letter',
             }),
         content: Joi.string()
             .max(Constants.ACTIVITY_VALIDATION.POST.CONTENT_MAX_LENGTH)
@@ -1012,22 +1014,20 @@ export const validateUpdatePost = (req: Request, res: Response, next: NextFuncti
 export const validateCreateComment = (req: Request, res: Response, next: NextFunction) => {
     const schema = Joi.object({
         postId: Joi.string()
-            .pattern(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
             .required()
             .messages({
-                'string.pattern.base': 'Invalid post ID format',
                 'any.required': 'Post ID is required',
             }),
         content: Joi.string()
-            .min(Constants.ACTIVITY_VALIDATION.COMMENT.MIN_LENGTH)
             .max(Constants.ACTIVITY_VALIDATION.COMMENT.MAX_LENGTH)
-            .required()
+            .optional()
+            .allow('')
             .messages({
                 'string.min': `Comment must be at least ${Constants.ACTIVITY_VALIDATION.COMMENT.MIN_LENGTH} character`,
                 'string.max': `Comment cannot exceed ${Constants.ACTIVITY_VALIDATION.COMMENT.MAX_LENGTH} characters`,
                 'any.required': 'Comment content is required',
             }),
-    });
+    }).unknown(true);
 
     const { error, value } = schema.validate(req.body, { abortEarly: false });
 

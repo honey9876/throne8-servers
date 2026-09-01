@@ -62,30 +62,12 @@ router.get(
 );
 
 /**
- * @route   GET /api/employees/companies-employees/:companyId
  * @route   GET /api/employees/company/:companyId
- * @route   GET /api/employees/:companyId
  * @desc    Get all employees of a company
  * @access  Private
  */
 router.get(
   '/companies-employees/:companyId',
-  AuthMiddleware.authenticate as any,
-  validationMiddleware.validateParamsJoi(employeeValidators.companyId),
-  resolveCompanyUUID,
-  employeeController.getEmployeesByCompany.bind(employeeController)
-);
-
-router.get(
-  '/company/:companyId',
-  AuthMiddleware.authenticate as any,
-  validationMiddleware.validateParamsJoi(employeeValidators.companyId),
-  resolveCompanyUUID,
-  employeeController.getEmployeesByCompany.bind(employeeController)
-);
-
-router.get(
-  '/:companyId',
   AuthMiddleware.authenticate as any,
   validationMiddleware.validateParamsJoi(employeeValidators.companyId),
   resolveCompanyUUID,

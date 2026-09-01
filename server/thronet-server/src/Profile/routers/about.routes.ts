@@ -191,7 +191,7 @@ router.post(
 router.post(
     '/upload-video/:aboutId',
     AuthMiddleware.authenticate as any,
-    uploadSingle('video', 'video'),   // 👈 second arg 'video' add kiya — ab video filter use hoga, image filter nahi
+    uploadSingle('video'),
     rateLimitMiddleware({ maxRequests: 3, windowMs: 60000 }),
     async (req: Request, res: Response, next: NextFunction) => {
         try {
@@ -201,6 +201,7 @@ router.post(
         }
     }
 );
+
 /**
  * @route   POST /api/v1/about/upload-media/:aboutId
  * @desc    Upload media attachment (image/document)

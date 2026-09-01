@@ -1,4 +1,10 @@
-﻿import mongoose, { Schema, Model, Document } from 'mongoose';
+/**
+ * ====================================
+ * DOUBT MODEL (PRODUCTION READY - FIXED)
+ * ====================================
+ */
+
+import mongoose, { Schema, Model } from 'mongoose';
 import { IDoubt } from '../interfaces/IDoubt';
 import { validId } from '@/shared/security';
 
@@ -22,14 +28,14 @@ interface IDoubtStatics {
 }
 
 type DoubtModel = Model<IDoubt, {}, IDoubtMethods> & IDoubtStatics;
-type DoubtDoc = IDoubt & IDoubtMethods & Document;
 
-const doubtSchema = new Schema(
+const doubtSchema = new Schema<IDoubt, DoubtModel, IDoubtMethods>(
   {
     doubtId: {
       type: String,
       required: true,
-      default: () => validId(''),
+      unique: true,
+      default: (v: any) => validId(v),
     },
     title: {
       type: String,
@@ -37,6 +43,7 @@ const doubtSchema = new Schema(
       trim: true,
       minlength: [5, 'Title must be at least 5 characters'],
       maxlength: [200, 'Title must not exceed 200 characters'],
+      index: true,
     },
     description: {
       type: String,
@@ -47,22 +54,43 @@ const doubtSchema = new Schema(
       type: String,
       ref: 'StudyGroup_Group',
       required: [true, 'Group is required'],
+      index: true,
     },
     postedBy: {
       type: String,
       ref: 'User',
       required: [true, 'Posted by user is required'],
+      index: true,
     },
     category: {
       type: String,
       enum: [
-        'Mathematics', 'Physics', 'Chemistry', 'Biology', 'Computer Science',
-        'English', 'Hindi', 'Social Science', 'General Knowledge', 'Aptitude',
-        'Reasoning', 'Current Affairs', 'Programming', 'Data Structures',
-        'Algorithms', 'Web Development', 'Mobile Development', 'Machine Learning',
-        'Artificial Intelligence', 'Database', 'Networking', 'Operating System', 'Other',
+        'Mathematics',
+        'Physics',
+        'Chemistry',
+        'Biology',
+        'Computer Science',
+        'English',
+        'Hindi',
+        'Social Science',
+        'General Knowledge',
+        'Aptitude',
+        'Reasoning',
+        'Current Affairs',
+        'Programming',
+        'Data Structures',
+        'Algorithms',
+        'Web Development',
+        'Mobile Development',
+        'Machine Learning',
+        'Artificial Intelligence',
+        'Database',
+        'Networking',
+        'Operating System',
+        'Other',
       ],
       default: 'Other',
+      index: true,
     },
     subject: {
       type: String,
@@ -73,72 +101,150 @@ const doubtSchema = new Schema(
       type: [String],
       default: [],
       validate: {
-        validator: function (tags: string[]) { return tags.length <= 10; },
+        validator: function (tags: string[]) {
+          return tags.length <= 10;
+        },
         message: 'Cannot have more than 10 tags',
       },
     },
     images: {
       type: [
         {
-          url: { type: String, required: true },
-          publicId: { type: String, required: true },
-          uploadedAt: { type: Date, default: Date.now },
+          url: {
+            type: String,
+            required: true,
+          },
+          publicId: {
+            type: String,
+            required: true,
+          },
+          uploadedAt: {
+            type: Date,
+            default: Date.now,
+          },
         },
       ],
       default: [],
       validate: {
-        validator: function (images: any[]) { return images.length <= 5; },
+        validator: function (images: any[]) {
+          return images.length <= 5;
+        },
         message: 'Cannot upload more than 5 images',
       },
     },
-    isUrgent: { type: Boolean, default: false },
-    isSolved: { type: Boolean, default: false },
-    solvedAt: { type: Date, default: null },
-    bestAnswer: { type: String, ref: 'Answer', default: null },
-    answerCount: { type: Number, default: 0, min: 0 },
-    viewCount: { type: Number, default: 0, min: 0 },
-    upvotes: { type: Number, default: 0, min: 0 },
+    isUrgent: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    isSolved: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    solvedAt: {
+      type: Date,
+      default: null,
+    },
+    bestAnswer: {
+      type: String,
+      ref: 'Answer',
+      default: null,
+    },
+    answerCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    viewCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    upvotes: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     upvotedBy: {
-      type: [{ type: String, ref: 'User' }],
+      type: [
+        {
+          type: String,
+          ref: 'User',
+        },
+      ],
       default: [],
     },
     taggedMembers: {
-      type: [{ type: String, ref: 'User' }],
+      type: [
+        {
+          type: String,
+          ref: 'User',
+        },
+      ],
       default: [],
       validate: {
-        validator: function (members: any[]) { return members.length <= 10; },
+        validator: function (members: any[]) {
+          return members.length <= 10;
+        },
         message: 'Cannot tag more than 10 members',
       },
     },
-    priority: { type: Number, default: 0, min: 0, max: 10 },
+    priority: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 10,
+    },
     difficulty: {
       type: String,
       enum: ['Easy', 'Medium', 'Hard', 'Expert'],
       default: 'Medium',
     },
-    isEdited: { type: Boolean, default: false },
-    editedAt: { type: Date, default: null },
-    isDeleted: { type: Boolean, default: false },
-    deletedAt: { type: Date, default: null },
-    deletedBy: { type: String, ref: 'User', default: null },
+    isEdited: {
+      type: Boolean,
+      default: false,
+    },
+    editedAt: {
+      type: Date,
+      default: null,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: String,
+      ref: 'User',
+      default: null,
+    },
   },
   {
     timestamps: true,
     toJSON: {
       virtuals: true,
       transform: function (_doc, ret) {
-        const r = ret as any;
-        r.id = r.doubtId;
-        delete r._id;
-        delete r.__v;
-        return r;
-      },
+        (ret as any).id = (ret as any).doubtId;
+        delete ret._id;
+        delete ret.__v;
+        return ret;
+      }
     },
     toObject: { virtuals: true },
   }
 );
 
-doubtSchema.index({ doubtId: 1 }, { unique: true });
+/**
+ * ====================================
+ * PERFORMANCE INDEXES (100K+ Users)
+ * ====================================
+ */
+doubtSchema.index({ doubtId: 1}, {unique: true });
 doubtSchema.index({ group: 1, isSolved: 1 });
 doubtSchema.index({ group: 1, createdAt: -1 });
 doubtSchema.index({ postedBy: 1, createdAt: -1 });
@@ -146,6 +252,11 @@ doubtSchema.index({ category: 1, isSolved: 1 });
 doubtSchema.index({ title: 'text', description: 'text', tags: 'text' });
 doubtSchema.index({ isDeleted: 1, createdAt: -1 });
 
+/**
+ * ====================================
+ * VIRTUAL FIELDS
+ * ====================================
+ */
 doubtSchema.virtual('answers', {
   ref: 'Answer',
   localField: '_id',
@@ -153,11 +264,11 @@ doubtSchema.virtual('answers', {
   options: { sort: { upvotes: -1, createdAt: -1 } },
 });
 
-doubtSchema.virtual('isAnswered').get(function (this: DoubtDoc) {
+doubtSchema.virtual('isAnswered').get(function (this: IDoubt) {
   return this.answerCount > 0;
 });
 
-doubtSchema.virtual('solvedDuration').get(function (this: DoubtDoc) {
+doubtSchema.virtual('solvedDuration').get(function (this: IDoubt) {
   if (this.isSolved && this.solvedAt) {
     const duration = this.solvedAt.getTime() - this.createdAt.getTime();
     return Math.floor(duration / (1000 * 60));
@@ -165,39 +276,64 @@ doubtSchema.virtual('solvedDuration').get(function (this: DoubtDoc) {
   return null;
 });
 
-doubtSchema.methods.markAsSolved = async function (this: DoubtDoc, answerId: string): Promise<void> {
+/**
+ * ====================================
+ * INSTANCE METHODS
+ * ====================================
+ */
+doubtSchema.methods.markAsSolved = async function (
+  this: IDoubt,
+  answerId: string
+): Promise<void> {
   this.isSolved = true;
   this.solvedAt = new Date();
   this.bestAnswer = answerId;
   await this.save();
 };
 
-doubtSchema.methods.incrementViewCount = async function (this: DoubtDoc): Promise<void> {
+doubtSchema.methods.incrementViewCount = async function (
+  this: IDoubt
+): Promise<void> {
   this.viewCount += 1;
   await this.save({ validateBeforeSave: false });
 };
 
-doubtSchema.methods.incrementAnswerCount = async function (this: DoubtDoc): Promise<void> {
+doubtSchema.methods.incrementAnswerCount = async function (
+  this: IDoubt
+): Promise<void> {
   this.answerCount += 1;
   await this.save({ validateBeforeSave: false });
 };
 
-doubtSchema.methods.decrementAnswerCount = async function (this: DoubtDoc): Promise<void> {
+doubtSchema.methods.decrementAnswerCount = async function (
+  this: IDoubt
+): Promise<void> {
   if (this.answerCount > 0) {
     this.answerCount -= 1;
     await this.save({ validateBeforeSave: false });
   }
 };
 
-doubtSchema.methods.softDelete = async function (this: DoubtDoc): Promise<void> {
+doubtSchema.methods.softDelete = async function (this: IDoubt): Promise<void> {
   this.isDeleted = true;
   this.deletedAt = new Date();
   await this.save();
 };
 
-doubtSchema.statics.findByGroup = function (groupId: string, options: any = {}) {
+/**
+ * ====================================
+ * STATIC METHODS
+ * ====================================
+ */
+doubtSchema.statics.findByGroup = function (
+  groupId: string,
+  options: any = {}
+) {
   const query: any = { group: groupId, isDeleted: false };
-  if (options.isSolved !== undefined) query.isSolved = options.isSolved;
+
+  if (options.isSolved !== undefined) {
+    query.isSolved = options.isSolved;
+  }
 
   return this.find(query)
     .populate('postedBy', 'name email avatar')
@@ -219,14 +355,24 @@ doubtSchema.statics.findUnsolved = function (groupId: string) {
 };
 
 doubtSchema.statics.findUrgent = function (groupId: string) {
-  return this.find({ group: groupId, isUrgent: true, isSolved: false, isDeleted: false })
+  return this.find({
+    group: groupId,
+    isUrgent: true,
+    isSolved: false,
+    isDeleted: false,
+  })
     .populate('postedBy', 'name email avatar')
     .sort({ createdAt: -1 });
 };
 
-doubtSchema.statics.findByCategory = function (category: string, groupId?: string) {
+doubtSchema.statics.findByCategory = function (
+  category: string,
+  groupId?: string
+) {
   const query: any = { category, isDeleted: false };
-  if (groupId) query.group = groupId;
+  if (groupId) {
+    query.group = groupId;
+  }
 
   return this.find(query)
     .populate('postedBy', 'name email avatar')
@@ -234,8 +380,14 @@ doubtSchema.statics.findByCategory = function (category: string, groupId?: strin
 };
 
 doubtSchema.statics.searchDoubts = function (query: string, groupId?: string) {
-  const searchQuery: any = { $text: { $search: query }, isDeleted: false };
-  if (groupId) searchQuery.group = groupId;
+  const searchQuery: any = {
+    $text: { $search: query },
+    isDeleted: false,
+  };
+
+  if (groupId) {
+    searchQuery.group = groupId;
+  }
 
   return this.find(searchQuery, { score: { $meta: 'textScore' } })
     .populate('postedBy', 'name email avatar')
@@ -244,14 +396,25 @@ doubtSchema.statics.searchDoubts = function (query: string, groupId?: string) {
 
 doubtSchema.statics.getDoubtStatsByGroup = async function (groupId: string) {
   const stats = await this.aggregate([
-    { $match: { group: groupId, isDeleted: false } },
+    {
+      $match: {
+        group: groupId,
+        isDeleted: false,
+      },
+    },
     {
       $group: {
         _id: null,
         totalDoubts: { $sum: 1 },
-        solvedDoubts: { $sum: { $cond: [{ $eq: ['$isSolved', true] }, 1, 0] } },
-        unsolvedDoubts: { $sum: { $cond: [{ $eq: ['$isSolved', false] }, 1, 0] } },
-        urgentDoubts: { $sum: { $cond: [{ $eq: ['$isUrgent', true] }, 1, 0] } },
+        solvedDoubts: {
+          $sum: { $cond: [{ $eq: ['$isSolved', true] }, 1, 0] },
+        },
+        unsolvedDoubts: {
+          $sum: { $cond: [{ $eq: ['$isSolved', false] }, 1, 0] },
+        },
+        urgentDoubts: {
+          $sum: { $cond: [{ $eq: ['$isUrgent', true] }, 1, 0] },
+        },
         totalAnswers: { $sum: '$answerCount' },
         totalViews: { $sum: '$viewCount' },
         avgAnswersPerDoubt: { $avg: '$answerCount' },
@@ -259,27 +422,43 @@ doubtSchema.statics.getDoubtStatsByGroup = async function (groupId: string) {
       },
     },
   ]);
+
   return stats[0] || {};
 };
 
 doubtSchema.statics.getDoubtStatsByUser = async function (userId: string) {
   const stats = await this.aggregate([
-    { $match: { postedBy: userId, isDeleted: false } },
+    {
+      $match: {
+        postedBy: userId,
+        isDeleted: false,
+      },
+    },
     {
       $group: {
         _id: null,
         totalDoubtsPosted: { $sum: 1 },
-        solvedDoubts: { $sum: { $cond: [{ $eq: ['$isSolved', true] }, 1, 0] } },
-        unsolvedDoubts: { $sum: { $cond: [{ $eq: ['$isSolved', false] }, 1, 0] } },
+        solvedDoubts: {
+          $sum: { $cond: [{ $eq: ['$isSolved', true] }, 1, 0] },
+        },
+        unsolvedDoubts: {
+          $sum: { $cond: [{ $eq: ['$isSolved', false] }, 1, 0] },
+        },
         totalAnswersReceived: { $sum: '$answerCount' },
         totalViews: { $sum: '$viewCount' },
       },
     },
   ]);
+
   return stats[0] || {};
 };
 
-doubtSchema.pre('save', function (this: DoubtDoc, next) {
+/**
+ * ====================================
+ * PRE-SAVE MIDDLEWARE
+ * ====================================
+ */
+doubtSchema.pre('save', function (next) {
   if (this.isModified('isSolved') && this.isSolved && !this.solvedAt) {
     this.solvedAt = new Date();
   }
@@ -302,6 +481,11 @@ doubtSchema.pre('save', function (this: DoubtDoc, next) {
   next();
 });
 
+/**
+ * ====================================
+ * PRE-FIND MIDDLEWARE (FIXED)
+ * ====================================
+ */
 doubtSchema.pre('find', function (next) {
   if (!(this.getOptions() as any).includeDeleted) {
     this.where({ isDeleted: false });

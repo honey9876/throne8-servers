@@ -39,11 +39,12 @@ let io: Server | null = null;
 export const initializeSocketIO = (httpServer: HTTPServer): Server => {
   io = new Server(httpServer, {
     cors: {
-      origin: (process.env['ALLOWED_ORIGINS'] || 'http://localhost:3000,http://localhost:3001')
-        .split(',')
-        .map((o) => o.trim()),
+      // origin: (process.env['ALLOWED_ORIGINS'] || 'http://localhost:3000,http://localhost:3001')
+      //   .split(',')
+      //   .map((o) => o.trim()),
+      origin: '*', // Allows all origins for APK/mobile testing
       methods: ['GET', 'POST'],
-      credentials: true,
+      // credentials: true, // Not allowed when origin is '*'
       allowedHeaders: ['Authorization'],
     },
     transports: ['websocket', 'polling'],

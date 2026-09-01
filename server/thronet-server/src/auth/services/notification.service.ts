@@ -4,7 +4,7 @@
  * Supports Email (SMTP), Gmail/SendGrid), SMS (Twilio), and Push Notifications
  * 
  * Features:
- * - Email via Nodemailer (SMTP/Gmail) or SendGrid HTTP API
+ * - Email via Nodemailer (SMTP/Gmail/SendGrid)
  * - SMS via Twilio
  * - Email templates with Handlebars
  * - Rate limiting per user
@@ -15,19 +15,21 @@
  * - Error handling & logging
  * 
  * @module services/notification.service
- * @version 3.1.0
+ * @version 3.0.0
  */
 
 import nodemailer, { Transporter } from 'nodemailer';
-import sgMail from '@sendgrid/mail';
 import twilio from 'twilio';
 import Handlebars from 'handlebars';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { LoggerUtil } from '@/shared/logger.util';
 import CacheUtil from '@/shared/cache.util';
 
 // Get current directory for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ==================== CONFIGURATION ====================
 
@@ -54,27 +56,16 @@ const emailConfig: EmailConfig = {
   port: parseInt(process.env.SMTP_PORT || '587'),
   secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
   auth: {
-    user:
-      process.env.EMAIL_SERVICE === 'sendgrid'
-        ? 'apikey'
-        : process.env.SMTP_USER || process.env.EMAIL_USER || '',
-    pass:
-      process.env.EMAIL_SERVICE === 'sendgrid'
-        ? process.env.SENDGRID_API_KEY || ''
-        : process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD || '',
+    user: process.env.SMTP_USER || process.env.EMAIL_USER || '',
+    pass: process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD || '',
   },
   from: {
     name: process.env.EMAIL_FROM_NAME || 'Auth Service',
-    address: process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_FROM || process.env.SMTP_USER || '',
+    address: process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER || '',
   },
   maxRetries: 3,
   retryDelay: 2000, // ms
 };
-
-// Initialize SendGrid HTTP API client (bypasses SMTP, which Railway blocks)
-if (emailConfig.service === 'sendgrid' && process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-}
 
 // ADD THIS DEBUG LOG
 console.log('EMAIL CONFIG LOADED:', {
@@ -216,7 +207,6 @@ class NotificationService {
         SMTP_PASSWORD: process.env.SMTP_PASSWORD ? 'Set' : 'Missing',
         EMAIL_USER: process.env.EMAIL_USER ? 'Set' : 'Missing',
         EMAIL_PASSWORD: process.env.EMAIL_PASSWORD ? 'Set' : 'Missing',
-        SENDGRID_API_KEY: process.env.SENDGRID_API_KEY ? 'Set' : 'Missing',
         emailConfig_user: emailConfig.auth.user ? 'Set' : 'Missing',
         emailConfig_pass: emailConfig.auth.pass ? 'Set' : 'Missing',
       });
@@ -231,16 +221,6 @@ class NotificationService {
         throw new Error('Email credentials missing - Check SMTP_USER and SMTP_PASSWORD in .env');
       }
 
-      // SendGrid uses the HTTP API (port 443), not SMTP — Railway blocks outbound SMTP ports
-      if (emailConfig.service === 'sendgrid') {
-        this.emailTransporter = null; // not used for sendgrid, sgMail handles sending
-        LoggerUtil.info('SendGrid HTTP API mode enabled — skipping SMTP transporter/verify', {
-          hasApiKey: !!process.env.SENDGRID_API_KEY,
-          from: emailConfig.from.address,
-        });
-        return;
-      }
-
       LoggerUtil.info('Email credentials found, creating transporter...');
 
       // Create transporter based on service
@@ -248,6 +228,15 @@ class NotificationService {
         this.emailTransporter = nodemailer.createTransport({
           service: 'gmail',
           auth: emailConfig.auth,
+        });
+      } else if (emailConfig.service === 'sendgrid') {
+        this.emailTransporter = nodemailer.createTransport({
+          host: 'smtp.sendgrid.net',
+          port: 587,
+          auth: {
+            user: 'apikey',
+            pass: emailConfig.auth.pass, // SendGrid API key
+          },
         });
       } else {
         // Generic SMTP
@@ -1282,72 +1271,6 @@ class NotificationService {
         await this.initialize();
       }
 
-      // ==================== SENDGRID VIA HTTP API ====================
-      // Railway blocks outbound SMTP ports, so SendGrid is sent over HTTPS (443) instead.
-      if (emailConfig.service === 'sendgrid') {
-        try {
-          if (!process.env.SENDGRID_API_KEY) {
-            throw new Error('SENDGRID_API_KEY not configured');
-          }
-
-          // Check rate limit
-          const rateLimitKey = `email_rate:${options.to}`;
-          const sent = (await CacheUtil.get(rateLimitKey)) || 0;
-          if (sent >= 10) {
-            LoggerUtil.warn('Email rate limit exceeded', { to: options.to });
-            throw new Error('Email rate limit exceeded');
-          }
-
-          let html = options.html;
-          if (options.template && this.emailTemplates.has(options.template)) {
-            const template = this.emailTemplates.get(options.template);
-            if (template) {
-              html = template(options.data || {});
-            }
-          } else if (options.template) {
-            LoggerUtil.warn('Template not found, using raw HTML', {
-              template: options.template,
-            });
-          }
-
-          const result = await sgMail.send({
-            to: options.to,
-            from: { email: emailConfig.from.address, name: emailConfig.from.name },
-            subject: options.subject,
-            html: html || options.text || '',
-            text: options.text,
-          });
-
-          await CacheUtil.set(rateLimitKey, (sent as number) + 1, 3600); // 1 hour
-
-          const duration = Date.now() - startTime;
-          LoggerUtil.info('Email sent successfully via SendGrid API', {
-            to: options.to,
-            subject: options.subject,
-            template: options.template,
-            duration,
-          });
-
-          return {
-            success: true,
-            messageId: (result[0]?.headers?.['x-message-id'] as string) || 'sendgrid-sent',
-            to: options.to,
-            duration,
-          };
-        } catch (error: any) {
-          const duration = Date.now() - startTime;
-          LoggerUtil.error('SendGrid API send failed', {
-            error: error.message,
-            response: error.response?.body,
-            to: options.to,
-            subject: options.subject,
-            duration,
-          });
-          throw error;
-        }
-      }
-      // ==================== END SENDGRID BLOCK ====================
-
       if (!this.emailTransporter) {
         LoggerUtil.warn('Email transporter not available', { to: options.to });
         // Return mock success in development
@@ -1686,7 +1609,7 @@ class NotificationService {
     return {
       initialized: this.initialized,
       email: {
-        available: emailConfig.service === 'sendgrid' ? !!process.env.SENDGRID_API_KEY : !!this.emailTransporter,
+        available: !!this.emailTransporter,
         service: emailConfig.service,
         from: emailConfig.from.address,
       },
@@ -1716,9 +1639,7 @@ class NotificationService {
       };
 
       // Check email
-      if (emailConfig.service === 'sendgrid') {
-        status.email = !!process.env.SENDGRID_API_KEY;
-      } else if (this.emailTransporter) {
+      if (this.emailTransporter) {
         try {
           await this.emailTransporter.verify();
           status.email = true;

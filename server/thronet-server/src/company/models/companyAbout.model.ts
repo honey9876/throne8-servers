@@ -59,15 +59,15 @@ const ImpactSchema = new Schema({
 }, { _id: false });
 
 const CompanyIdentitySchema = new Schema<ICompanyIdentity>({
-    identityId: { type: String, default: uuidv4, unique: true },
-    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true, unique: true },
-    companyUUID: { type: String, required: true },
+    identityId: { type: String, default: uuidv4, unique: true, index: true },
+    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true, unique: true, index: true },
+    companyUUID: { type: String, required: true, index: true },
     story: { type: String, trim: true, maxlength: 5000 },
     mission: { type: String, trim: true, maxlength: 1000 },
     vision: { type: String, trim: true, maxlength: 1000 },
     promises: [{ type: String, trim: true, maxlength: 500 }],
     impacts: { type: [ImpactSchema], default: [] },
-    createdBy: { type: String, default: 'system' },
+    createdBy: { type: String, required: true },
     updatedBy: { type: String },
 }, { timestamps: true, collection: 'company_identities', versionKey: false });
 
@@ -90,16 +90,16 @@ export interface ICompanyTimeline extends Document {
 }
 
 const CompanyTimelineSchema = new Schema<ICompanyTimeline>({
-    timelineId: { type: String, default: uuidv4, unique: true },
-    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true },
-    companyUUID: { type: String, required: true },
+    timelineId: { type: String, default: uuidv4, unique: true, index: true },
+    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
+    companyUUID: { type: String, required: true, index: true },
     year: { type: Number, required: true, min: 1800, max: new Date().getFullYear() + 1 },
     month: { type: Number, min: 1, max: 12 },
     title: { type: String, required: true, trim: true, maxlength: 200 },
     description: { type: String, trim: true, maxlength: 2000 },
     type: { type: String, enum: Object.values(TimelineType), default: TimelineType.MILESTONE },
     icon: { type: String, trim: true, maxlength: 100 },
-    isPublished: { type: Boolean, default: true },
+    isPublished: { type: Boolean, default: true, index: true },
     createdBy: { type: String, required: true },
     updatedBy: { type: String },
 }, { timestamps: true, collection: 'company_timelines', versionKey: false });
@@ -127,16 +127,16 @@ export interface ICompanyUpdate extends Document {
 }
 
 const CompanyUpdateSchema = new Schema<ICompanyUpdate>({
-    updateId: { type: String, default: uuidv4, unique: true },
-    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true },
-    companyUUID: { type: String, required: true },
+    updateId: { type: String, default: uuidv4, unique: true, index: true },
+    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
+    companyUUID: { type: String, required: true, index: true },
     title: { type: String, required: true, trim: true, minlength: 5, maxlength: 200 },
     content: { type: String, required: true, trim: true, minlength: 10, maxlength: 10000 },
     summary: { type: String, trim: true, maxlength: 500 },
     category: { type: String, enum: Object.values(UpdateCategory), default: UpdateCategory.ANNOUNCEMENT },
     coverImage: { type: String, trim: true },
     tags: [{ type: String, lowercase: true, trim: true, maxlength: 50 }],
-    isPublished: { type: Boolean, default: false },
+    isPublished: { type: Boolean, default: false, index: true },
     publishedAt: { type: Date },
     externalLink: { type: String, trim: true },
     createdBy: { type: String, required: true },
@@ -167,9 +167,9 @@ export interface ICompanyTestimonial extends Document {
 }
 
 const CompanyTestimonialSchema = new Schema<ICompanyTestimonial>({
-    testimonialId: { type: String, default: uuidv4, unique: true },
-    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true },
-    companyUUID: { type: String, required: true },
+    testimonialId: { type: String, default: uuidv4, unique: true, index: true },
+    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
+    companyUUID: { type: String, required: true, index: true },
     authorName: { type: String, required: true, trim: true, maxlength: 100 },
     authorTitle: { type: String, trim: true, maxlength: 100 },
     authorCompany: { type: String, trim: true, maxlength: 100 },
@@ -177,8 +177,8 @@ const CompanyTestimonialSchema = new Schema<ICompanyTestimonial>({
     message: { type: String, required: true, trim: true, minlength: 10, maxlength: 1000 },
     rating: { type: Number, min: 1, max: 5 },
     source: { type: String, enum: Object.values(TestimonialSource), default: TestimonialSource.USER },
-    isPublished: { type: Boolean, default: false },
-    isFeatured: { type: Boolean, default: false },
+    isPublished: { type: Boolean, default: false, index: true },
+    isFeatured: { type: Boolean, default: false, index: true },
     createdBy: { type: String, required: true },
     updatedBy: { type: String },
 }, { timestamps: true, collection: 'company_testimonials', versionKey: false });
@@ -216,16 +216,16 @@ const ProductFeatureSchema = new Schema<IProductFeature>({
 }, { _id: false });
 
 const CompanyProductSchema = new Schema<ICompanyProduct>({
-    productId: { type: String, default: uuidv4, unique: true },
-    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true },
-    companyUUID: { type: String, required: true },
+    productId: { type: String, default: uuidv4, unique: true, index: true },
+    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
+    companyUUID: { type: String, required: true, index: true },
     name: { type: String, required: true, trim: true, maxlength: 200 },
     tagline: { type: String, trim: true, maxlength: 300 },
     description: { type: String, trim: true, maxlength: 5000 },
     features: { type: [ProductFeatureSchema], default: [] },
     screenshots: [{ type: String, trim: true }],
     demoLink: { type: String, trim: true },
-    isPublished: { type: Boolean, default: false },
+    isPublished: { type: Boolean, default: false, index: true },
     createdBy: { type: String, required: true },
     updatedBy: { type: String },
 }, { timestamps: true, collection: 'company_products', versionKey: false });
@@ -304,9 +304,9 @@ const GalleryItemSchema = new Schema<IGalleryItem>({
 }, { _id: false });
 
 const CompanyLifeSchema = new Schema<ICompanyLife>({
-    lifeId: { type: String, default: uuidv4, unique: true },
-    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true, unique: true },
-    companyUUID: { type: String, required: true },
+    lifeId: { type: String, default: uuidv4, unique: true, index: true },
+    company: { type: Schema.Types.ObjectId, ref: 'Company', required: true, unique: true, index: true },
+    companyUUID: { type: String, required: true, index: true },
     values: { type: [CompanyValueSchema], default: [] },
     perks: { type: [PerkSchema], default: [] },
     teamMembers: { type: [TeamMemberSchema], default: [] },

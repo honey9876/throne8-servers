@@ -1,9 +1,10 @@
-// src/connections/middleware/security.middleware.ts
+// src/middleware/security.middleware.ts
 
 import helmet from 'helmet';
 import { Request, Response, NextFunction } from 'express';
-import environmentConfig from '@/config/environment/environment';
-import logger, { LogCategory } from '@/shared/logger.util';
+import environmentConfig from '../config/environment';
+import logger from '../utils/logger';
+import { LogCategory } from '../utils/logger';
 
 /**
  * Security Middleware
@@ -46,6 +47,7 @@ export const securityMiddleware = helmet({
       fontSrc: ["'self'", 'data:', environmentConfig.CSP_FONT_SRC],
       objectSrc: ["'none'"],
       upgradeInsecureRequests: [],
+      // reportOnly: environmentConfig.CSP_REPORT_ONLY,
     },
     reportOnly: environmentConfig.CSP_REPORT_ONLY,
   },

@@ -1,4 +1,4 @@
-﻿import { Schema } from 'mongoose';
+import { Schema } from 'mongoose';
 
 export const LeadGenSchema = new Schema(
   {
@@ -6,6 +6,7 @@ export const LeadGenSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'Company',
       required: true,
+      index: true,
     },
     campaign: {
       name: String,

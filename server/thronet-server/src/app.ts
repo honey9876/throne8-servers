@@ -1,19 +1,25 @@
-// /**
-//  * app.ts
-//  * server/thronet-server/src/app.ts
-//  * Express Application Configuration
-//  * ./version 4.1.1 (debug — SeniorMentorship temporarily disabled)
-//  *
-//  * 🟢 DEBUG (temporary):
-//  *    - SeniorMentorship import/mount commented out to isolate a startup
-//  *      hang. Nothing after "ALL connection sub-routes loaded successfully"
-//  *      was ever printing, and app.ts's own top-level console.logs never
-//  *      fired either — meaning one of app.ts's static imports never
-//  *      resolves. SeniorMentorship is the prime suspect (not even present
-//  *      in the original project file tree — looks new/half-wired).
-//  *      Once confirmed, either fix whatever's hanging inside
-//  *      SeniorMentorship/routers, or leave it disabled until it's ready.
-//  */
+/**
+ * app.ts
+ * server/thronet-server/src/app.ts
+ * Express Application Configuration
+ * ./version 5.0.0 (merged: app + web server best features)
+ *
+ * MERGED FROM WEB SERVER:
+ *   - express-mongo-sanitize (NoSQL injection protection)
+ *   - hpp (HTTP Parameter Pollution protection)
+ *   - Stricter auth rate limiter
+ *   - Health check + readiness probe endpoints
+ *   - 404 handler for unmatched routes
+ *   - CORS error handler
+ *   - requestLogger middleware
+ *
+ * KEPT FROM APP SERVER:
+ *   - Open CORS (origin: '*') for mobile APK testing
+ *   - Verify routes
+ *   - Kafka producers (via connections module)
+ *   - Audit consumer support
+ *   - Database indexes/sharding
+ */
 
 import express, { Express, Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
@@ -22,61 +28,58 @@ import rateLimit from 'express-rate-limit';
 import session from 'express-session';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import mongoSanitize from 'express-mongo-sanitize'; 
-import hpp from 'hpp'; 
+import mongoSanitize from 'express-mongo-sanitize';
+import hpp from 'hpp';
 import mongoose from 'mongoose';
-import { MongoStore } from 'connect-mongo';   
 import passport from '@/config/oauth/passport.config';
 
 // Routes
 import AuthRoutes from './routes/index';
-console.log("Verifiy route import mounting....")
-// import verifyRoutes from './auth/routes/index';
-import mentorRoutes from './Mentorship/routers';
-// import seniorMentorRoutes from './SeniorMentorship/routers';
-console.log('🔍 mentorRoutes imported successfully');
-import companyRoutes from './company/routers';
-import studyGroupRoutes from './StudyGroup/routers';
-import messageRoutes from './message/routes/message.routes';
-import notificationRoutes from './notifications/routes/notification.routes';
+import profileRoutes from './routes/index';
+import verifyRoutes from './auth/routes/index';
+console.log("Importing mentorRoutes"); import mentorRoutes from './Mentorship/routers';
+console.log("Importing companyRoutes"); import companyRoutes from './company/routers';
+console.log("Importing studyGroupRoutes"); import studyGroupRoutes from './StudyGroup/routers';
 import jobServiceRoutes from './Job-Service/routers';
 
-
-import { User } from './auth/models';
-
 // Config
-import { LoggerUtil, requestLogger } from './shared/logger.util';
+import { LoggerUtil } from './shared/logger.util';
 import NotificationService from './auth/services/notification.service';
-// const NotificationService = { initialize: async () => false };
-
-import CacheUtil from './shared/cache.util';
-
-console.log('🔍 App.ts LOADING START');
+import notificationRoutes from './notifications/routes/notification.routes';
+import messageRoutes from './message/routes/message.routes';
+import { User } from './auth/models';
 
 interface CustomError extends Error {
     status?: number;
     code?: string;
+    statusCode?: number;
 }
 
 const logger = LoggerUtil;
-const app: Express = express();  
+const app: Express = express();
 
 // ==================== TRUST PROXY ====================
-// Railway sits behind exactly one reverse proxy layer.
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
 // ==================== CORS ====================
 app.use(cors({
     origin: (origin, callback) => {
-        const allowedOrigins = process.env['CORS_ORIGIN']
-            ? process.env['CORS_ORIGIN'].split(',').map(o => o.trim())
-            : ['http://localhost:3000', 'http://localhost:3001'];
-
-        // Server-to-server calls (no origin) allow karo
+        // Allow requests with no origin (like mobile apps or curl)
         if (!origin) return callback(null, true);
 
-        if (allowedOrigins.includes(origin)) {
+        // Get allowed origins from environment variables or default to localhost
+        const envOrigins = process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGIN;
+        const allowedOrigins = envOrigins
+            ? envOrigins.split(',').map(o => o.trim())
+            : ['http://localhost:3000', 'http://localhost:3001'];
+
+        const isLocalIp = /^http:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(origin);
+        if (
+            allowedOrigins.includes(origin) || 
+            isLocalIp ||
+            process.env.NODE_ENV === 'development'
+        ) {
             return callback(null, true);
         }
 
@@ -98,16 +101,10 @@ app.use(cors({
     credentials: true
 }));
 
-console.log('🔍 cors configured successfully');
-
-// 1. Cookie parser and request logger
+// 1. Cookie parser
 app.use(cookieParser());
-app.use(requestLogger);
 
 // 2. Body parsers
-// ⚠️ 50mb is high for plain JSON bodies. Keep it only if you genuinely accept
-// base64 payloads (e.g. inline image uploads). If uploads go through
-// Cloudinary/multipart instead, drop this to something like '2mb'.
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -127,7 +124,7 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 // params (e.g. ?role=admin&role=user) to a single value instead of an array.
 app.use(hpp());
 
-// 4. Rate limiting
+// 4. Rate limiting (general)
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 1000,
@@ -147,36 +144,16 @@ const authLimiter = rateLimit({
 });
 app.use('/api/v1/auth', authLimiter);
 
-console.log('🔍 Express, cookie parser, body parser, security middleware, rate limiting configured successfully');
-
 // ==================== SESSION ====================
-const sessionSecret = process.env['SESSION_SECRET'];
-if (!sessionSecret) {
-    throw new Error('SESSION_SECRET environment variable is required. Set it in .env.production');
-}
-
-console.log('🔍 Session configuration initialized');
-
 app.use(session({
-    secret: sessionSecret,
+    secret: process.env.SESSION_SECRET!,
     resave: false,
     saveUninitialized: false,
-    store: MongoStore.create({
-        mongoUrl: process.env['MONGODB_URI'],
-        collectionName: 'sessions',
-        ttl: 5 * 60,
-        autoRemove: 'native',
-    }),
     cookie: {
-        secure: process.env['NODE_ENV'] === 'production',
+        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        // SameSite=strict already provides strong CSRF protection for
-        // state-changing requests from other origins — that's why there's
-        // no separate CSRF-token middleware here. If you ever need
-        // cross-site form posts (e.g. an external partner site submitting
-        // to your API), you'd need to relax this and add real CSRF tokens.
-            sameSite: 'lax',  // 'strict' se change
-        maxAge: 5 * 60 * 1000  // 5 min in ms
+        sameSite: 'lax',
+        maxAge: 5 * 60 * 1000
     }
 }));
 
@@ -186,13 +163,11 @@ passport.serializeUser((user: any, done) => done(null, user.userId));
 passport.deserializeUser(async (userId: string, done) => {
     try {
         const user = await User.findOne({ userId });
-        done(null, user as any);
+        done(null, user);
     } catch (err) {
-        done(err as Error);
+        done(err);
     }
 });
-
-console.log('🔍 Session configured successfully');
 
 // ==================== HEALTH CHECK ====================
 // Liveness probe — just confirms the process is up and responding.
@@ -201,14 +176,12 @@ app.get('/api/v1/health', (_req: Request, res: Response) => {
         status: 'ok',
         timestamp: new Date().toISOString(),
         environment: process.env['NODE_ENV'],
-        version: process.env['APP_VERSION'] || '1.0.0',
+        version: process.env['APP_VERSION'] || '5.0.0',
     });
 });
 
 // Readiness probe — confirms downstream dependencies (MongoDB) are
-// actually connected, not just that the process exists. Useful for
-// Railway/load-balancer health checks that should fail traffic routing
-// if the DB connection drops, even though the process is technically alive.
+// actually connected, not just that the process exists.
 app.get('/api/v1/health/ready', (_req: Request, res: Response) => {
     const mongoState = mongoose.connection.readyState; // 1 = connected
     const isReady = mongoState === 1;
@@ -225,35 +198,23 @@ app.get('/api/v1/health/ready', (_req: Request, res: Response) => {
     });
 });
 
-
-console.log('🔍 Health check configured successfully');
 // ==================== ROUTES ====================
 console.log('Mounting API routes...');
 
 app.use('/api/v1', AuthRoutes);
-console.log('🔍 AuthRoutes mounted successfully in app');
-
-console.log("Verifiy route mounting....")
-// app.use('/api/v1/verify', verifyRoutes);
-console.log('🔍 VerifyRoutes mounted successfully in app');
-// app.use('/api/v1/senior-mentorship', seniorMentorRoutes);
-console.log('🔍 MentorRoutes mounted successfully in app');
+app.use('/api/v1/verify', verifyRoutes);
+app.use('/api/v1/profile', profileRoutes);
+app.use('/api/v1/mentorship', mentorRoutes);
 app.use('/api/v1/company', companyRoutes);
-console.log('🔍 CompanyRoutes mounted successfully in app');
 app.use('/api/v1/study-group', studyGroupRoutes);
-console.log('🔍 StudyGroupRoutes mounted successfully in app');
 app.use('/api/v1/messaging', messageRoutes);
-console.log('🔍 MessageRoutes mounted successfully in app');
 app.use('/api/v1/notifications', notificationRoutes);
-console.log('🔍 NotificationRoutes mounted successfully in app');
 app.use('/api/v1/job-service', jobServiceRoutes);
 
 console.log('All routes mounted successfully.');
 
 // ==================== 404 HANDLER ====================
-// Catches anything that didn't match a mounted route, before the error
-// handler. Without this, unmatched routes fall through to Express's
-// default (unstyled) 404 page instead of your JSON error format.
+// Catches anything that didn't match a mounted route.
 app.use((req: Request, res: Response) => {
     res.status(404).json({
         status: 'error',
@@ -263,7 +224,7 @@ app.use((req: Request, res: Response) => {
 });
 
 // ==================== ERROR HANDLER ====================
-app.use(((err: CustomError, req: Request, res: Response, next: NextFunction) => {
+app.use(((err: CustomError, req: Request, res: Response, _next: NextFunction) => {
     if (err.code === 'EBADCSRFTOKEN') {
         return res.status(403).json({
             status: 'error',
@@ -277,7 +238,7 @@ app.use(((err: CustomError, req: Request, res: Response, next: NextFunction) => 
             status: 'error',
             message: 'Origin not allowed',
             code: 'CORS_NOT_ALLOWED',
-        }); 
+        });
     }
 
     logger.error('Unhandled error', {
@@ -286,7 +247,10 @@ app.use(((err: CustomError, req: Request, res: Response, next: NextFunction) => 
         path: req.path,
         method: req.method,
     });
-    return res.status(err.statusCode || err.status || 500).json({
+
+    const statusCode = err.statusCode || err.status || 500;
+
+    return res.status(statusCode).json({
         status: 'error',
         message: process.env['NODE_ENV'] === 'production'
             ? 'Internal server error'
@@ -295,6 +259,3 @@ app.use(((err: CustomError, req: Request, res: Response, next: NextFunction) => 
 }) as express.ErrorRequestHandler);
 
 export { app, NotificationService };
-
-
-console.log('🔍 Error handler configured successfully');

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Project Model - User Projects with Media, Skills, Team Members
  * 
  * @module models/Project.model
@@ -167,11 +167,13 @@ const ProjectSchema = new Schema<IProject, IProjectModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
@@ -185,6 +187,7 @@ const ProjectSchema = new Schema<IProject, IProjectModel>(
             trim: true,
             minlength: [2, 'Project name must be at least 2 characters'],
             maxlength: [200, 'Project name cannot exceed 200 characters'],
+            index: true,
         },
         projectDescription: {
             type: String,
@@ -264,10 +267,12 @@ const ProjectSchema = new Schema<IProject, IProjectModel>(
         isVisible: {
             type: Boolean,
             default: true,
+            index: true,
         },
         isPinned: {
             type: Boolean,
             default: false,
+            index: true,
         },
         pinnedOrder: {
             type: Number,
@@ -277,6 +282,7 @@ const ProjectSchema = new Schema<IProject, IProjectModel>(
             type: Number,
             required: true,
             default: 0,
+            index: true,
         },
 
         // ==================== METADATA ====================
@@ -289,6 +295,7 @@ const ProjectSchema = new Schema<IProject, IProjectModel>(
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: {
             type: Date,
@@ -297,6 +304,7 @@ const ProjectSchema = new Schema<IProject, IProjectModel>(
         isArchived: {
             type: Boolean,
             default: false,
+            index: true,
         },
         archivedAt: {
             type: Date,

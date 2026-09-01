@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ====================================
  * STUDY SESSION MODEL
  * ====================================
@@ -14,16 +14,19 @@ const studySessionSchema = new Schema<IStudySession>(
       type: String,
       required: true,
       unique: true,
+      index: true,
     },
     user: {
       type: String,
       ref: 'User',
       required: [true, 'User is required'],
+      index: true,
     },
     goal: {
       type: String,
       ref: 'StudyGroup_Goal',
       default: null,
+      index: true,
     },
     startTime: {
       type: Date,
@@ -52,6 +55,7 @@ const studySessionSchema = new Schema<IStudySession>(
       type: String,
       enum: Object.values(SessionStatus),
       default: SessionStatus.ACTIVE,
+      index: true,
     },
     notes: {
       type: String,
@@ -68,15 +72,14 @@ const studySessionSchema = new Schema<IStudySession>(
     timestamps: true,
     // UPDATE: toJSON transform
     toJSON: {
-  virtuals: true,
-  transform: function (_doc, ret) {
-    const r = ret as any;
-    r.id = r.sessionId;
-    delete r._id;
-    delete r.__v;
-    return r;
-  },
-},
+      virtuals: true,
+      transform: function (_doc, ret) {
+        (ret as any).id = (ret as any).sessionId;
+        delete ret._id;
+        delete ret.__v;
+        return ret;
+      }
+    },
     toObject: { virtuals: true },
   }
 );

@@ -7,7 +7,7 @@
 
 import { Router } from 'express';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
-import  attendanceController  from '../controllers/attendance.controller';
+import { attendanceController } from '../controllers';
 
 const router = Router();
 

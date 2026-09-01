@@ -2,9 +2,9 @@
 
 import { Router } from 'express';
 import { param } from 'express-validator';
-import { authenticateJWT } from '@/shared/middlewares/auth.middleware';
+// import { authenticateJWT } from '@middleware/auth.middleware';
 
-import { searchController } from '../controllers/search.controller';
+import * as searchController from '@controllers/searchController';
 import { cacheMiddleware } from '../middleware/cache.middleware';
 import { defaultRateLimiter } from '../middleware/rateLimiter.middleware';
 import { roleBasedAccess } from '../middleware/rbca.middleware';
@@ -152,7 +152,7 @@ router.get(
     '/users',
     requestLogging('search_users'),
     searchLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['user', 'premium', 'admin']),
     sanitizeInput,
     validateRequest(userSearchSchema, 'query'),
@@ -172,7 +172,7 @@ router.get(
     '/company',
     requestLogging('search_company'),
     searchLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['user', 'premium', 'admin']),
     sanitizeInput,
     validateRequest(companySearchSchema, 'query'),
@@ -192,7 +192,7 @@ router.get(
     '/skills',
     requestLogging('search_skills'),
     searchLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['user', 'premium', 'admin']),
     sanitizeInput,
     validateRequest(skillsSearchSchema, 'query'),
@@ -212,7 +212,7 @@ router.get(
     '/suggestions',
     requestLogging('search_suggestions'),
     suggestionLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['user', 'premium', 'admin']),
     sanitizeInput,
     validateRequest(suggestionsSchema, 'query'),
@@ -231,7 +231,7 @@ router.post(
     '/index/:userId',
     requestLogging('update_search_index'),
     indexUpdateLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['admin', 'system']),
     sanitizeInput,
     [
@@ -254,7 +254,7 @@ router.get(
     '/filters',
     requestLogging('search_filters'),
     searchLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['user', 'premium', 'admin']),
     cacheMiddleware({ ttl: 1800, prefix: 'filters' }),
     compressionMiddleware,
@@ -271,7 +271,7 @@ router.post(
     '/cache/manage',
     requestLogging('manage_search_cache'),
     defaultRateLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['admin']),
     sanitizeInput,
     validateRequest(cacheManageSchema, 'body'),
@@ -289,7 +289,7 @@ router.get(
     '/analytics',
     requestLogging('search_analytics'),
     analyticsLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['admin', 'premium']),
     validateRequest(analyticsSchema, 'query'),
     analyticsCache,
@@ -307,7 +307,7 @@ router.post(
     '/optimize',
     requestLogging('search_optimize'),
     defaultRateLimiter, // 2 per hour
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['admin']),
     sanitizeInput,
     validateRequest(searchOptimizeSchema, 'body'),
@@ -325,7 +325,7 @@ router.get(
     '/history',
     requestLogging('search_history'),
     defaultRateLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['user', 'premium', 'admin']),
     validateRequest(historySchema, 'query'),
     cacheMiddleware({ ttl: 300, prefix: 'history', varyBy: ['userId'] }),
@@ -344,7 +344,7 @@ router.get(
     '/recommendations',
     requestLogging('search_recommendations'),
     defaultRateLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['user', 'premium', 'admin']),
     validateRequest(recommendationsSchema, 'query'),
     cacheMiddleware({ ttl: 900, prefix: 'recommendations', varyBy: ['userId', 'type'] }),
@@ -362,7 +362,7 @@ router.post(
     '/validate',
     requestLogging('search_validate'),
     searchLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['user', 'premium', 'admin']),
     sanitizeInput,
     validateRequest(validationSchema, 'body'),
@@ -379,7 +379,7 @@ router.get(
     '/audit',
     requestLogging('search_audit'),
     defaultRateLimiter,
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['admin']),
     validateRequest(auditSchema, 'query'),
     cacheMiddleware({ ttl: 300, prefix: 'audit' }),
@@ -413,7 +413,7 @@ router.get('/health', (_req, res) => {
  */
 router.get(
     '/metrics',
-    authenticateJWT,
+    // authenticateJWT,
     roleBasedAccess(['system', 'monitoring']),
     (_req, res) => {
         // Return Prometheus-formatted metrics

@@ -3,7 +3,7 @@
  * Architecture: One document per user, posts[] array inside
  *
  * @module controllers/post.controller
- * @version 2.2.0 (reach-based feed + connection status + user-specific posts)
+ * @version 2.0.0
  */
 
 import { Request, Response } from 'express';
@@ -32,6 +32,7 @@ class PostController {
     /**
      * ✅ CREATE POST
      * POST /api/v1/activity/create-posts
+     * Routes me :postId nahi hai — entryId response me milega
      */
     static async createPost(
         req: Request & { user?: UserPayload },
@@ -86,6 +87,7 @@ class PostController {
                 return;
             }
 
+            // Audit log (non-blocking)
             setImmediate(async () => {
                 try {
                     await AuditProducer.connect();
@@ -213,16 +215,11 @@ class PostController {
     }
 
     /**
-     * ✅ GET POSTS BY USER ID (public/other-user profile view)
-     * GET /api/v1/activity/posts/user/:userId
-     *
-     * Requester must still be authenticated (so we know WHO is viewing —
-     * needed for isLikedByCurrentUser etc.) but the posts returned belong
-     * to the :userId in the URL, NOT to req.user.userId. This is what
-     * powers the "Activity" section on someone else's profile page.
+     * ✅ GET POSTS BY USER ID (for visiting another user's profile)
+     * GET /api/v1/activity/get-all/posts/user/:targetUserId
      */
-    static async getUserPostsById(
-        req: Request<{ userId: string }> & { user?: UserPayload },
+    static async getPostsByUserId(
+        req: Request<{ targetUserId: string }> & { user?: UserPayload },
         res: Response
     ): Promise<void> {
         const correlationId = (req as any).correlationId || uuidv4();
@@ -233,29 +230,20 @@ class PostController {
                 return;
             }
 
-            const targetUserId = req.params.userId;
-            const requestingUserId = req.user.userId;
+            const { targetUserId } = req.params;
+            const currentUserId = req.user.userId;
 
             if (!targetUserId) {
-                ResponseUtil.badRequest(res, 'User ID is required');
+                ResponseUtil.badRequest(res, 'Target user ID is required');
                 return;
             }
 
-            // Visitors should never see archived/deleted posts of someone else,
-            // regardless of any query param they try to pass.
-            const includeArchived = targetUserId === requestingUserId
-                ? req.query.includeArchived === 'true'
-                : false;
+            // Reuse the same service — pass targetUserId as the owner, currentUserId for like status
+            const result = await PostService.getAllPosts(targetUserId, false, currentUserId);
 
-            const result = await PostService.getAllPosts(
-                targetUserId,       // whose posts to fetch
-                includeArchived,
-                requestingUserId    // used for isLikedByCurrentUser flag
-            );
-
-            LoggerUtil.info('User posts fetched (by userId)', {
+            LoggerUtil.info('Posts fetched by userId', {
                 targetUserId,
-                requestingUserId,
+                requestedBy: currentUserId,
                 count: result.total,
                 correlationId,
             });
@@ -264,10 +252,9 @@ class PostController {
             return;
 
         } catch (error: any) {
-            LoggerUtil.error('Get user posts by id failed', {
+            LoggerUtil.error('Get posts by userId failed', {
                 error: error.message,
-                targetUserId: req.params.userId,
-                requestingUserId: req.user?.userId,
+                targetUserId: req.params.targetUserId,
                 correlationId,
             });
             ResponseUtil.internalError(res, error.message, error);
@@ -276,8 +263,8 @@ class PostController {
     }
 
     /**
-     * ✅ GET ALL POSTS FOR HOME FEED (sabhi users ke posts — reach-based ranking)
-     * GET /api/v1/activity/posts/feed/all?page=1&limit=20
+     * ✅ GET ALL POSTS FOR HOME FEED (sabhi users ke posts)
+     * GET /api/v1/activity/posts/feed/all
      */
     static async getAllPostsForHome(
         req: Request & { user?: UserPayload },
@@ -293,15 +280,12 @@ class PostController {
 
             const currentUserId = req.user.userId;
             const includeArchived = req.query.includeArchived === 'true';
-            const page = parseInt(req.query.page as string) || 1;
-            const limit = parseInt(req.query.limit as string) || 20;
 
-            const result = await PostService.getAllPostsForHome(currentUserId, includeArchived, page, limit);
+            const result = await PostService.getAllPostsForHome(currentUserId, includeArchived);
 
             LoggerUtil.info('Home feed posts fetched', {
                 currentUserId,
                 totalPosts: result.total,
-                page,
                 correlationId,
             });
 
@@ -322,6 +306,7 @@ class PostController {
     /**
      * ✅ GET POST BY ID (entryId)
      * GET /api/v1/activity/get-post/:postId
+     * Note: :postId param ab entryId hai
      */
     static async getPostById(
         req: Request<{ postId: string }> & { user?: UserPayload },
@@ -336,7 +321,7 @@ class PostController {
             }
 
             const userId = req.user.userId;
-            const entryId = req.params.postId;
+            const entryId = req.params.postId; // route param naam same rakha
 
             if (!entryId) {
                 ResponseUtil.badRequest(res, 'Post ID is required');
@@ -728,46 +713,11 @@ class PostController {
         }
     }
 
-   /**
-     * ✅ NEW: GET SAVED POSTS (current logged-in user ke)
-     * GET /api/v1/activity/posts/saved
+    /**
+     * ✅ GET POST ANALYTICS
+     * GET /api/v1/activity/posts/:postId/analytics
      */
-   static async getSavedPosts(
-    req: Request & { user?: UserPayload },
-    res: Response
-): Promise<void> {
-    const correlationId = (req as any).correlationId || uuidv4();
-
-    try {
-        if (!req.user?.userId) {
-            ResponseUtil.unauthorized(res, 'Authentication required');
-            return;
-        }
-
-        const userId = req.user.userId;
-        const result = await PostService.getSavedPosts(userId);
-
-        LoggerUtil.info('Saved posts fetched', { userId, count: result.total, correlationId });
-
-        ResponseUtil.success(res, result, 'Saved posts fetched successfully');
-        return;
-
-    } catch (error: any) {
-        LoggerUtil.error('Get saved posts failed', {
-            error: error.message,
-            userId: req.user?.userId,
-            correlationId,
-        });
-        ResponseUtil.internalError(res, error.message, error);
-        return;
-    }
-}
-
-/**
- * ✅ GET POST ANALYTICS
- * GET /api/v1/activity/posts/:postId/analytics
- */
-static async getPostAnalytics(
+    static async getPostAnalytics(
         req: Request<{ postId: string }> & { user?: UserPayload },
         res: Response
     ): Promise<void> {
@@ -865,6 +815,7 @@ static async getPostAnalytics(
     /**
      * ✅ TRACK POST VIEW
      * POST /api/v1/activity/posts/:postId/track-view
+     * POST /api/v1/activity/posts/:postId/view
      */
     static async trackPostView(
         req: Request<{ postId: string }> & { user?: UserPayload },
@@ -1004,221 +955,6 @@ static async getPostAnalytics(
             }
             if (error.message === 'You have not liked this post') {
                 ResponseUtil.badRequest(res, 'You have not liked this post');
-                return;
-            }
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-    /**
-     * ✅ REACT TO POST
-     * POST /api/v1/activity/posts/:postId/react
-     * body: { type: 'like' | 'celebrate' | 'support' | 'love' | 'insightful' | 'funny' }
-     */
-    static async reactToPost(
-        req: Request<{ postId: string }> & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-
-            const entryId = req.params.postId;
-            const userId = req.user.userId;
-            const { type } = req.body;
-
-            if (!type) {
-                ResponseUtil.badRequest(res, 'Reaction type is required');
-                return;
-            }
-
-            const result = await PostService.reactToPost(entryId, userId, type);
-
-            ResponseUtil.success(res, result, 'Reaction added successfully');
-            return;
-
-        } catch (error: any) {
-            LoggerUtil.error('React to post failed', {
-                error: error.message,
-                entryId: req.params.postId,
-                userId: req.user?.userId,
-                correlationId,
-            });
-
-            if (error.message === 'Post not found') {
-                ResponseUtil.notFound(res, 'Post not found');
-                return;
-            }
-            if (error.message === 'Invalid reaction type') {
-                ResponseUtil.badRequest(res, 'Invalid reaction type');
-                return;
-            }
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-    /**
-     * ✅ REMOVE REACTION
-     * DELETE /api/v1/activity/posts/:postId/react
-     */
-    static async removeReaction(
-        req: Request<{ postId: string }> & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-
-            const entryId = req.params.postId;
-            const userId = req.user.userId;
-
-            const result = await PostService.removeReaction(entryId, userId);
-
-            ResponseUtil.success(res, result, 'Reaction removed successfully');
-            return;
-
-        } catch (error: any) {
-            LoggerUtil.error('Remove reaction failed', {
-                error: error.message,
-                entryId: req.params.postId,
-                userId: req.user?.userId,
-                correlationId,
-            });
-
-            if (error.message === 'Post not found') {
-                ResponseUtil.notFound(res, 'Post not found');
-                return;
-            }
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-    /**
-     * ✅ GET USER REACTIONS (for "Reactions" activity tab)
-     * GET /api/v1/activity/reactions/user/:userId
-     */
-    static async getUserReactions(
-        req: Request<{ userId: string }> & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-
-            const targetUserId = req.params.userId;
-            const result = await PostService.getUserReactions(targetUserId);
-
-            ResponseUtil.success(res, result, 'Reactions fetched successfully');
-            return;
-
-        } catch (error: any) {
-            LoggerUtil.error('Get user reactions failed', {
-                error: error.message,
-                targetUserId: req.params.userId,
-                correlationId,
-            });
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-    /**
-     * ✅ NEW: Get all users who reacted to a specific post (Reactions modal)
-     * GET /api/v1/activity/posts/:postId/reactors
-     */
-    static async getPostReactors(
-        req: Request<{ postId: string }> & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-
-            const entryId = req.params.postId;
-            if (!entryId) {
-                ResponseUtil.badRequest(res, 'Post ID is required');
-                return;
-            }
-
-            const result = await PostService.getPostReactors(entryId);
-
-            ResponseUtil.success(res, result, 'Reactors fetched successfully');
-            return;
-
-        } catch (error: any) {
-            LoggerUtil.error('Get post reactors failed', {
-                error: error.message,
-                entryId: req.params.postId,
-                correlationId,
-            });
-
-            if (error.message === 'Post not found') {
-                ResponseUtil.notFound(res, 'Post not found');
-                return;
-            }
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-    /**
-     * ✅ RECORD POST SEND
-     * POST /api/v1/profile/activity/posts/:postId/record-send
-     */
-    static async recordSend(
-        req: Request<{ postId: string }> & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-
-            const entryId = req.params.postId;
-            const userId = req.user.userId;
-            const { recipientCount } = req.body;
-
-            if (!entryId) {
-                ResponseUtil.badRequest(res, 'Post ID is required');
-                return;
-            }
-
-            const result = await PostService.recordSend(entryId, userId, recipientCount || 1);
-
-            ResponseUtil.success(res, result, 'Post send recorded successfully');
-            return;
-
-        } catch (error: any) {
-            LoggerUtil.error('Record post send failed', {
-                error: error.message,
-                entryId: req.params.postId,
-                correlationId,
-            });
-
-            if (error.message === 'Post not found') {
-                ResponseUtil.notFound(res, 'Post not found');
                 return;
             }
             ResponseUtil.internalError(res, error.message, error);

@@ -13,11 +13,14 @@
  *  6. No N+1 on populate — single populate call with nested paths
  */
 
+import mongoose from 'mongoose';
 import { Server, Socket } from 'socket.io';
 import { LoggerUtil } from '@/shared/logger.util';
 import Message from '../models/Message.model';
 import GroupMember from '../models/GroupMember.model';
 import { MessageType } from '../enums/MessageType.enum';
+import ProfilePhoto from '@/Profile/models/ProfilePhoto.model';
+import { generateSecureId } from '@/shared/security';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_CONTENT_LENGTH = 2_000;
@@ -43,9 +46,17 @@ async function assertMembership(
   socket: Socket,
   event: string
 ): Promise<boolean> {
+  // OLD: field names 'user' and 'group' don't match GroupMember model (uses userId, groupId)
+  // const member = await GroupMember.findOne({
+  //   user: userId,
+  //   group: groupId,
+  //   status: 'active',
+  // }).lean();
+
+  // NEW: correct field names matching GroupMember model schema
   const member = await GroupMember.findOne({
-    user: userId,
-    group: groupId,
+    userId: userId,
+    groupId: groupId,
     status: 'active',
   }).lean();
 
@@ -58,6 +69,21 @@ async function assertMembership(
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
 export const handleChatEvents = (io: Server, socket: Socket, userId: string): void => {
+
+  // ========================================================
+  // JOIN & LEAVE GROUP CHAT ROOMS
+  // ========================================================
+  socket.on('join-group', (groupId: string) => {
+    if (!groupId || typeof groupId !== 'string') return;
+    socket.join(groupId);
+    LoggerUtil.debug(`User ${userId} joined chat group: ${groupId}`);
+  });
+
+  socket.on('leave-group', (groupId: string) => {
+    if (!groupId || typeof groupId !== 'string') return;
+    socket.leave(groupId);
+    LoggerUtil.debug(`User ${userId} left chat group: ${groupId}`);
+  });
 
   // ========================================================
   // SEND MESSAGE
@@ -110,6 +136,7 @@ export const handleChatEvents = (io: Server, socket: Socket, userId: string): vo
 
       // ── Persist ──────────────────────────────────────────────────────────
       const message = await Message.create({
+        messageId: generateSecureId(),
         groupId,
         sender: userId,
         content: sanitizedContent,
@@ -120,18 +147,36 @@ export const handleChatEvents = (io: Server, socket: Socket, userId: string): vo
         fileSize: fileSize || null,
       });
 
-      // Single populate call with all needed paths
-      await message.populate([
-        { path: 'sender', select: 'name avatar email' },
-        ...(replyTo ? [{ path: 'replyTo', select: 'content sender' }] : []),
-      ]);
+      // Populate replyTo if exists
+      if (replyTo) {
+        await message.populate({ path: 'replyTo', select: 'content sender' });
+      }
+
+      // Manually fetch sender because Mongoose populate fails on UUID string reference
+      const User = mongoose.model('User');
+      const senderUser = await User.findOne({ userId }).select('userId name profilePhotoId email firstName lastName username').lean().exec();
+      
+      let senderPayload: any = senderUser || { userId, name: 'User' };
+      
+      if (senderPayload && senderPayload.profilePhotoId) {
+        try {
+          // Import ProfilePhoto if not imported, or use mongoose.model
+          const ProfilePhoto = mongoose.model('ProfilePhoto');
+          const photo = await ProfilePhoto.findOne({ photoId: senderPayload.profilePhotoId }).lean().exec();
+          if (photo) {
+            senderPayload.profileImage = (photo as any).cloudinarySecureUrl;
+          }
+        } catch (e) {
+          LoggerUtil.error('Failed to fetch profile photo in chat handler', { error: (e as Error).message });
+        }
+      }
 
       LoggerUtil.info(`Message created: ${message._id} in group ${groupId}`);
 
       io.to(groupId).emit('new-message', {
         _id: message._id,
         groupId: message.groupId,
-        sender: message.sender,
+        sender: senderPayload,
         content: message.content,
         messageType: message.messageType,
         fileUrl: message.fileUrl,
@@ -225,9 +270,18 @@ export const handleChatEvents = (io: Server, socket: Socket, userId: string): vo
 
       // Check leader role only if not the sender (saves one DB query for senders)
       if (!isSender) {
+        // OLD: wrong field names
+        // const isLeader = await GroupMember.findOne({
+        //   user: userId,
+        //   group: message.groupId,
+        //   role: 'leader',
+        //   status: 'active',
+        // }).lean();
+
+        // NEW: correct field names matching GroupMember model schema
         const isLeader = await GroupMember.findOne({
-          user: userId,
-          group: message.groupId,
+          userId: userId,
+          groupId: message.groupId,
           role: 'leader',
           status: 'active',
         }).lean();
@@ -349,9 +403,18 @@ export const handleChatEvents = (io: Server, socket: Socket, userId: string): vo
         return;
       }
 
+      // OLD: wrong field names
+      // const isLeaderOrMod = await GroupMember.findOne({
+      //   user: userId,
+      //   group: message.groupId,
+      //   role: { $in: ['leader', 'moderator'] },
+      //   status: 'active',
+      // }).lean();
+
+      // NEW: correct field names matching GroupMember model schema
       const isLeaderOrMod = await GroupMember.findOne({
-        user: userId,
-        group: message.groupId,
+        userId: userId,
+        groupId: message.groupId,
         role: { $in: ['leader', 'moderator'] },
         status: 'active',
       }).lean();

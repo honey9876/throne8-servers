@@ -80,6 +80,7 @@ class ExperienceController {
 
             const experience = await ExperienceService.createExperience(userId, req.body);
 
+            // Audit log (non-blocking)
             setImmediate(async () => {
                 try {
                     await AuditProducer.connect();
@@ -131,6 +132,7 @@ class ExperienceController {
                 correlationId,
             });
 
+            // Audit log for error
             setImmediate(async () => {
                 try {
                     await AuditProducer.connect();
@@ -192,7 +194,7 @@ class ExperienceController {
                 return;
             }
 
-            const userId = req.user.userId;
+            const userId = (req.query.userId as string) || req.user.userId;
             const includeArchived = req.query.includeArchived === 'true';
 
             const result = await ExperienceService.getAllExperiences(userId, includeArchived);
@@ -214,54 +216,6 @@ class ExperienceController {
             logger.error('Get all experiences failed', {
                 error: error.message,
                 userId: req.user?.userId,
-                correlationId,
-            });
-
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-    /**
-     * ✅ GET ALL EXPERIENCES BY USER ID (PUBLIC)
-     * GET /api/v1/experience/get-all-experiences/:userId
-     * @access Public
-     */
-    static async getAllExperiencesByUserId(
-        req: Request<{ userId: string }> & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            const { userId } = req.params;
-
-            if (!userId) {
-                ResponseUtil.badRequest(res, 'User ID is required');
-                return;
-            }
-
-            const includeArchived = req.query.includeArchived === 'true';
-
-            const result = await ExperienceService.getAllExperiences(userId, includeArchived);
-
-            logger.info('All experiences fetched (public)', {
-                userId,
-                count: result.total,
-                correlationId,
-            });
-
-            ResponseUtil.success(
-                res,
-                result,
-                'Experiences fetched successfully'
-            );
-            return;
-
-        } catch (error: any) {
-            logger.error('Get all experiences by userId failed', {
-                error: error.message,
-                userId: req.params.userId,
                 correlationId,
             });
 
@@ -353,6 +307,7 @@ class ExperienceController {
                 req.body
             );
 
+            // Audit log
             setImmediate(async () => {
                 try {
                     await AuditProducer.connect();
@@ -429,6 +384,7 @@ class ExperienceController {
                 permanent
             );
 
+            // Audit log
             setImmediate(async () => {
                 try {
                     await AuditProducer.connect();

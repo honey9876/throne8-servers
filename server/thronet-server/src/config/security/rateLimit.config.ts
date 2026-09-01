@@ -1,3 +1,5 @@
+//../src/config/security/rateLimit.config.ts
+
 /**
  * Rate‑Limit Global Configuration & Policies
  * Centralised, environment‑aware, and extensible.
@@ -10,16 +12,15 @@ const ONE_MINUTE = 60 * 1000;
 const FIFTEEN_MINUTES = 15 * ONE_MINUTE;
 const ONE_HOUR = 60 * ONE_MINUTE;
 
-const isDev = process.env.NODE_ENV !== 'production';
-
 /**
  * Global defaults – applied when no specific policy exists
  */
 export const global = {
     windowMs: FIFTEEN_MINUTES,
-    maxRequests: isDev ? 1000 : 100,
+    maxRequests: 100,
     message: 'Too many requests from this IP, please try again later.',
     redisPrefix: 'ratelimit:global',
+    // Skip decrement on success (optional)
     skipSuccessfulRequests: false,
 };
 

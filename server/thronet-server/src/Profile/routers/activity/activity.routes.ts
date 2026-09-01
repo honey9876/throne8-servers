@@ -2,7 +2,7 @@
  * Activity Routes - API Endpoints for Posts, Comments, Media
  * 
  * @module routes/activity.routes
- * @version 1.1.0
+ * @version 1.0.0
  */
 
 import express, { Request, Response } from 'express';
@@ -23,7 +23,6 @@ import {
 import ResponseUtil from '@/shared/response.util';
 import { PostService } from '@/shared/services/index.service';
 import RepostController from '@/Profile/controllers/activity/repost.controller';
-import ReportMuteController from '@/Profile/controllers/reportMute.controller';
 
 const router = express.Router();
 
@@ -63,16 +62,7 @@ router.get(
     // rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
     PostController.getUserPostsPerformance as any
 );
-router.get(
-    '/posts/:postId/reactors',
-     AuthMiddleware.authenticate as any, 
-     PostController.getPostReactors as any
-    );
-router.post(
-    '/posts/:postId/record-send',
-    AuthMiddleware.authenticate as any,
-    PostController.recordSend as any
-);
+
 /**
  * @route   GET /api/v1/activity/posts/:postId/analytics
  * @desc    Get detailed post analytics
@@ -99,7 +89,7 @@ router.post(
 );
 
 /**
- * @route   GET /api/v1/activity/posts
+ * @route   GET /api/v1/activity/get-all/posts
  * @desc    Get all posts of authenticated user
  * @access  Private
  */
@@ -111,18 +101,15 @@ router.get(
 );
 
 /**
- * @route   GET /api/v1/activity/posts/user/:userId
- * @desc    Get all posts belonging to a SPECIFIC user (for viewing someone
- *          else's profile). Requester must be authenticated, but the posts
- *          returned belong to :userId, not the requester. Archived posts
- *          are never returned unless :userId === the requester's own id.
- * @access  Private (any logged-in user can view)
+ * @route   GET /api/v1/activity/get-all/posts/user/:targetUserId
+ * @desc    Get public posts of any user by their userId (for profile viewing)
+ * @access  Private
  */
 router.get(
-    '/posts/user/:userId',
+    '/get-all/posts/user/:targetUserId',
     AuthMiddleware.authenticate as any,
     rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
-    PostController.getUserPostsById as any
+    PostController.getPostsByUserId as any
 );
 
 /**
@@ -225,19 +212,6 @@ router.put(
     PostController.savePost as any
 );
 
-/**
- * @route   GET /api/v1/activity/posts/saved
- * @desc    Get all posts saved by the authenticated user
- * @access  Private
- */
-router.get(
-    '/posts/saved',
-    AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
-    PostController.getSavedPosts as any
-);
-
-
 // ==================== POST LIKES ROUTES ====================
 
 /**
@@ -264,45 +238,6 @@ router.delete(
     PostController.unlikePost as any
 );
 
-// ==================== POST REACTIONS ROUTES ====================
-
-/**
- * @route   POST /api/v1/activity/posts/:postId/react
- * @desc    Add/switch a reaction (like/celebrate/support/love/insightful/funny)
- * @access  Private
- * @body    { type: string }
- */
-router.post(
-    '/posts/:postId/react',
-    AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
-    PostController.reactToPost as any
-);
-
-/**
- * @route   DELETE /api/v1/activity/posts/:postId/react
- * @desc    Remove reaction from a post
- * @access  Private
- */
-router.delete(
-    '/posts/:postId/react',
-    AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
-    PostController.removeReaction as any
-);
-
-/**
- * @route   GET /api/v1/activity/reactions/user/:userId
- * @desc    Get all posts a specific user has reacted to (Reactions tab)
- * @access  Private
- */
-router.get(
-    '/reactions/user/:userId',
-    AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
-    PostController.getUserReactions as any
-);
-
 // ==================== COMMENT ROUTES ====================
 
 /**
@@ -314,6 +249,7 @@ router.get(
 router.post(
     '/create-comment/comments',
     AuthMiddleware.authenticate as any,
+    upload.uploadSingle('image'),
     validateCreateComment,
     // rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
     CommentController.createComment as any
@@ -463,16 +399,15 @@ router.delete(
 );
 
 /**
- * @route   GET /api/v1/activity/comments/user/:userId
- * @desc    Get all comments made by a SPECIFIC user (viewing someone
- *          else's profile). Requester must be authenticated.
- * @access  Private (any logged-in user can view)
+ * @route   POST /api/v1/activity/comments/:commentId/react
+ * @desc    React to a comment with an emoji
+ * @access  Private
  */
-router.get(
-    '/comments/user/:userId',
+router.post(
+    '/comments/:commentId/react',
     AuthMiddleware.authenticate as any,
     rateLimitMiddleware({ maxRequests: 100, windowMs: 60000 }),
-    CommentController.getCommentsByUserId as any
+    CommentController.reactComment as any
 );
 
 // ==================== MEDIA ROUTES ====================
@@ -578,6 +513,13 @@ router.post(
 // ==================== REPOST ROUTES ====================
 // Existing routes ke baad add karo
 
+// Get my reposts — MUST be before /:entryId routes to avoid wildcard clash
+router.get(
+    '/posts/reposts/my-reposts',
+    AuthMiddleware.authenticate as any,
+    RepostController.getMyReposts as any
+);
+
 // Create repost / quote repost
 router.post(
     '/posts/:entryId/repost',
@@ -600,13 +542,6 @@ router.get(
     RepostController.getRepostsByPost as any
 );
 
-// Get my reposts
-router.get(
-    '/posts/reposts/my-reposts',
-    AuthMiddleware.authenticate as any,
-    RepostController.getMyReposts as any
-);
-
 // Check repost status
 router.get(
     '/posts/:entryId/repost-status',
@@ -615,98 +550,4 @@ router.get(
 );
 
 
-/**
- * @route   POST /api/v1/activity/comments/:commentId/report
- * @desc    Report a comment
- * @access  Private
- * @body    { reason?: string }
- */
-router.post(
-    '/comments/:commentId/report',
-    AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 20, windowMs: 60000 }),
-    ReportMuteController.reportComment as any
-);
-
-/**
- * @route   POST /api/v1/activity/comments/:commentId/mute-thread
- * @desc    Mute notifications for the whole post/thread this comment belongs to
- * @access  Private
- */
-router.post(
-    '/comments/:commentId/mute-thread',
-    AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
-    ReportMuteController.muteThread as any
-);
-
-/**
- * @route   DELETE /api/v1/activity/posts/:postId/mute-thread
- * @desc    Unmute a previously muted thread
- * @access  Private
- */
-router.delete(
-    '/posts/:postId/mute-thread',
-    AuthMiddleware.authenticate as any,
-    ReportMuteController.unmuteThread as any
-);
-
-/**
- * @route   GET /api/v1/activity/muted-threads
- * @desc    Get list of postIds the user has muted
- * @access  Private
- */
-router.get(
-    '/muted-threads',
-    AuthMiddleware.authenticate as any,
-    ReportMuteController.getMutedThreads as any
-);
-
-
-
-
-
-// ==================== REPOST ROUTES ====================
-
-router.post(
-    '/posts/:entryId/repost',
-    AuthMiddleware.authenticate as any,
-    validateCreateRepost,
-    RepostController.createRepost as any
-);
-
-router.delete(
-    '/posts/reposts/:repostId',
-    AuthMiddleware.authenticate as any,
-    RepostController.deleteRepost as any
-);
-
-router.get(
-    '/posts/:entryId/reposts',
-    AuthMiddleware.authenticate as any,
-    RepostController.getRepostsByPost as any
-);
-
-router.get(
-    '/posts/reposts/my-reposts',
-    AuthMiddleware.authenticate as any,
-    RepostController.getMyReposts as any
-);
-
-router.get(
-    '/posts/:entryId/repost-status',
-    AuthMiddleware.authenticate as any,
-    RepostController.getRepostStatus as any
-);
-
-router.post(
-    '/posts/reposts/:repostId/react',
-    AuthMiddleware.authenticate as any,
-    RepostController.likeRepost as any
-);
-router.delete(
-    '/posts/reposts/:repostId/react',
-    AuthMiddleware.authenticate as any,
-    RepostController.unlikeRepost as any
-);
-export default router;// Force Railway rebuild 07/30/2026 17:41:23
+export default router;

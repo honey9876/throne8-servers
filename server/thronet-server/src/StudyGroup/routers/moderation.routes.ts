@@ -31,7 +31,7 @@ import {
   reportUser,
   reportMessage,
   getReports,
-} from '../controllers/moderation.controller';
+} from '../controllers';
 
 // Validators (Joi Schemas)
 import {

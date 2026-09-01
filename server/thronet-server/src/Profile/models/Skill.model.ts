@@ -1,6 +1,16 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
-import { v4 as uuidv4 } from 'uuid';
+/**
+ * Skill Model - User Skills and Endorsements
+ * Stores user skills with endorsements, featured/pinned status, and categories
+ * 
+ * @module models/Skill.model
+ * @version 1.0.0
+ */
+
 import { LoggerUtil } from '@/shared/logger.util';
+import mongoose, { Schema, Document, Model } from 'mongoose';
+import { v4 as uuidv4 } from 'uuid';
+
+// ==================== INTERFACES ====================
 
 export interface IEndorser {
     userId: string;
@@ -10,63 +20,88 @@ export interface IEndorser {
 export interface ISkill extends Document {
     skillId: string;
     userId: string;
+
+    // Basic Info
     skillName: string;
-    category?: string;
+    category?: string;  // e.g., "Programming", "Design", "Marketing"
+
+    // Featured/Pinned (Top 3)
     isPinned: boolean;
-    pinnedOrder?: number;
+    pinnedOrder?: number;  // 1, 2, or 3 (for top 3)
     pinnedAt?: Date;
+
+    // Endorsements
     endorsements: IEndorser[];
     endorsementCount: number;
+
+    // Skill Metadata
     skillStrength?: 'beginner' | 'intermediate' | 'advanced' | 'expert';
     yearsOfExperience?: number;
     lastUsed?: Date;
+
+    // Skill Assessment & Quiz
     hasAssessment?: boolean;
     assessmentPassed?: boolean;
     assessmentScore?: number;
     assessmentDate?: Date;
-    skillBadge?: string;
+    skillBadge?: string;  // Badge earned after passing quiz
+
+    // Skill Level
     skillLevel?: 'beginner' | 'intermediate' | 'advanced' | 'expert';
-    showEndorsements: boolean;
-    endorsementNotifications: boolean;
-    displayOrder?: number;
-    industry?: string;
-    suggestedBySystem: boolean;
+
+    // Endorsement Settings
+    showEndorsements: boolean;  // Show/hide endorsements toggle
+    endorsementNotifications: boolean;  // Enable/disable endorsement notifications
+
+    // Skill Reordering
+    displayOrder?: number;  // For drag & drop reordering
+
+    // Industry/Suggestions
+    industry?: string;  // Industry-specific skill
+    suggestedBySystem: boolean;  // System-recommended skill
+
+    // Export/Archive metadata
     lastExportedAt?: Date;
-    isVisible: boolean;
+
+    // Visibility
+    isVisible: boolean;  // Show/Hide skill on profile
+
+    // Metadata
+    createdAt: Date;
+    updatedAt: Date;
+
+    // Soft Delete / Archive
     isDeleted: boolean;
     deletedAt?: Date;
     isArchived: boolean;
     archivedAt?: Date;
-    createdAt: Date;
-    updatedAt: Date;
 }
 
 export interface ISkillModel extends Model<ISkill> {
+    [x: string]: any;
     findByUserId(userId: string, includeArchived?: boolean): Promise<ISkill[]>;
     getUserSkillCount(userId: string): Promise<number>;
     findActiveById(skillId: string, userId: string): Promise<ISkill | null>;
     getPinnedSkills(userId: string): Promise<ISkill[]>;
     getTopEndorsedSkills(userId: string, limit?: number): Promise<ISkill[]>;
-    getSkillsByIndustry(userId: string, industry: string): Promise<ISkill[]>;
-    getSuggestedSkills(userId: string): Promise<ISkill[]>;
-    reorderSkills(userId: string, skillIds: string[]): Promise<boolean>;
 }
 
-const EndorserSchema = new Schema<IEndorser>(
-    {
-        userId: {
-            type: String,
-            required: true,
-            validate: {
-                validator: (v: string) =>
-                    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
-                message: 'Invalid endorser User ID format',
-            },
+// ==================== SCHEMA ====================
+
+const EndorserSchema = new Schema<IEndorser>({
+    userId: {
+        type: String,
+        required: true,
+        validate: {
+            validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
+            message: 'Invalid endorser User ID format',
         },
-        endorsedAt: { type: Date, default: Date.now },
     },
-    { _id: false }
-);
+    endorsedAt: {
+        type: Date,
+        default: Date.now,
+    },
+}, { _id: false });
 
 const SkillSchema = new Schema<ISkill, ISkillModel>(
     {
@@ -75,104 +110,213 @@ const SkillSchema = new Schema<ISkill, ISkillModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
-                validator: (v: string) =>
-                    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
+                validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
             },
         },
+
+        // ==================== BASIC INFO ====================
         skillName: {
             type: String,
             required: [true, 'Skill name is required'],
             trim: true,
-            minlength: [2, 'Skill name must be at least 2 characters'],
+            minlength: [1, 'Skill name must be at least 1 character'],
             maxlength: [100, 'Skill name cannot exceed 100 characters'],
             validate: {
-                validator: (v: string) => /^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()]+$/.test(v),
-                message: 'Skill name must start with a letter or number',
+                validator: (v: string) => /^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()/&]*$/.test(v),
+                message: 'Skill name must start with a letter or number and contain valid characters',
             },
+            index: true,
         },
-        category: { type: String, trim: true, maxlength: 50 },
-        isPinned: { type: Boolean, default: false },
+        category: {
+            type: String,
+            trim: true,
+            maxlength: [50, 'Category cannot exceed 50 characters'],
+            index: true,
+        },
+
+        // ==================== PINNED (TOP 3) ====================
+        isPinned: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
         pinnedOrder: {
             type: Number,
             min: 1,
             max: 3,
             validate: {
                 validator: function (this: ISkill, v: number | undefined) {
-                    if (this.isPinned && (!v || v < 1 || v > 3)) return false;
+                    // If isPinned is true, pinnedOrder must be 1, 2, or 3
+                    if (this.isPinned && (!v || v < 1 || v > 3)) {
+                        return false;
+                    }
                     return true;
                 },
                 message: 'Pinned order must be 1, 2, or 3',
             },
         },
-        pinnedAt: Date,
-        endorsements: { type: [EndorserSchema], default: [] },
-        endorsementCount: { type: Number, default: 0 },
+        pinnedAt: {
+            type: Date,
+        },
+
+        // ==================== ENDORSEMENTS ====================
+        endorsements: {
+            type: [EndorserSchema],
+            default: [],
+        },
+        endorsementCount: {
+            type: Number,
+            default: 0,
+            index: true,
+        },
+
+        // ==================== SKILL METADATA ====================
         skillStrength: {
             type: String,
             enum: ['beginner', 'intermediate', 'advanced', 'expert'],
             lowercase: true,
         },
-        yearsOfExperience: { type: Number, min: 0, max: 50 },
-        lastUsed: Date,
-        hasAssessment: { type: Boolean, default: false },
-        assessmentPassed: { type: Boolean, default: false },
-        assessmentScore: { type: Number, min: 0, max: 100 },
-        assessmentDate: Date,
-        skillBadge: { type: String, maxlength: 100 },
+        yearsOfExperience: {
+            type: Number,
+            min: 0,
+            max: 50,
+        },
+        lastUsed: {
+            type: Date,
+        },
+
+        hasAssessment: {
+            type: Boolean,
+            default: false,
+        },
+        assessmentPassed: {
+            type: Boolean,
+            default: false,
+        },
+        assessmentScore: {
+            type: Number,
+            min: 0,
+            max: 100,
+        },
+        assessmentDate: {
+            type: Date,
+        },
+        skillBadge: {
+            type: String,
+            maxlength: [100, 'Badge name cannot exceed 100 characters'],
+        },
         skillLevel: {
             type: String,
             enum: ['beginner', 'intermediate', 'advanced', 'expert'],
             lowercase: true,
         },
-        showEndorsements: { type: Boolean, default: true },
-        endorsementNotifications: { type: Boolean, default: true },
-        displayOrder: { type: Number, min: 0 },
-        industry: { type: String, trim: true, maxlength: 100 },
-        suggestedBySystem: { type: Boolean, default: false },
-        lastExportedAt: Date,
-        isVisible: { type: Boolean, default: true },
-        isDeleted: { type: Boolean, default: false },
-        deletedAt: { type: Date, default: null },
-        isArchived: { type: Boolean, default: false },
-        archivedAt: { type: Date, default: null },
+        showEndorsements: {
+            type: Boolean,
+            default: true,
+            index: true,
+        },
+        endorsementNotifications: {
+            type: Boolean,
+            default: true,
+        },
+        displayOrder: {
+            type: Number,
+            min: 0,
+        },
+        industry: {
+            type: String,
+            trim: true,
+            maxlength: [100, 'Industry cannot exceed 100 characters'],
+        },
+        suggestedBySystem: {
+            type: Boolean,
+            default: false,
+        },
+        lastExportedAt: {
+            type: Date,
+        },
+
+        // ==================== VISIBILITY ====================
+        isVisible: {
+            type: Boolean,
+            default: true,
+            index: true,
+        },
+
+        // ==================== SOFT DELETE / ARCHIVE ====================
+        isDeleted: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+        deletedAt: {
+            type: Date,
+            default: null,
+        },
+        isArchived: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+        archivedAt: {
+            type: Date,
+            default: null,
+        },
     },
     {
         timestamps: true,
         collection: 'skills',
         toJSON: {
             virtuals: true,
-            transform: (_doc, ret: Record<string, unknown>) => {
+            transform: function (_doc, ret: any) {
                 delete ret.__v;
                 return ret;
             },
         },
-        toObject: { virtuals: true },
+        toObject: {
+            virtuals: true,
+        },
     }
 );
 
-SkillSchema.index({ userId: 1, isPinned: -1, endorsementCount: -1 });
-SkillSchema.index({ userId: 1, category: 1 });
-SkillSchema.index({ userId: 1, isDeleted: 1, isArchived: 1 });
-SkillSchema.index({ userId: 1, skillName: 1 });
-SkillSchema.index({ userId: 1, displayOrder: 1 });
-SkillSchema.index({ userId: 1, industry: 1 });
-SkillSchema.index({ userId: 1, skillLevel: 1 });
-SkillSchema.index({ createdAt: -1 });
+// ==================== INDEXES ====================
 
+SkillSchema.index({ userId: 1, isPinned: -1, endorsementCount: -1 });  // Pinned first, then by endorsements
+SkillSchema.index({ userId: 1, category: 1 });                         // Filter by category
+SkillSchema.index({ userId: 1, isDeleted: 1, isArchived: 1 });        // Soft delete and archive
+SkillSchema.index({ userId: 1, skillName: 1 });                        // Search by skill name
+SkillSchema.index({ createdAt: -1 });                                  // Recent skills
+
+SkillSchema.index({ userId: 1, displayOrder: 1 });  // For reordering
+SkillSchema.index({ userId: 1, industry: 1 });      // Industry filter
+SkillSchema.index({ userId: 1, skillLevel: 1 });    // Skill level filter
+SkillSchema.index({ userId: 1, showEndorsements: 1 }); // Endorsement visibility
+
+// ==================== MIDDLEWARE ====================
+
+/**
+ * Pre-save: Update endorsementCount
+ */
 SkillSchema.pre('save', function (next) {
     this.endorsementCount = this.endorsements.length;
     next();
 });
 
+/**
+ * Pre-save: Validate pinned order uniqueness
+ */
 SkillSchema.pre('save', async function (next) {
     if (this.isPinned && this.pinnedOrder) {
+        // Check if another skill already has this pinnedOrder
         const existing = await (this.constructor as ISkillModel).findOne({
             userId: this.userId,
             isPinned: true,
@@ -180,107 +324,103 @@ SkillSchema.pre('save', async function (next) {
             skillId: { $ne: this.skillId },
             isDeleted: false,
         });
+
         if (existing) {
-            return next(new Error(`Pinned order ${this.pinnedOrder} is already taken`));
+            return next(new Error(`Pinned order ${this.pinnedOrder} is already taken by another skill`));
         }
     }
+
     next();
 });
 
-SkillSchema.statics.findByUserId = async function (
-    userId: string,
-    includeArchived = false
-): Promise<ISkill[]> {
+// ==================== STATIC METHODS ====================
+
+/**
+ * Find all skills by userId (excluding deleted)
+ */
+SkillSchema.statics.findByUserId = async function (userId: string, includeArchived: boolean = false): Promise<ISkill[]> {
     try {
-        const query: Record<string, unknown> = { userId, isDeleted: false };
-        if (!includeArchived) query.isArchived = false;
+        const query: any = { userId, isDeleted: false };
+
+        if (!includeArchived) {
+            query.isArchived = false;
+        }
+
         return await this.find(query)
-            .sort({ isPinned: -1, pinnedOrder: 1, endorsementCount: -1 })
+            .sort({ isPinned: -1, pinnedOrder: 1, endorsementCount: -1 })  // Pinned first (1,2,3), then by endorsements
             .exec();
-    } catch (error: unknown) {
-        LoggerUtil.error('Find skills by userId failed', { error: (error as Error).message, userId });
+    } catch (error: any) {
+        LoggerUtil.error('Find skills by userId failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
+/**
+ * Get total skill count for user (excluding deleted)
+ */
 SkillSchema.statics.getUserSkillCount = async function (userId: string): Promise<number> {
     try {
         return await this.countDocuments({ userId, isDeleted: false });
-    } catch (error: unknown) {
-        LoggerUtil.error('Get skill count failed', { error: (error as Error).message, userId });
+    } catch (error: any) {
+        LoggerUtil.error('Get skill count failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
-SkillSchema.statics.findActiveById = async function (
-    skillId: string,
-    userId: string
-): Promise<ISkill | null> {
+/**
+ * Get skills by industry
+ */
+SkillSchema.statics.getSkillsByIndustry = async function (userId: string, industry: string): Promise<ISkill[]> {
     try {
-        return await this.findOne({ skillId, userId, isDeleted: false }).exec();
-    } catch (error: unknown) {
-        LoggerUtil.error('Find active skill by ID failed', { error: (error as Error).message, skillId });
-        throw error;
-    }
-};
-
-SkillSchema.statics.getPinnedSkills = async function (userId: string): Promise<ISkill[]> {
-    try {
-        return await this.find({ userId, isPinned: true, isDeleted: false })
-            .sort({ pinnedOrder: 1 })
-            .limit(3)
-            .exec();
-    } catch (error: unknown) {
-        LoggerUtil.error('Get pinned skills failed', { error: (error as Error).message, userId });
-        throw error;
-    }
-};
-
-SkillSchema.statics.getTopEndorsedSkills = async function (
-    userId: string,
-    limit = 10
-): Promise<ISkill[]> {
-    try {
-        return await this.find({ userId, isDeleted: false })
-            .sort({ endorsementCount: -1 })
-            .limit(limit)
-            .exec();
-    } catch (error: unknown) {
-        LoggerUtil.error('Get top endorsed skills failed', { error: (error as Error).message, userId });
-        throw error;
-    }
-};
-
-SkillSchema.statics.getSkillsByIndustry = async function (
-    userId: string,
-    industry: string
-): Promise<ISkill[]> {
-    try {
-        return await this.find({ userId, industry, isDeleted: false })
+        return await this.find({
+            userId,
+            industry,
+            isDeleted: false,
+        })
             .sort({ endorsementCount: -1 })
             .exec();
-    } catch (error: unknown) {
-        LoggerUtil.error('Get skills by industry failed', { error: (error as Error).message, userId });
+    } catch (error: any) {
+        LoggerUtil.error('Get skills by industry failed', {
+            error: (error as Error).message,
+            userId,
+            industry,
+        });
         throw error;
     }
 };
 
+/**
+ * Get system-suggested skills
+ */
 SkillSchema.statics.getSuggestedSkills = async function (userId: string): Promise<ISkill[]> {
     try {
-        return await this.find({ userId, suggestedBySystem: true, isDeleted: false })
+        return await this.find({
+            userId,
+            suggestedBySystem: true,
+            isDeleted: false,
+        })
             .sort({ createdAt: -1 })
             .limit(10)
             .exec();
-    } catch (error: unknown) {
-        LoggerUtil.error('Get suggested skills failed', { error: (error as Error).message, userId });
+    } catch (error: any) {
+        LoggerUtil.error('Get suggested skills failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
 
-SkillSchema.statics.reorderSkills = async function (
-    userId: string,
-    skillIds: string[]
-): Promise<boolean> {
+/**
+ * Reorder skills
+ */
+SkillSchema.statics.reorderSkills = async function (userId: string, skillIds: string[]): Promise<boolean> {
     try {
         const bulkOps = skillIds.map((skillId, index) => ({
             updateOne: {
@@ -288,13 +428,82 @@ SkillSchema.statics.reorderSkills = async function (
                 update: { $set: { displayOrder: index } },
             },
         }));
+
         await this.bulkWrite(bulkOps);
         return true;
-    } catch (error: unknown) {
-        LoggerUtil.error('Reorder skills failed', { error: (error as Error).message, userId });
+    } catch (error: any) {
+        LoggerUtil.error('Reorder skills failed', {
+            error: (error as Error).message,
+            userId,
+        });
         throw error;
     }
 };
+
+/**
+ * Find active skill by ID (not deleted, belongs to user)
+ */
+SkillSchema.statics.findActiveById = async function (skillId: string, userId: string): Promise<ISkill | null> {
+    try {
+        return await this.findOne({
+            skillId,
+            userId,
+            isDeleted: false,
+        }).exec();
+    } catch (error: any) {
+        LoggerUtil.error('Find active skill by ID failed', {
+            error: (error as Error).message,
+            skillId,
+            userId,
+        });
+        throw error;
+    }
+};
+
+/**
+ * Get pinned skills (top 3)
+ */
+SkillSchema.statics.getPinnedSkills = async function (userId: string): Promise<ISkill[]> {
+    try {
+        return await this.find({
+            userId,
+            isPinned: true,
+            isDeleted: false,
+        })
+            .sort({ pinnedOrder: 1 })
+            .limit(3)
+            .exec();
+    } catch (error: any) {
+        LoggerUtil.error('Get pinned skills failed', {
+            error: (error as Error).message,
+            userId,
+        });
+        throw error;
+    }
+};
+
+/**
+ * Get top endorsed skills
+ */
+SkillSchema.statics.getTopEndorsedSkills = async function (userId: string, limit: number = 10): Promise<ISkill[]> {
+    try {
+        return await this.find({
+            userId,
+            isDeleted: false,
+        })
+            .sort({ endorsementCount: -1 })
+            .limit(limit)
+            .exec();
+    } catch (error: any) {
+        LoggerUtil.error('Get top endorsed skills failed', {
+            error: (error as Error).message,
+            userId,
+        });
+        throw error;
+    }
+};
+
+// ==================== EXPORT ====================
 
 const Skill = mongoose.model<ISkill, ISkillModel>('Skill', SkillSchema);
 export default Skill;

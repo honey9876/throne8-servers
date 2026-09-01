@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '@/shared/logger.util';
 import { cacheHits } from '@/shared/metrics';
@@ -13,7 +13,7 @@ interface ILocation {
   timezone?: string;
 }
 
-interface IPlatform { 
+interface IPlatform {
   device: 'desktop' | 'mobile' | 'tablet';
   os?: string;
   browser?: string;
@@ -460,6 +460,7 @@ const userInteractionSchema = new Schema<IUserInteraction>(
       type: String,
       required: true,
       unique: true,
+      // index: true,
       validate: {
         validator: (v: string) => validUUIDRegex.test(v),
         message: 'Invalid userId UUID',
@@ -468,6 +469,7 @@ const userInteractionSchema = new Schema<IUserInteraction>(
     isAnonymous: {
       type: Boolean,
       default: false,
+      index: true,
     },
     activities: [{
       action: {
@@ -763,9 +765,10 @@ const userInteractionSchema = new Schema<IUserInteraction>(
         const date = new Date();
         return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       },
+      index: true,
     },
-    isActive: { type: Boolean, default: true },
-    isDeleted: { type: Boolean, default: false },
+    isActive: { type: Boolean, default: true, index: true },
+    isDeleted: { type: Boolean, default: false, index: true },
   },
   {
     collection: 'user_interactions',

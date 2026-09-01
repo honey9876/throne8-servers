@@ -1,4 +1,4 @@
-﻿// src/models/mongodb/ConnectionNote.ts
+// src/models/mongodb/ConnectionNote.ts
 
 import { 
   Schema, 
@@ -161,15 +161,18 @@ const connectionNoteSchema: Schema = new Schema(
       default: () => uuidv4(),
       unique: true,
       required: true,
+      index: true
     },
     connectionId: {
       type: Schema.Types.Mixed,  // ✅ Changed to Mixed to support both ObjectId and String (UUID)
       required: [true, 'Connection ID is required'],
+      index: true
     },
     userId: {
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: [true, 'User ID is required'],
+      index: true
     },
     title: {
       type: String,
@@ -191,21 +194,25 @@ const connectionNoteSchema: Schema = new Schema(
     },
     contentHash: {
       type: String,
+      index: true
     },
     type: {
       type: String,
       enum: Object.values(NoteType),
       default: NoteType.PERSONAL,
+      index: true
     },
     priority: {
       type: String,
       enum: Object.values(NotePriority),
       default: NotePriority.MEDIUM,
+      index: true
     },
     status: {
       type: String,
       enum: Object.values(NoteStatus),
       default: NoteStatus.ACTIVE,
+      index: true
     },
     tags: {
       type: [String],
@@ -214,19 +221,23 @@ const connectionNoteSchema: Schema = new Schema(
         validator: (tags: string[]) => tags.length <= 20,
         message: 'Maximum 20 tags allowed'
       },
+      index: true
     },
     category: {
       type: String,
       maxlength: [50, 'Category cannot exceed 50 characters'],
+      index: true
     },
     isPrivate: {
       type: Boolean,
       default: true,
+      index: true
     },
     visibility: {
       type: String,
       enum: ['private', 'shared', 'team', 'public'],
       default: 'private',
+      index: true
     },
     sharedWith: [{
       type: Schema.Types.ObjectId,
@@ -283,6 +294,7 @@ const connectionNoteSchema: Schema = new Schema(
       reminderAt: {
         type: Date,
         required: true,
+        index: true
       },
       isCompleted: {
         type: Boolean,
@@ -347,10 +359,12 @@ const connectionNoteSchema: Schema = new Schema(
     isIndexed: {
       type: Boolean,
       default: false,
+      index: true
     },
     isTemplate: {
       type: Boolean,
       default: false,
+      index: true
     },
     templateCategory: {
       type: String,
@@ -359,6 +373,7 @@ const connectionNoteSchema: Schema = new Schema(
     isPinned: {
       type: Boolean,
       default: false,
+      index: true
     },
     expiresAt: {
       type: Date,

@@ -1,4 +1,4 @@
-﻿import { IEmployeeDocument } from '../interfaces';
+import { IEmployeeDocument } from '../interfaces';
 import { v4 as uuidv4 } from 'uuid';
 import mongoose, { Model, Query, Document } from 'mongoose';
 import { Schema } from 'mongoose';
@@ -9,6 +9,7 @@ export const EmployeeSchema = new Schema(
       type: String,
       required: true,
       unique: true,
+      index: true,
       default: uuidv4,
     },
     firstName: {
@@ -27,11 +28,13 @@ export const EmployeeSchema = new Schema(
       unique: true,
       lowercase: true,
       match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Please provide valid email'],
+      index: true,
     },
     company: {
       type: Schema.Types.ObjectId,
       ref: 'Company',
       required: true,
+      index: true,
     },
     designation: {
       type: String,
@@ -69,6 +72,7 @@ export const EmployeeSchema = new Schema(
     isActive: {
       type: Boolean,
       default: false,
+      index: true,
     },
     advocacyScore: {
       type: Number,
@@ -78,6 +82,7 @@ export const EmployeeSchema = new Schema(
     isAdvocate: {
       type: Boolean,
       default: false,
+      index: true,
     },
     assignedAsAdvocateAt: {
       type: Date,

@@ -90,6 +90,7 @@ export const CompanyPostSchema = new Schema(
       type: String,
       required: true,
       unique: true,
+      index: true,
       default: uuidv4,
     },
     title: {
@@ -104,17 +105,19 @@ export const CompanyPostSchema = new Schema(
       required: false,  // ✅ FIXED: Changed from true to false
       unique: true,
       lowercase: true,
+      index: true,
       sparse: true,  // ✅ ADDED: Allows null/undefined in unique index
     },
     content: {
       type: String,
-      required: false,
-      default: '',
+      required: [true, 'Post content is required'],
+      minlength: [10, 'Content must be at least 10 characters'],
     },
     company: {
       type: Schema.Types.ObjectId,
       ref: 'Company',
       required: true,
+      index: true,
     },
     author: {
       type: Schema.Types.ObjectId,
@@ -125,6 +128,7 @@ export const CompanyPostSchema = new Schema(
       type: String,
       enum: ['Blog', 'News', 'Update', 'Achievement'],
       default: 'Blog',
+      index: true,
     },
     media: [
       {
@@ -175,6 +179,7 @@ export const CompanyPostSchema = new Schema(
     isPublished: {
       type: Boolean,
       default: false,
+      index: true,
     },
     publishedAt: { type: Date },
     scheduledFor: { type: Date },
@@ -263,9 +268,7 @@ CompanyPostSchema.pre(['findOneAndUpdate', 'updateOne'], async function (next) {
       let slug = baseSlug;
       let counter = 1;
 
-      const PostModel = (mongoose.models['CompanyPost'] as IPostModel) ||
-        mongoose.model<IPostDocument, IPostModel>('CompanyPost', CompanyPostSchema);
-
+      const PostModel = (mongoose.models.Post as IPostModel) || mongoose.model<IPostDocument, IPostModel>('Post', CompanyPostSchema);
       const currentDoc = await this.model.findOne(this.getQuery());
 
       // eslint-disable-next-line no-constant-condition
@@ -318,7 +321,7 @@ CompanyPostSchema.methods.archive = async function (this: IPostDocument) {
 
 // Increment views (atomic operation)
 CompanyPostSchema.methods.incrementViews = async function () {
-  await (mongoose.models['CompanyPost'] as IPostModel).updateOne(
+  await mongoose.model('CompanyPost').updateOne(
     { _id: this._id },
     { $inc: { 'engagementMetrics.viewsCount': 1 } }
   );
@@ -328,7 +331,7 @@ CompanyPostSchema.methods.incrementViews = async function () {
 
 // Increment likes (atomic operation)
 CompanyPostSchema.methods.incrementLikes = async function (this: IPostDocument) {
-  await (mongoose.models['CompanyPost'] as IPostModel).updateOne(
+  await mongoose.model('CompanyPost').updateOne(
     { _id: this._id },
     { $inc: { 'engagementMetrics.likesCount': 1 } }
   );
@@ -338,7 +341,7 @@ CompanyPostSchema.methods.incrementLikes = async function (this: IPostDocument) 
 
 // Increment shares (atomic operation)
 CompanyPostSchema.methods.incrementShares = async function (this: IPostDocument) {
-  await (mongoose.models['CompanyPost'] as IPostModel).updateOne(
+  await mongoose.model('CompanyPost').updateOne(
     { _id: this._id },
     { $inc: { 'engagementMetrics.sharesCount': 1 } }
   );
@@ -348,7 +351,7 @@ CompanyPostSchema.methods.incrementShares = async function (this: IPostDocument)
 
 // Increment comments (atomic operation)
 CompanyPostSchema.methods.incrementComments = async function (this: IPostDocument) {
-  await (mongoose.models['CompanyPost'] as IPostModel).updateOne(
+  await mongoose.model('CompanyPost').updateOne(
     { _id: this._id },
     { $inc: { 'engagementMetrics.commentsCount': 1 } }
   );
@@ -359,7 +362,7 @@ CompanyPostSchema.methods.incrementComments = async function (this: IPostDocumen
 // Schedule post
 CompanyPostSchema.methods.schedule = async function (this: IPostDocument, date: Date) {
   this.scheduledFor = date;
-  this.status = PostStatus.SCHEDULED;
+  this.status = PostStatus.SCHEDULED; 
   this.isPublished = false;
   return this.save();
 };
@@ -591,7 +594,6 @@ CompanyPostSchema.set('toObject', { virtuals: true });
 // =====================================================
 // CREATE AND EXPORT MODEL
 // =====================================================
-const CompanyPost = (mongoose.models['CompanyPost'] as IPostModel) ||
-  mongoose.model<IPostDocument, IPostModel>('CompanyPost', CompanyPostSchema);
+const CompanyPost = mongoose.model<IPostDocument, IPostModel>('CompanyPost', CompanyPostSchema);
 
 export default CompanyPost;

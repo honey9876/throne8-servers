@@ -65,6 +65,7 @@ export class ConversationRepository {
                 unreadCounts: 1,
                 groupName: 1,
                 groupAvatar: 1,
+                archivedBy: 1,
                 isActive: 1,
                 createdAt: 1,
                 updatedAt: 1,
@@ -101,7 +102,11 @@ export class ConversationRepository {
             inc[`unreadCounts.${uid}`] = 1;
         });
 
-        await Conversation.updateOne({ _id: conversationObjectId }, { $inc: inc });
+        await Conversation.updateOne(
+            { _id: conversationObjectId },
+            { $inc: inc },
+            { timestamps: false }
+        );
     }
 
     /**
@@ -113,7 +118,22 @@ export class ConversationRepository {
     ): Promise<void> {
         await Conversation.updateOne(
             { _id: conversationObjectId },
-            { $set: { [`unreadCounts.${userId}`]: 0 } }
+            { $set: { [`unreadCounts.${userId}`]: 0 } },
+            { timestamps: false }
+        );
+    }
+
+    /**
+     * Set unread count to 1 for a specific user (mark as unread)
+     */
+    async markUnread(
+        conversationObjectId: Types.ObjectId,
+        userId: string
+    ): Promise<void> {
+        await Conversation.updateOne(
+            { _id: conversationObjectId },
+            { $set: { [`unreadCounts.${userId}`]: 1 } },
+            { timestamps: false }
         );
     }
 
@@ -150,6 +170,32 @@ export class ConversationRepository {
             { _id: 1 }
         ).lean();
         return !!conv;
+    }
+
+    /**
+     * Soft delete a conversation (set isActive to false)
+     */
+    async softDelete(conversationId: string, userId: string): Promise<boolean> {
+        const result = await Conversation.updateOne(
+            { conversationId, members: userId },
+            { $set: { isActive: false, updatedAt: new Date() } }
+        );
+        return result.modifiedCount > 0;
+    }
+
+    /**
+     * Toggle archive status for a specific user
+     */
+    async toggleArchive(conversationId: string, userId: string, archive: boolean): Promise<boolean> {
+        const update = archive 
+            ? { $addToSet: { archivedBy: userId } }
+            : { $pull: { archivedBy: userId } };
+        
+        const result = await Conversation.updateOne(
+            { conversationId, members: userId },
+            update as any
+        );
+        return result.modifiedCount > 0;
     }
 }
 
@@ -316,20 +362,37 @@ export class MessageRepository {
         const message = await Message.findOne({ messageId, isDeleted: false });
         if (!message) return null;
 
-        const existing = message.reactions.find((r) => r.emoji === emoji);
+        // Find if the user has already reacted with ANY emoji
+        const previousReactionIndex = message.reactions.findIndex(r => r.userIds.includes(userId));
 
-        if (existing) {
-            if (existing.userIds.includes(userId)) {
-                // Remove reaction
-                existing.userIds = existing.userIds.filter((id) => id !== userId);
-                if (existing.userIds.length === 0) {
-                    message.reactions = message.reactions.filter((r) => r.emoji !== emoji);
+        if (previousReactionIndex !== -1) {
+            const previousReaction = message.reactions[previousReactionIndex];
+            
+            // Remove user from the old reaction
+            previousReaction.userIds = previousReaction.userIds.filter((id) => id !== userId);
+            
+            // If the old reaction has no users left, remove the emoji entry
+            if (previousReaction.userIds.length === 0) {
+                message.reactions.splice(previousReactionIndex, 1);
+            }
+
+            // If the new emoji is different from the old one, we need to add the new one
+            if (previousReaction.emoji !== emoji) {
+                const newEmojiExisting = message.reactions.find(r => r.emoji === emoji);
+                if (newEmojiExisting) {
+                    newEmojiExisting.userIds.push(userId);
+                } else {
+                    message.reactions.push({ emoji, userIds: [userId] });
                 }
-            } else {
-                existing.userIds.push(userId);
             }
         } else {
-            message.reactions.push({ emoji, userIds: [userId] });
+            // User hasn't reacted yet, just add the new one
+            const existing = message.reactions.find((r) => r.emoji === emoji);
+            if (existing) {
+                existing.userIds.push(userId);
+            } else {
+                message.reactions.push({ emoji, userIds: [userId] });
+            }
         }
 
         return message.save();

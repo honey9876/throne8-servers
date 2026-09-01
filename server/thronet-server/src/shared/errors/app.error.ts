@@ -14,7 +14,7 @@ export class AppError extends Error {
     public readonly errorCode?: string;
     public readonly metadata?: any;
 
-    constructor(
+    constructor(    
         message: string,
         statusCode: number = 500,
         isOperational: boolean = true,
@@ -89,31 +89,31 @@ export class NotFoundError extends AppError {
  * Forbidden Error (Alias for AuthorizationError)
  */
 export class ForbiddenError extends AppError {
-    constructor(resource: string = 'Access denied', errors: any[] = []) {
-        super(`${resource} forbidden`, 403, true, errors, 'FORBIDDEN');
-    }
+  constructor(resource: string = 'Access denied', errors: any[] = []) {
+    super(`${resource} forbidden`, 403, true, errors, 'FORBIDDEN');
+  }
 }
 
 /**
  * TooManyRequests Error (Alias for AuthorizationError)
  */
 export class TooManyRequestsError extends AppError {
-    constructor(resource: string = 'Access denied', errors: any[] = []) {
-        super(`${resource} Too Many Requests`, 429, true, errors, 'TOO MANY REQUESTS');
-    }
+  constructor(resource: string = 'Access denied', errors: any[] = []) {
+    super(`${resource} Too Many Requests`, 429, true, errors, 'TOO MANY REQUESTS');
+  }
 }
 
 export class BadRequestError extends AppError {
-    constructor(resource: string = 'Bad request', errors: any[] = []) {
-        super(`${resource} Too Many Requests`, 400, true, errors, 'BAD_REQUEST');
-    }
+  constructor(resource: string = 'Bad request', errors: any[] = []) {
+    super(`${resource} Too Many Requests`, 400, true, errors, 'BAD_REQUEST');
+  }
 }
 
 /**
  * Conflict Error
  */
 export class ConflictError extends AppError {
-    constructor(message: string, errors: any[] = []) {
+    constructor(message: string,  errors: any[] = []) {
         super(message, 409, true, errors, 'CONFLICT_ERROR');
     }
 }
@@ -267,7 +267,7 @@ export const handleUnhandledRejection = () => {
  */
 export const handleUncaughtException = () => {
     process.on('uncaughtException', (error: Error) => {
-        logger.error('Uncaught Exception in app error', {
+        logger.error('Uncaught Exception', {
             message: error.message,
             stack: error.stack
         });

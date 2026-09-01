@@ -8,7 +8,7 @@
 
 import express from 'express';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
-import dashboardController from '../controllers/dashboard.controller';
+import {dashboardController} from '../controllers';
 
 const router = express.Router();
 

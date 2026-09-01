@@ -9,8 +9,6 @@
 
 import dotenv from 'dotenv';
 dotenv.config();
-import fs from 'fs';
-import path from 'path';
 
 import { connectDB } from '@/database/connection';
 import { LoggerUtil } from '@/shared/logger.util';
@@ -230,6 +228,9 @@ const seedCategories = async (): Promise<void> => {
  * Export categories as JSON
  */
 const exportCategories = (): void => {
+  const fs = require('fs');
+  const path = require('path');
+
   const outputPath = path.join(process.cwd(), 'data', 'categories.json');
   const outputDir = path.dirname(outputPath);
 

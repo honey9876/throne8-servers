@@ -217,7 +217,7 @@ class SkillController {
                 return;
             }
 
-            const userId = req.user.userId;
+            const userId = (req.query.userId as string) || req.user.userId;
             const includeArchived = req.query.includeArchived === 'true';
 
             LoggerUtil.info('Get all skills request', {
@@ -313,69 +313,6 @@ class SkillController {
 
             if (error.message === 'Skill not found') {
                 ResponseUtil.notFound(res, 'Skill not found');
-                return;
-            }
-
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-    /**
-     * ✅ GET ALL SKILLS BY USER ID (Public Profile View)
-     */
-    static async getSkillsByUserId(
-        req: Request<{ userId: string }> & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const startTime = Date.now();
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-
-            const { userId } = req.params;
-
-            if (!userId) {
-                ResponseUtil.badRequest(res, 'User ID is required');
-                return;
-            }
-
-            LoggerUtil.info('Get skills by user ID request', {
-                targetUserId: userId,
-                requestedBy: req.user.userId,
-                correlationId,
-            });
-
-            const result = await SkillService.getAllSkills(userId, false);
-
-            const duration = Date.now() - startTime;
-            LoggerUtil.info('Skills list fetched for user', {
-                targetUserId: userId,
-                count: result.total,
-                duration,
-                correlationId,
-            });
-
-            ResponseUtil.success(
-                res,
-                result,
-                'Skills fetched successfully'
-            );
-            return;
-
-        } catch (error: any) {
-            LoggerUtil.error('Get skills by user ID failed', {
-                error: error.message,
-                targetUserId: req.params.userId,
-                correlationId,
-            });
-
-            if (error.message === 'User not found') {
-                ResponseUtil.notFound(res, 'User not found');
                 return;
             }
 

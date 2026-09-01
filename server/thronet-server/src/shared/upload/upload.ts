@@ -9,7 +9,6 @@ import multer, { FileFilterCallback, StorageEngine } from 'multer';
 // ==================== CONFIGURATION ====================
 interface UploadConfig {
     maxFileSize: number;
-    maxVideoFileSize: number;
     allowedMimeTypes: string[];
     minWidth: number;
     minHeight: number;
@@ -18,8 +17,7 @@ interface UploadConfig {
 }
 
 const uploadConfig: UploadConfig = {
-    maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '52428800'), // 50MB (images/docs)
-    maxVideoFileSize: parseInt(process.env.MAX_VIDEO_FILE_SIZE || '104857600'), // 100MB (video)
+    maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '52428800'), // 50MB
     allowedMimeTypes: (process.env.ALLOWED_IMAGE_TYPES || 'image/jpeg,image/jpg,image/png,image/webp,image/gif').split(','),
     minWidth: parseInt(process.env.MIN_IMAGE_WIDTH || '100'),
     minHeight: parseInt(process.env.MIN_IMAGE_HEIGHT || '100'),
@@ -95,75 +93,11 @@ const imageFileFilter = (req: Request, file: Express.Multer.File, callback: File
     }
 };
 
-// ✅ Video file filter (mp4 / mov / webm / avi / mpeg)
-const videoFileFilter = (req: Request, file: Express.Multer.File, callback: FileFilterCallback): void => {
-    try {
-        logger.info('🔍 [FILE FILTER] Validating uploaded video', {
-            fieldname: file.fieldname,
-            originalname: file.originalname,
-            mimetype: file.mimetype,
-            size: file.size
-        });
-
-        const allowedVideoMimeTypes = [
-            'video/mp4',
-            'video/mpeg',
-            'video/quicktime',   // .mov
-            'video/x-msvideo',   // .avi
-            'video/webm'
-        ];
-        const allowedVideoExtensions = ['.mp4', '.mpeg', '.mpg', '.mov', '.avi', '.webm'];
-
-        if (!allowedVideoMimeTypes.includes(file.mimetype)) {
-            logger.warn('⚠️ [FILE FILTER] Invalid video MIME type', {
-                mimetype: file.mimetype,
-                allowed: allowedVideoMimeTypes
-            });
-            return callback(
-                new AppError(
-                    `Invalid video type. Allowed types: ${allowedVideoMimeTypes.join(', ')}`,
-                    400
-                )
-            );
-        }
-
-        const ext = path.extname(file.originalname).toLowerCase();
-        if (!allowedVideoExtensions.includes(ext)) {
-            logger.warn('⚠️ [FILE FILTER] Invalid video extension', {
-                extension: ext,
-                allowed: allowedVideoExtensions
-            });
-            return callback(
-                new AppError(
-                    `Invalid video extension. Allowed: ${allowedVideoExtensions.join(', ')}`,
-                    400
-                )
-            );
-        }
-
-        logger.info('✅ [FILE FILTER] Video validation passed', {
-            originalname: file.originalname,
-            mimetype: file.mimetype
-        });
-
-        callback(null, true);
-    } catch (error: any) {
-        logger.error('❌ [FILE FILTER] Video validation error', {
-            error: error.message,
-            file: file.originalname
-        });
-        callback(error);
-    }
-};
-
-// ✅ Universal filter for all media types (used by uploadMultiple/uploadFields)
+// ✅ ADD THIS: Universal filter for all media types
 const mediaFileFilter = (req: Request, file: Express.Multer.File, callback: FileFilterCallback): void => {
     const allowedMimeTypes: { [key: string]: string[] } = {
-        images: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'],
-        videos: [
-            'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/webm',
-            'video/ogg', 'video/3gpp', 'video/x-matroska', 'video/mkv', 'video/avi', 'video/x-m4v', 'video/mp2t'
-        ],
+        images: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'],
+        videos: ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/webm'],
         documents: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']
     };
 
@@ -173,83 +107,61 @@ const mediaFileFilter = (req: Request, file: Express.Multer.File, callback: File
         ...allowedMimeTypes.documents
     ];
 
-    if (file.mimetype.startsWith('video/') || allAllowed.includes(file.mimetype)) {
-        return callback(null, true);
+    if (!allAllowed.includes(file.mimetype)) {
+        return callback(new AppError(`Invalid file type: ${file.mimetype}`, 400));
     }
 
-    callback(new AppError(`Invalid file type: ${file.mimetype}`, 400));
+    callback(null, true);
 };
 
 // ==================== MULTER INSTANCES ====================
 
 /**
- * Single file upload configuration (IMAGE)
+ * Single file upload configuration
  */
 const uploadSingleConfig = multer({
     storage: memoryStorage,
-    fileFilter: imageFileFilter,
+    fileFilter: mediaFileFilter,
     limits: {
         fileSize: uploadConfig.maxFileSize,
         files: 1,
-        fields: 20,
-        parts: 30
+        fields: 10,
+        parts: 20
     }
 });
 
 /**
- * Single file upload configuration (VIDEO)
- * Separate instance so video gets its own filter + bigger size limit.
- */
-const uploadVideoConfig = multer({
-    storage: memoryStorage,
-    fileFilter: videoFileFilter,
-    limits: {
-        fileSize: uploadConfig.maxVideoFileSize,
-        files: 1,
-        fields: 20,
-        parts: 30
-    }
-});
-
-/**
- * Multiple files upload configuration (max 20 files, 100MB for video support)
+ * Multiple files upload configuration (max 10 files)
  */
 const uploadMultipleConfig = multer({
     storage: memoryStorage,
     fileFilter: mediaFileFilter,
     limits: {
-        fileSize: uploadConfig.maxVideoFileSize,
-        files: 20,
-        fields: 50,
-        parts: 100,
-        fieldSize: 10 * 1024 * 1024,
+        fileSize: uploadConfig.maxFileSize,
+        files: 20,      // ← 10 se 20
+        fields: 50,     // ← 20 se 50 — JSON strings ke liye
+        parts: 100,     // ← 30 se 100
+        fieldSize: 10 * 1024 * 1024,  // ← 10MB per field — ADD THIS
     }
 });
 
 // ==================== UPLOAD MIDDLEWARE ====================
 
-type UploadFileType = 'image' | 'video';
-
 /**
  * Single file upload middleware
  * @param fieldName - Form field name
- * @param fileType - 'image' (default) or 'video' — selects the right multer
- *                   instance (filter + size limit) for the field being uploaded.
  */
-export const uploadSingle = (fieldName: string = 'photo', fileType: UploadFileType = 'image') => {
+export const uploadSingle = (fieldName: string = 'photo') => {
     return (req: Request, res: any, next: any) => {
         const startTime = Date.now();
-        const config = fileType === 'video' ? uploadVideoConfig : uploadSingleConfig;
-        const maxSize = fileType === 'video' ? uploadConfig.maxVideoFileSize : uploadConfig.maxFileSize;
 
         logger.info('📤 [UPLOAD START] Single file upload initiated', {
             fieldName,
-            fileType,
             url: req.url,
             method: req.method
         });
 
-        config.single(fieldName)(req, res, (error: any) => {
+        uploadSingleConfig.single(fieldName)(req, res, (error: any) => {
             const duration = Date.now() - startTime;
 
             if (error) {
@@ -258,14 +170,13 @@ export const uploadSingle = (fieldName: string = 'photo', fileType: UploadFileTy
                         code: error.code,
                         message: error.message,
                         field: error.field,
-                        fileType,
                         duration: `${duration}ms`
                     });
 
                     if (error.code === 'LIMIT_FILE_SIZE') {
                         return next(
                             new AppError(
-                                `File size exceeds maximum limit of ${maxSize / (1024 * 1024)}MB`,
+                                `File size exceeds maximum limit of ${uploadConfig.maxFileSize / (1024 * 1024)}MB`,
                                 400
                             )
                         );
@@ -285,7 +196,6 @@ export const uploadSingle = (fieldName: string = 'photo', fileType: UploadFileTy
 
                 logger.error('❌ [UPLOAD ERROR] Unknown error', {
                     error: error.message,
-                    fileType,
                     duration: `${duration}ms`
                 });
                 return next(error);
@@ -294,15 +204,13 @@ export const uploadSingle = (fieldName: string = 'photo', fileType: UploadFileTy
             if (!req.file) {
                 logger.warn('⚠️ [NO FILE] No file uploaded', {
                     fieldName,
-                    fileType,
                     duration: `${duration}ms`
                 });
-                return next(new AppError('No file uploaded', 400));
+                return next(); // Proceed without file, controllers will handle it
             }
 
             logger.info('✅ [UPLOAD SUCCESS] File uploaded successfully', {
                 fieldName,
-                fileType,
                 originalname: req.file.originalname,
                 mimetype: req.file.mimetype,
                 size: req.file.size,
@@ -375,7 +283,7 @@ export const uploadMultiple = (fieldName: string = 'photos', maxCount: number = 
                     fieldName,
                     duration: `${duration}ms`
                 });
-                return next(new AppError('No files uploaded', 400));
+                return next(); // Proceed without files, controllers will handle it
             }
 
             const files = req.files as Express.Multer.File[];
@@ -396,6 +304,9 @@ export const uploadMultiple = (fieldName: string = 'photos', maxCount: number = 
     };
 };
 
+/**
+ * Fields upload middleware (different field names)
+ */
 export const uploadFields = (fields: Array<{ name: string; maxCount: number }>) => {
     return (req: Request, res: any, next: any) => {
         const startTime = Date.now();
@@ -409,29 +320,14 @@ export const uploadFields = (fields: Array<{ name: string; maxCount: number }>) 
             const duration = Date.now() - startTime;
 
             if (error) {
-                logger.error('❌ [MULTER / UPLOAD ERROR]', {
-                    error: error.message,
-                    code: (error as any).code,
-                    duration: `${duration}ms`
-                });
-
                 if (error instanceof multer.MulterError) {
-                    const errorMessages: Record<string, string> = {
-                        LIMIT_FILE_SIZE: `File too large. Maximum size allowed: ${uploadConfig.maxVideoFileSize / (1024 * 1024)}MB`,
-                        LIMIT_FILE_COUNT: 'Too many files uploaded',
-                        LIMIT_UNEXPECTED_FILE: 'Unexpected field in form data',
-                    };
-                    return res.status(400).json({
-                        success: false,
-                        message: errorMessages[error.code] || error.message,
-                        code: error.code
+                    logger.error('❌ [MULTER ERROR]', {
+                        code: error.code,
+                        message: error.message
                     });
+                    return next(new AppError(error.message, 400));
                 }
-
-                return res.status(400).json({
-                    success: false,
-                    message: error.message || 'File upload failed'
-                });
+                return next(error);
             }
 
             logger.info('✅ [UPLOAD SUCCESS] Fields uploaded', {

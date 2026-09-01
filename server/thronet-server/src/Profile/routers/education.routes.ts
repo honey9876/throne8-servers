@@ -1,5 +1,6 @@
 /**
  * Education Routes - API Endpoints for Educational Background
+ * Only CREATE endpoint implemented
  * 
  * @module routes/education.routes
  * @version 1.0.0
@@ -17,10 +18,14 @@ const router = express.Router();
 
 // ==================== MIDDLEWARE ====================
 
+/**
+ * Sanitize input - Remove dangerous characters
+ */
 const sanitizeInput = (req: Request, res: Response, next: NextFunction) => {
     if (req.body) {
         Object.keys(req.body).forEach(key => {
             if (typeof req.body[key] === 'string') {
+                // Remove HTML tags and dangerous characters
                 req.body[key] = (req.body[key] as string)
                     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
                     .replace(/<[^>]+>/g, '')
@@ -33,7 +38,11 @@ const sanitizeInput = (req: Request, res: Response, next: NextFunction) => {
 
 // ==================== VALIDATION SCHEMAS ====================
 
+/**
+ * Create Education Validation Schema
+ */
 const createEducationSchema = Joi.object({
+    // ==================== REQUIRED FIELDS ====================
     schoolCollegeName: Joi.string()
         .min(2)
         .max(200)
@@ -50,7 +59,7 @@ const createEducationSchema = Joi.object({
 
     degreeType: Joi.string()
         .valid('High School', 'Diploma', "Bachelor's", "Master's", 'Doctorate', 'Certificate', 'Other')
-        .required()
+        .required()  // ya .optional() agar optional banana hai
         .messages({
             'any.only': 'Degree type must be one of: High School, Diploma, Bachelor\'s, Master\'s, Doctorate, Certificate, Other',
             'any.required': 'Degree type is required',
@@ -79,6 +88,7 @@ const createEducationSchema = Joi.object({
             'any.required': 'Start date is required',
         }),
 
+    // ==================== OPTIONAL FIELDS ====================
     specialization: Joi.string()
         .min(2)
         .max(150)
@@ -149,12 +159,14 @@ const createEducationSchema = Joi.object({
         }),
 
 }).custom((value, helpers) => {
+    // Custom validation: If gradeValue is provided, gradeType must be provided
     if (value.gradeValue && !value.gradeType) {
         return helpers.error('any.invalid', {
             message: 'Grade type is required when grade value is provided',
         });
     }
 
+    // Validate grade value based on grade type
     if (value.gradeType && value.gradeValue) {
         const gradeValue = value.gradeValue.trim();
 
@@ -185,6 +197,9 @@ const createEducationSchema = Joi.object({
     return value;
 });
 
+/**
+ * Validation middleware wrapper
+ */
 const validateCreateEducation = (req: Request, res: Response, next: NextFunction) => {
     const { error, value } = createEducationSchema.validate(req.body, {
         abortEarly: false,
@@ -208,6 +223,9 @@ const validateCreateEducation = (req: Request, res: Response, next: NextFunction
     next();
 };
 
+/**
+ * Update Education Validation Schema
+ */
 const updateEducationSchema = Joi.object({
     schoolCollegeName: Joi.string()
         .min(2)
@@ -318,6 +336,9 @@ const updateEducationSchema = Joi.object({
     'object.min': 'At least one field must be provided for update',
 });
 
+/**
+ * Validation middleware for update
+ */
 const validateUpdateEducation = (req: Request, res: Response, next: NextFunction) => {
     const { error, value } = updateEducationSchema.validate(req.body, {
         abortEarly: false,
@@ -341,19 +362,32 @@ const validateUpdateEducation = (req: Request, res: Response, next: NextFunction
     next();
 };
 
+
 // ==================== ROUTES ====================
 
 /**
  * @route   POST /api/v1/education
  * @desc    Create new education record
  * @access  Private (requires JWT)
+ * @body    {
+ *            schoolCollegeName: string (required),
+ *            degree: string (required),
+ *            specialization: string (optional),
+ *            startDate: string (required, YYYY-MM-DD),
+ *            endDate: string (optional, YYYY-MM-DD or null),
+ *            description: string (optional),
+ *            educationType: string (optional),
+ *            gradeType: string (optional),
+ *            gradeValue: string (optional),
+ *            location: string (optional)
+ *          }
  */
 router.post(
     '/create-education',
     AuthMiddleware.authenticate as any,
     sanitizeInput,
     validateCreateEducation,
-    rateLimitMiddleware({ maxRequests: 10, windowMs: 60000 }),
+    rateLimitMiddleware({ maxRequests: 10, windowMs: 60000 }), // 10 requests per minute
     async (req: Request, res: Response, next: NextFunction) => {
         try {
             console.log('🎯 CREATE EDUCATION ROUTE HIT');
@@ -363,7 +397,7 @@ router.post(
             await EducationController.createEducation(req as any, res);
 
             console.log('✅ CREATE EDUCATION ROUTE COMPLETED');
-        } catch (error: any) {
+        } catch (error : any) {
             console.error('❌ CREATE EDUCATION ROUTE ERROR:', error);
             next(error);
         }
@@ -371,7 +405,7 @@ router.post(
 );
 
 /**
- * @route   GET /api/v1/education/getEducation-id/:educationId
+ * @route   GET /api/v1/education/:educationId
  * @desc    Get education record by ID
  * @access  Private
  */
@@ -388,7 +422,7 @@ router.get(
             await EducationController.getEducationById(req as any, res);
 
             console.log('✅ GET EDUCATION BY ID ROUTE COMPLETED');
-        } catch (error: any) {
+        } catch (error : any) {
             console.error('❌ GET EDUCATION BY ID ROUTE ERROR:', error);
             next(error);
         }
@@ -396,15 +430,15 @@ router.get(
 );
 
 /**
- * @route   GET /api/v1/education/get-all-education
+ * @route   GET /api/v1/education
  * @desc    Get all education records for authenticated user
  * @access  Private
- * @query   includeArchived=true (optional)
+ * @query   includeArchived=true (optional) - Include archived records
  */
 router.get(
     '/get-all-education',
     AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
+    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }), // 50 requests per minute
     async (req: Request, res: Response, next: NextFunction) => {
         try {
             console.log('🎯 GET ALL EDUCATION ROUTE HIT');
@@ -414,28 +448,8 @@ router.get(
             await EducationController.getAllEducation(req as any, res);
 
             console.log('✅ GET ALL EDUCATION ROUTE COMPLETED');
-        } catch (error: any) {
+        } catch (error : any) {
             console.error('❌ GET ALL EDUCATION ROUTE ERROR:', error);
-            next(error);
-        }
-    }
-);
-
-/**
- * @route   GET /api/v1/education/get-all-education/:userId
- * @desc    Get all education for a specific user (public profile view)
- * @access  Public
- */
-router.get(
-    '/get-all-education/:userId',
-    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
-    async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            console.log('🎯 GET ALL EDUCATION BY USERID ROUTE HIT');
-            await EducationController.getAllEducationByUserId(req as any, res);
-            console.log('✅ GET ALL EDUCATION BY USERID ROUTE COMPLETED');
-        } catch (error: any) {
-            console.error('❌ GET ALL EDUCATION BY USERID ROUTE ERROR:', error);
             next(error);
         }
     }
@@ -451,7 +465,7 @@ router.put(
     AuthMiddleware.authenticate as any,
     sanitizeInput,
     validateUpdateEducation,
-    rateLimitMiddleware({ maxRequests: 20, windowMs: 60000 }),
+    rateLimitMiddleware({ maxRequests: 20, windowMs: 60000 }), // 20 requests per minute
     async (req: Request, res: Response, next: NextFunction) => {
         try {
             console.log('🎯 UPDATE EDUCATION ROUTE HIT');
@@ -462,7 +476,7 @@ router.put(
             await EducationController.updateEducation(req as any, res);
 
             console.log('✅ UPDATE EDUCATION ROUTE COMPLETED');
-        } catch (error: any) {
+        } catch (error : any) {
             console.error('❌ UPDATE EDUCATION ROUTE ERROR:', error);
             next(error);
         }
@@ -477,7 +491,7 @@ router.put(
 router.delete(
     '/delete-education/:educationId',
     AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 10, windowMs: 60000 }),
+    rateLimitMiddleware({ maxRequests: 10, windowMs: 60000 }), // 10 requests per minute
     async (req: Request, res: Response, next: NextFunction) => {
         try {
             console.log('🎯 DELETE EDUCATION ROUTE HIT');
@@ -487,7 +501,7 @@ router.delete(
             await EducationController.deleteEducation(req as any, res);
 
             console.log('✅ DELETE EDUCATION ROUTE COMPLETED');
-        } catch (error: any) {
+        } catch (error : any) {
             console.error('❌ DELETE EDUCATION ROUTE ERROR:', error);
             next(error);
         }
@@ -512,7 +526,7 @@ router.post(
             await EducationController.archiveEducation(req as any, res);
 
             console.log('✅ ARCHIVE EDUCATION ROUTE COMPLETED');
-        } catch (error: any) {
+        } catch (error : any) {
             console.error('❌ ARCHIVE EDUCATION ROUTE ERROR:', error);
             next(error);
         }
@@ -537,7 +551,7 @@ router.post(
             await EducationController.restoreEducation(req as any, res);
 
             console.log('✅ RESTORE EDUCATION ROUTE COMPLETED');
-        } catch (error: any) {
+        } catch (error : any) {
             console.error('❌ RESTORE EDUCATION ROUTE ERROR:', error);
             next(error);
         }

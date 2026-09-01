@@ -1,4 +1,4 @@
-﻿// src/models/mongodb/ConnectionActivity.ts
+// src/models/mongodb/ConnectionActivity.ts
 
 import { Schema, model, Document, Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -60,21 +60,26 @@ const ConnectionActivitySchema: Schema<IConnectionActivity, IConnectionActivityM
         required: true,
         unique: true,
         default: () => uuidv4(),
+        index: true,
       },
       userId: {
         type: Schema.Types.ObjectId,
         ref: 'User',
         required: [true, 'User ID is required'],
+        index: true,
       },
       targetUserId: {
         type: Schema.Types.ObjectId,
         ref: 'User',
+        index: true,
       },
       connectionId: {
         type: String,
+        index: true,
       },
       requestId: {
         type: String,
+        index: true,
       },
       activityType: {
         type: String,
@@ -83,6 +88,7 @@ const ConnectionActivitySchema: Schema<IConnectionActivity, IConnectionActivityM
           message: '{VALUE} is not a valid activity type',
         },
         required: [true, 'Activity type is required'],
+        index: true,
       },
       description: {
         type: String,
@@ -107,14 +113,17 @@ const ConnectionActivitySchema: Schema<IConnectionActivity, IConnectionActivityM
         type: Date,
         default: Date.now,
         required: true,
+        index: true,
       },
       region: {
         type: String,
         default: 'global',
+        index: true,
       },
       isDeleted: {
         type: Boolean,
         default: false,
+        index: true,
       },
     },
     {

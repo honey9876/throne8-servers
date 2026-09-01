@@ -21,34 +21,10 @@ class CompanyRepository {
     }
 
     async updateByObjectId(objectId: string, data: any) {
-        const updateFields: any = { updatedAt: new Date() };
-        if (data.companyName) updateFields.companyName = data.companyName;
-        if (data.companySlug) updateFields.companySlug = data.companySlug.toLowerCase().trim();
-        if (data.slug && !updateFields.companySlug) updateFields.companySlug = data.slug.toLowerCase().trim();
-        if (data.descriptions?.tagline !== undefined) updateFields['descriptions.tagline'] = data.descriptions.tagline;
-        if (data.descriptions?.short !== undefined) updateFields['descriptions.short'] = data.descriptions.short;
-        if (data.descriptions?.detailed !== undefined) updateFields['descriptions.detailed'] = data.descriptions.detailed;
-        if (data.tagline !== undefined && !updateFields['descriptions.tagline']) updateFields['descriptions.tagline'] = data.tagline;
-        if (data.description !== undefined && !updateFields['descriptions.short']) updateFields['descriptions.short'] = data.description;
-        if (data.industry) updateFields.industry = data.industry;
-        if (data.companySize) updateFields.companySize = data.companySize;
-        if (data.size && !updateFields.companySize) updateFields.companySize = data.size;
-        if (data.website !== undefined) updateFields.website = data.website;
-        if (data.foundedYear !== undefined) updateFields.foundedYear = data.foundedYear;
-        if (data.founded !== undefined && !updateFields.foundedYear) updateFields.foundedYear = Number(data.founded);
-        if (data.socialMedia) updateFields.socialMedia = data.socialMedia;
-        if (data.updatedBy) updateFields['audit.updatedBy'] = data.updatedBy;
-
-        for (const key of Object.keys(data)) {
-            if (!['companyName', 'companySlug', 'slug', 'descriptions', 'tagline', 'description', 'industry', 'companySize', 'size', 'website', 'foundedYear', 'founded', 'socialMedia', 'updatedBy'].includes(key)) {
-                updateFields[key] = data[key];
-            }
-        }
-
         return Company.findByIdAndUpdate(
             objectId,
-            { $set: updateFields },
-            { new: true, runValidators: false }
+            { ...data, updatedAt: new Date() },
+            { new: true, runValidators: true }
         ).lean();
     }
 

@@ -15,24 +15,15 @@ export const resolveCompanyUUID = async (
 
     if (!uuid) return next();
 
-    // If already a valid MongoDB ObjectId
-    if (/^[0-9a-fA-F]{24}$/.test(uuid)) {
-        const directDoc = await Company.findOne({ _id: uuid, 'audit.isDeleted': false }).select('_id').lean();
-        if (directDoc) {
-            (req as any).resolvedObjectId = directDoc._id.toString();
-            return next();
-        }
+    // UUID format check
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(uuid)) {
+        return ResponseUtil.badRequest(res, 'Invalid company ID format. UUID v4 required.');
     }
 
-    let company = await Company.findOne({ companyId: uuid, 'audit.isDeleted': false })
+    const company = await Company.findOne({ companyId: uuid, 'audit.isDeleted': false })
         .select('_id')
         .lean();
-
-    if (!company) {
-        company = await Company.findOne({ companySlug: uuid, 'audit.isDeleted': false })
-            .select('_id')
-            .lean();
-    }
 
     if (!company) {
         return ResponseUtil.notFound(res, 'Company not found');

@@ -6,7 +6,7 @@
  */
 
 import express from 'express';
-import shareController  from '../controllers/share.controller';
+import { shareController } from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 
 const router = express.Router();

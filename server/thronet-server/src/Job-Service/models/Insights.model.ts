@@ -1,4 +1,4 @@
-﻿// src/models/insights.model.ts
+// src/models/insights.model.ts
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import logger from '@/shared/logger.util';
 import { v4 as uuidv4, validate as uuidValidate } from 'uuid';
@@ -172,6 +172,7 @@ const insightsSchema = new Schema<IInsights, IInsightsModel>(
     userId: {
       type: String,
       required: true,
+      index: true,
       validate: {
         validator: (v: string) => validUUIDRegex.test(v),
         message: 'Invalid userId UUID',

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * /server/thronet-server/src/message/models/messaging.model.ts
  * message.model.ts
  * MongoDB schema for individual messages
@@ -19,17 +19,6 @@ const ReactionSchema = new Schema(
     { _id: false }
 );
 
-// Lightweight snapshot of the original message, embedded on the reply message
-const ReplySnapshotSchema = new Schema(
-    {
-        messageId: { type: String, required: true },
-        text: { type: String },
-        senderId: { type: String, required: true },
-        type: { type: String },
-    },
-    { _id: false }
-);
-
 console.log('🔍 message.model.ts TOP =>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>');
 
 const MessageSchema = new Schema<IMessage>(
@@ -40,6 +29,7 @@ const MessageSchema = new Schema<IMessage>(
             required: true,
             unique: true,
             default: uuidv4,
+            index: true,
             immutable: true,
         },
 
@@ -48,21 +38,21 @@ const MessageSchema = new Schema<IMessage>(
             type: Schema.Types.ObjectId,
             ref: 'Conversation',
             required: true,
-            // 
+            // index: true,
         },
 
         // Sender is a UUID string (matches User.userId)
         senderId: {
             type: String,
             required: true,
-            // 
+            // index: true,
         },
 
         type: {
             type: String,
             enum: Object.values(MessageType),
             default: MessageType.TEXT,
-            // 
+            // index: true,
         },
 
         // Text content — required only for text/system messages
@@ -82,7 +72,7 @@ const MessageSchema = new Schema<IMessage>(
             type: String,
             enum: Object.values(MessageStatus),
             default: MessageStatus.SENT,
-            // 
+            // index: true,
         },
         deliveredAt: { type: Date },
         seenAt: { type: Date },
@@ -97,35 +87,21 @@ const MessageSchema = new Schema<IMessage>(
         isPinned: {
             type: Boolean,
             default: false,
-            //  
+            // index: true 
         },
         pinnedAt: { type: Date },
         pinnedBy: { type: String },
-
-        // Reply — snapshot of the message being replied to
-        replyTo: {
-            type: ReplySnapshotSchema,
-            default: undefined,
-        },
-
-        // Edit tracking
-        isEdited: {
-            type: Boolean,
-            default: false,
-        },
-        editedAt: { type: Date },
 
         // Soft delete
         isDeleted: {
             type: Boolean,
             default: false,
-            //  
+            // index: true 
         },
         deletedAt: { type: Date },
         deletedBy: { type: String },
 
-        // Flexible metadata for system/reminder messages and rich previews
-        // (e.g. metadata.postPreview = { postId, title, image, authorName, authorAvatar })
+        // Flexible metadata for system/reminder messages
         metadata: {
             type: Schema.Types.Mixed,
             default: undefined,
@@ -177,9 +153,6 @@ MessageSchema.methods.toResponse = function (currentUserId: string) {
             reactedByMe: r.userIds.includes(currentUserId),
         })),
         isPinned: this.isPinned,
-        replyTo: this.replyTo || null,
-        isEdited: this.isEdited || false,
-        editedAt: this.editedAt?.toISOString(),
         metadata: this.metadata,
         createdAt: this.createdAt.toISOString(),
         deliveredAt: this.deliveredAt?.toISOString(),

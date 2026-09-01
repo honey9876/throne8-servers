@@ -45,8 +45,10 @@ const authenticateSocket = async (socket: Socket): Promise<string | null> => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
 
     // Verify user exists and is active
-    const user = await User.findById(decoded.userId).select('_id isActive');
-    
+    // BUG FIX: must select 'status' — selecting '_id isActive' left status=undefined,
+    // so user.status !== 'active' was always true → blocked ALL socket connections.
+    const user = await User.findOne({ userId: decoded.userId }).select('userId status isActive');
+
     if (!user || user.status !== 'active') {
       LoggerUtil.warn(`⚠️  Invalid or inactive user for socket: ${socket.id}`);
       return null;
@@ -67,9 +69,17 @@ const verifyGroupMembership = async (
   groupId: string
 ): Promise<boolean> => {
   try {
+    // OLD: wrong field names — GroupMember model uses userId/groupId, not user/group
+    // const membership = await GroupMember.findOne({
+    //   user: userId,
+    //   group: groupId,
+    //   status: 'active',
+    // });
+
+    // NEW: correct field names matching GroupMember model schema
     const membership = await GroupMember.findOne({
-      user: userId,
-      group: groupId,
+      userId: userId,
+      groupId: groupId,
       status: 'active',
     });
 
@@ -111,12 +121,26 @@ export const setupSocketHandlers = (io: Server): void => {
     socket.data.userId = userId;
 
     // Get user details for live room handler
-    const user = await User.findById(userId).select('name');
-    const userName = user?.username || 'Unknown User';
+    // BUG FIX: userId is a UUID string, so we must use findOne({ userId }) instead of findById
+    const user = await User.findOne({ userId }).select('username name firstName lastName');
+    const userName =
+      user?.username ||
+      (user as any)?.name ||
+      ((user as any)?.firstName ? `${(user as any).firstName} ${(user as any).lastName || ''}`.trim() : '') ||
+      'Unknown User';
 
-    // Attach userName to socket for live room events
+    // BUG FIX: set BOTH socket.data.userName AND (socket as any).userName.
+    // liveRoomHandler reads socket.data.userName — it was always undefined before.
+    socket.data.userName = userName;
     (socket as any).userId = userId;
     (socket as any).userName = userName;
+
+    // ⚡ CRITICAL: Join the user's personal socket room.
+    // This is required for WebRTC P2P signaling (offer/answer/ICE).
+    // liveRoomHandler uses io.to(`user:${targetUserId}`) to send signals
+    // directly to a specific peer — without this, all WebRTC signals are dropped.
+    socket.join(`user:${userId}`);
+    LoggerUtil.info(`📡 User ${userId} joined personal room user:${userId}`);
 
     // ==========================================
     // JOIN GROUP ROOM

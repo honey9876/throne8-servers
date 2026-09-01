@@ -18,10 +18,8 @@ class GroupController {
       }
 
       const authToken = getAuthToken(req) || undefined;
-      const file = req.file as Express.Multer.File | undefined;
       const session = await groupService.createGroupSession(
         { ...req.body, mentorId: userId },
-        file,
         authToken
       );
 
@@ -152,6 +150,28 @@ class GroupController {
   }
 
   /**
+   * @route   PUT /api/v1/mentorship/group-sessions/:id
+   * @access  Private (Mentor)
+   */
+  async updateGroupSession(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const userId = req.user?.id;
+      if (!userId) {
+        ResponseHandler.unauthorized(res);
+        return;
+      }
+
+      const authToken = getAuthToken(req) || undefined;
+      const session = await groupService.updateGroupSession(id, userId, req.body, authToken);
+      ResponseHandler.success(res, 'Group session updated successfully', session);
+    } catch (error: any) {
+      logger.error('Failed to update group session:', error);
+      next(error);
+    }
+  }
+
+  /**
    * @route   POST /api/v1/mentorship/group-sessions/:id/start
    * @access  Private (Mentor)
    */
@@ -264,7 +284,7 @@ class GroupController {
    */
   async getMyGroupSessions(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const userId = req.user?.id ?? req.user?.userId;
+      const userId = req.user?.id;
       if (!userId) {
         ResponseHandler.unauthorized(res);
         return;
@@ -281,36 +301,6 @@ class GroupController {
       ResponseHandler.success(res, 'My group sessions retrieved successfully', sessions);
     } catch (error: any) {
       logger.error('Failed to fetch my group sessions:', error);
-      next(error);
-    }
-  }
-
-  /**
-   * @route   PUT /api/v1/mentorship/group-sessions/:id
-   * @access  Private (Mentor)
-   */
-  async updateGroupSession(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const { id } = req.params;
-      const userId = req.user?.id;
-      if (!userId) {
-        ResponseHandler.unauthorized(res);
-        return;
-      }
-
-      const authToken = getAuthToken(req) || undefined;
-      const file = req.file as Express.Multer.File | undefined;
-      const session = await groupService.updateGroupSession(
-        id,
-        userId,
-        req.body,
-        file,
-        authToken
-      );
-
-      ResponseHandler.success(res, 'Group session updated successfully', session);
-    } catch (error: any) {
-      logger.error('Failed to update group session:', error);
       next(error);
     }
   }

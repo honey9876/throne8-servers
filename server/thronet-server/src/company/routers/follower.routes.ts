@@ -57,12 +57,6 @@ router.get('/stats/:companyId',
   followerController.getFollowerStats
 );
 
-router.get('/:companyId/followers/count',
-  validationMiddleware.validateParamsJoi(followerValidators.companyId),
-  resolveCompanyUUID,
-  followerController.getFollowerStats
-);
-
 router.get('/mutual/:companyId',
   AuthMiddleware.authenticate as any,
   validationMiddleware.validateParamsJoi(followerValidators.companyId),

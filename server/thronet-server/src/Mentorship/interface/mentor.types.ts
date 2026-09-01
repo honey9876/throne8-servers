@@ -1,7 +1,6 @@
 //mentor interface
 import { TimeStamps, SoftDelete } from './common.types';
 import { Domain } from '../../shared/constants/domains';
-import { ITrustScore } from './trustScore.types';
 
 export enum MentorStatus {
   ACTIVE = 'active',
@@ -28,7 +27,7 @@ export interface IMentor extends TimeStamps, SoftDelete {
   status: MentorStatus;
   // ⭐ ADD THESE TWO LINES
   profilePic?: string; // Cloudinary URL
-  bannerImage?: string; // Cloudinary URL
+  coverImage?: string; // Cloudinary URL
   cloudinaryPublicId?: string; // For deletion/updates
 
   title: string;
@@ -112,7 +111,6 @@ export interface IMentor extends TimeStamps, SoftDelete {
     featuredUntil?: Date;
     featuredOrder?: number;
   };
-  trustScore?: ITrustScore;
   // profilePicUrl?: string; // 👈 ADD THIS - cloudinary URL
 }
 
@@ -183,6 +181,8 @@ export interface CreateMentorInput {
 export interface UpdateMentorInput {
   title?: string;
   bio?: string;
+  coverImageFile?: Express.Multer.File;
+  profilePicFile?: Express.Multer.File;
   tagline?: string;
   domains?: Domain[];
   skills?: string[];

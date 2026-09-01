@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Position Model - User Work Experience Positions
  * Stores job positions, employment history
  * 
@@ -98,11 +98,13 @@ const PositionSchema = new Schema<IPosition, IPositionModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
@@ -116,12 +118,14 @@ const PositionSchema = new Schema<IPosition, IPositionModel>(
             trim: true,
             minlength: [2, 'Job title must be at least 2 characters'],
             maxlength: [100, 'Job title cannot exceed 100 characters'],
+            index: true,
         },
         employmentType: {
             type: String,
             required: [true, 'Employment type is required'],
             enum: ['full-time', 'part-time', 'contract', 'freelance', 'internship', 'self-employed', 'seasonal', 'temporary'],
             lowercase: true,
+            index: true,
         },
         companyName: {
             type: String,
@@ -129,23 +133,27 @@ const PositionSchema = new Schema<IPosition, IPositionModel>(
             trim: true,
             minlength: [2, 'Company name must be at least 2 characters'],
             maxlength: [150, 'Company name cannot exceed 150 characters'],
+            index: true,
         },
         location: {
             type: String,
             trim: true,
             maxlength: [100, 'Location cannot exceed 100 characters'],
+            index: true,
         },
         locationType: {
             type: String,
             required: [true, 'Location type is required'],
             enum: ['on-site', 'remote', 'hybrid'],
             lowercase: true,
+            index: true,
         },
 
         // ==================== DATES ====================
         startDate: {
             type: Date,
             required: [true, 'Start date is required'],
+            index: true,
         },
         endDate: {
             type: Date,
@@ -154,6 +162,7 @@ const PositionSchema = new Schema<IPosition, IPositionModel>(
         currentlyWorking: {
             type: Boolean,
             default: false,
+            index: true,
         },
 
         // ==================== ADDITIONAL DETAILS ====================
@@ -161,6 +170,7 @@ const PositionSchema = new Schema<IPosition, IPositionModel>(
             type: String,
             trim: true,
             maxlength: [100, 'Industry cannot exceed 100 characters'],
+            index: true,
         },
         description: {
             type: String,
@@ -224,6 +234,7 @@ const PositionSchema = new Schema<IPosition, IPositionModel>(
         displayOrder: {
             type: Number,
             default: 0,
+            index: true,
         },
 
         // ==================== AUTO-CALCULATED FIELDS ====================
@@ -248,6 +259,7 @@ const PositionSchema = new Schema<IPosition, IPositionModel>(
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: {
             type: Date,
@@ -256,6 +268,7 @@ const PositionSchema = new Schema<IPosition, IPositionModel>(
         isArchived: {
             type: Boolean,
             default: false,
+            index: true,
         },
         archivedAt: {
             type: Date,

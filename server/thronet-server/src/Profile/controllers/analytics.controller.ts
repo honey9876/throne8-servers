@@ -13,6 +13,8 @@ import { LoggerUtil } from '@/shared/logger.util';
 import ResponseUtil from '@/shared/response.util';
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import User from '@/auth/models/User.model';
+import ProfilePhoto from '@/Profile/models/ProfilePhoto.model';
 
 // ==================== INTERFACES ====================
 
@@ -143,12 +145,32 @@ class AnalyticsController {
                 correlationId,
             });
 
+            // Fetch viewer's real name and profile photo from DB
+            const viewerUser = await User.findOne({ userId: viewerId }).select('firstName lastName profilePhotoId').lean() as any;
+            let resolvedViewerName = viewerName || undefined;
+            let resolvedViewerPhotoUrl = viewerPhotoUrl || undefined;
+
+            if (viewerUser) {
+                const fullName = `${viewerUser.firstName || ''} ${viewerUser.lastName || ''}`.trim();
+                if (fullName) resolvedViewerName = fullName;
+
+                // Resolve profile photo
+                if (viewerUser.profilePhotoId) {
+                    const photo = await ProfilePhoto.findOne({ photoId: viewerUser.profilePhotoId }).lean() as any;
+                    if (photo?.cloudinarySecureUrl) resolvedViewerPhotoUrl = photo.cloudinarySecureUrl;
+                }
+                if (!resolvedViewerPhotoUrl) {
+                    const photo = await ProfilePhoto.findOne({ userId: viewerId, isActive: true }).lean() as any;
+                    if (photo?.cloudinarySecureUrl) resolvedViewerPhotoUrl = photo.cloudinarySecureUrl;
+                }
+            }
+
             // Call service method
             await AnalyticsService.recordProfileView(profileOwnerId, {
                 viewerId,
-                viewerName: viewerName || req.user.email,
+                viewerName: resolvedViewerName,
                 viewerHeadline: viewerHeadline || undefined,
-                viewerPhotoUrl: viewerPhotoUrl || undefined,
+                viewerPhotoUrl: resolvedViewerPhotoUrl,
                 ipAddress: req.ip || 'unknown',
                 userAgent: req.headers['user-agent'] || 'unknown',
             });
@@ -1156,82 +1178,6 @@ class AnalyticsController {
         }
     }
 
-
-    
-
-    /**
-     * ✅ Get post impressions % change
-     * GET /api/v1/analytics/post-impressions/change
-     */
-    static async getPostImpressionsChange(
-        req: Request & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-
-            const userId = req.user.userId;
-            const days = parseInt(req.query.days as string) || 30;
-
-            const result = await AnalyticsService.getPostImpressionsChange(userId, days);
-
-            ResponseUtil.success(res, result, 'Post impressions change fetched successfully');
-            return;
-
-        } catch (error: any) {
-            LoggerUtil.error('Get post impressions change failed', {
-                error: error.message,
-                correlationId,
-            });
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-    /**
-     * ✅ Get search appearances % change
-     * GET /api/v1/analytics/search-appearances/change
-     */
-    static async getSearchAppearancesChange(
-        req: Request & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-
-            const userId = req.user.userId;
-            const days = parseInt(req.query.days as string) || 30;
-
-            const result = await AnalyticsService.getSearchAppearancesChange(userId, days);
-
-            ResponseUtil.success(res, result, 'Search appearances change fetched successfully');
-            return;
-
-        } catch (error: any) {
-            LoggerUtil.error('Get search appearances change failed', {
-                error: error.message,
-                correlationId,
-            });
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-
-
-
-
-
     // ==================== FEATURE 3: TOTAL ENGAGEMENTS ====================
 
     /**
@@ -1521,7 +1467,7 @@ class AnalyticsController {
         }
     }
 
-   // ✅ CHANGED: viewDuration ab body se accept hota hai aur service ko pass hota hai
+    // Add this NEW method:
     static async recordPostImpressionSmart(
         req: Request & { user?: UserPayload },
         res: Response
@@ -1535,7 +1481,7 @@ class AnalyticsController {
             }
 
             const viewerId = req.user.userId;
-            const { postId, postOwnerId, source, viewDuration } = req.body;
+            const { postId, postOwnerId, source } = req.body;
 
             // Generate session/device fingerprint
             const sessionId = req.headers['x-session-id'] as string || uuidv4();
@@ -1556,18 +1502,11 @@ class AnalyticsController {
                 return;
             }
 
-            // ✅ NEW: sanity check — negative ya bahut bada duration ignore karo (junk data se bachne ke liye)
-            const sanitizedDuration =
-                typeof viewDuration === 'number' && viewDuration >= 0 && viewDuration <= 3600
-                    ? viewDuration
-                    : undefined;
-
             LoggerUtil.info('Recording smart post impression', {
                 viewerId,
                 postOwnerId,
                 postId,
                 source,
-                viewDuration: sanitizedDuration,
                 correlationId,
             });
 
@@ -1576,8 +1515,7 @@ class AnalyticsController {
                 source,
                 viewerId,
                 sessionId,
-                deviceFingerprint,
-                viewDuration: sanitizedDuration, // ✅ NEW
+                deviceFingerprint
             });
 
             ResponseUtil.success(
@@ -1706,21 +1644,6 @@ class AnalyticsController {
                 return;
             }
 
-
-
-        // ✅ NEW: Apna khud ka click count nahi karna (jaise LinkedIn)
-        if (clickerId === targetUserId) {
-            ResponseUtil.success(res, null, 'Self-click not recorded');
-            return;
-        }
-
-        const validClickTypes = ['profile_link', 'external_link', 'post_link', 'image', 'video', 'document', 'document_download'];
-if (!validClickTypes.includes(clickType)) {
-    ResponseUtil.validationError(res, ['Invalid clickType'], 'Validation failed');
-    return;
-}
-        
-
             await AnalyticsService.recordClick(targetUserId, {
                 clickType,
                 targetUrl,
@@ -1774,11 +1697,6 @@ if (!validClickTypes.includes(clickType)) {
                 return;
             }
 
-            if (sharerId === postOwnerId) {
-                ResponseUtil.success(res, null, 'Self-share not recorded');
-                return;
-            }
-
             await AnalyticsService.recordShare(postOwnerId, {
                 postId,
                 shareType,
@@ -1829,13 +1747,6 @@ if (!validClickTypes.includes(clickType)) {
                 return;
             }
 
-
-            if (visitorId === profileOwnerId) {
-                ResponseUtil.success(res, null, 'Self-visit not recorded');
-                return;
-
-            }
-
             await AnalyticsService.recordUniqueVisitor(profileOwnerId, {
                 visitorId,
                 deviceFingerprint: req.headers['user-agent'],
@@ -1860,83 +1771,6 @@ if (!validClickTypes.includes(clickType)) {
             return;
         }
     }
-    /**
-     * ✅ RECORD ENGAGEMENT (like/comment/share/save)
-     * POST /api/v1/analytics/record-engagement
-     */
-    static async recordEngagement(
-        req: Request & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
-
-            const viewerId = req.user.userId;
-            const { postId, postOwnerId, engagementType } = req.body;
-
-            if (!postId || !postOwnerId || !engagementType) {
-                ResponseUtil.validationError(
-                    res,
-                    ['postId, postOwnerId, and engagementType are required'],
-                    'Validation failed'
-                );
-                return;
-            }
-
-            const validTypes = ['like', 'comment', 'share', 'save'];
-            if (!validTypes.includes(engagementType)) {
-                ResponseUtil.validationError(
-                    res,
-                    ['Invalid engagementType. Must be one of: ' + validTypes.join(', ')],
-                    'Validation failed'
-                );
-                return;
-            }
-
-            // Don't count self-engagement
-            if (viewerId === postOwnerId) {
-                ResponseUtil.success(res, null, 'Self-engagement not recorded');
-                return;
-            }
-
-            LoggerUtil.info('Recording engagement', {
-                viewerId,
-                postOwnerId,
-                postId,
-                engagementType,
-                correlationId,
-            });
-
-            await AnalyticsService.recordEngagement(postOwnerId, {
-                postId,
-                viewerId,
-                engagementType,
-            });
-
-            ResponseUtil.success(
-                res,
-                { recorded: true },
-                'Engagement recorded successfully'
-            );
-            return;
-
-        } catch (error: any) {
-            LoggerUtil.error('Record engagement failed', {
-                error: error.message,
-                correlationId,
-            });
-
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-    
 
     /**
      * ✅ GET CLICKS COUNT
@@ -2131,37 +1965,37 @@ if (!validClickTypes.includes(clickType)) {
     /**
      * ✅ GET DISCOVERY STATS
      */
-    static async getDiscoveryStats(
-        req: Request & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const correlationId = (req as any).correlationId || uuidv4();
+    // static async getDiscoveryStats(
+    //     req: Request & { user?: UserPayload },
+    //     res: Response
+    // ): Promise<void> {
+    //     const correlationId = (req as any).correlationId || uuidv4();
 
-        try {
-            if (!req.user?.userId) {
-                ResponseUtil.unauthorized(res, 'Authentication required');
-                return;
-            }
+    //     try {
+    //         if (!req.user?.userId) {
+    //             ResponseUtil.unauthorized(res, 'Authentication required');
+    //             return;
+    //         }
 
-            const userId = req.user.userId;
-            const days = req.query.days ? parseInt(req.query.days as string) : undefined;
+    //         const userId = req.user.userId;
+    //         const days = req.query.days ? parseInt(req.query.days as string) : undefined;
 
-            const result = await AnalyticsService.getDiscoveryStats(userId, days);
-            ResponseUtil.success(
-                res,
-                result,
-                'Discovery stats fetched successfully'
-            );
-            return;
+    //         const result = await Analytics.getDiscoveryStats(userId, days);
+    //         ResponseUtil.success(
+    //             res,
+    //             result,
+    //             'Discovery stats fetched successfully'
+    //         );
+    //         return;
 
-        } catch (error: any) {
-            LoggerUtil.error('Get discovery stats failed', {
-                error: error.message,
-                correlationId
-            });
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
+    //     } catch (error: any) {
+    //         LoggerUtil.error('Get discovery stats failed', {
+    //             error: error.message,
+    //             correlationId
+    //         });
+    //         ResponseUtil.internalError(res, error.message, error);
+    //         return;
+    //     }
+    // }
 }
 export default AnalyticsController;

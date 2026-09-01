@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ====================================
  * TASK MODEL
  * ====================================
@@ -17,9 +17,10 @@ const taskSchema = new Schema<ITask>(
       type: String,
       ref: 'User',
       required: [true, 'User is required'],
-    }, 
+      index: true,
+    },
 
-    // ADD: taskId UUID � external identifier
+    // ADD: taskId UUID — external identifier
     taskId: {
       type: String,
       required: true,
@@ -28,8 +29,9 @@ const taskSchema = new Schema<ITask>(
     groupId: {
   type: String,
   ref: 'StudyGroup_Group',
-  required: false,   // CHANGE � was: required: true
+  required: false,   // CHANGE — was: required: true
   default: null,
+  index: true,
 },
     title: {
       type: String,
@@ -85,15 +87,14 @@ const taskSchema = new Schema<ITask>(
     timestamps: true,
     // ADD: toJSON transform
     toJSON: {
-  virtuals: true,
-  transform: function (_doc, ret) {
-    const r = ret as any;
-    r.id = r.taskId;
-    delete r._id;
-    delete r.__v;
-    return r;
-  },
-},
+      virtuals: true,
+      transform: function (_doc, ret) {
+        (ret as any).id = (ret as any).taskId;
+        delete ret._id;
+        delete ret.__v;
+        return ret;
+      }
+    },
     toObject: {
       virtuals: true,
       transform: function (_doc, ret) {
@@ -107,7 +108,7 @@ const taskSchema = new Schema<ITask>(
 /**
  * Indexes
  */
-
+taskSchema.index({ taskId: 1}, {unique: true});
 taskSchema.index({ userId: 1, createdAt: -1 });
 taskSchema.index({ userId: 1, status: 1 });
 taskSchema.index({ userId: 1, priority: 1 });

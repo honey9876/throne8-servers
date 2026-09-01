@@ -1,12 +1,10 @@
 // src/controllers/privacyController.ts - PRODUCTION READY - ALL ERRORS FIXED
 
 import { Request, Response } from 'express';
-import { privacyService } from '../services/privacy.service';
-import { SuccessResponse, ErrorResponse, HttpStatus } from '@/shared/response.util';
-import logger, { LogCategory } from '@/shared/logger.util';
-import constants from '@/shared/constants.util';
-const { ERROR_CODES } = constants;
-const DEFAULT_VALUES = constants.CONNECTION_SERVICE_CONSTANTS.DEFAULT_VALUES;
+import { privacyService } from '../services/privacyService';
+import { SuccessResponse, ErrorResponse, HttpStatus } from '../utils/response';
+import logger, { LogCategory } from '../utils/logger';
+import { ERROR_CODES } from '../utils/constants';
 
 // Inline asyncHandler since the middleware doesn't exist
 const asyncHandler = (fn: (req: Request, res: Response, next: any) => Promise<any>) => 

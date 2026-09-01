@@ -1,4 +1,12 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+/**
+ * Activity Media Model - Tracks all media used in posts
+ * Separate tracking for images, videos, documents
+ * 
+ * @module models/ActivityMedia.model
+ * @version 1.0.0
+ */
+
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 
 // ==================== INTERFACES ====================
@@ -26,20 +34,12 @@ export interface IActivityMedia extends Document {
     updatedAt: Date;
 }
 
-export interface IMediaStats {
-    totalImages: number;
-    totalVideos: number;
-    totalDocuments: number;
-    totalFiles: number;
-    totalSize: number;
-}
-
 export interface IActivityMediaModel extends Model<IActivityMedia> {
     findByMediaId(mediaId: string): Promise<IActivityMedia | null>;
-    findByUserId(userId: string, type?: 'image' | 'video' | 'document'): Promise<IActivityMedia[]>;
+    findByUserId(userId: string, type?: string): Promise<IActivityMedia[]>;
     findByPostId(postId: string): Promise<IActivityMedia[]>;
-    getUserMediaCount(userId: string, type?: 'image' | 'video' | 'document'): Promise<number>;
-    getUserMediaStats(userId: string): Promise<IMediaStats>;
+    getUserMediaCount(userId: string, type?: string): Promise<number>;
+    getUserMediaStats(userId: string): Promise<any>;
 }
 
 // ==================== SCHEMA ====================
@@ -51,28 +51,70 @@ const ActivityMediaSchema = new Schema<IActivityMedia, IActivityMediaModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
         },
-        userId: { type: String, required: true },
-        postId: { type: String, required: true },
+        userId: {
+            type: String,
+            required: true,
+            index: true,
+        },
+        postId: {
+            type: String,
+            required: true,
+            index: true,
+        },
         type: {
             type: String,
             enum: ['image', 'video', 'document'],
             required: true,
+            index: true,
         },
-        cloudinaryPublicId: { type: String, required: true, unique: true },
-        cloudinaryUrl: { type: String, required: true },
-        cloudinarySecureUrl: { type: String, required: true },
-        cloudinaryFolder: { type: String, required: true },
-        originalName: { type: String, required: true },
-        mimeType: { type: String, required: true },
-        fileSize: { type: Number, required: true },
+        cloudinaryPublicId: {
+            type: String,
+            required: true,
+            unique: true,
+        },
+        cloudinaryUrl: {
+            type: String,
+            required: true,
+        },
+        cloudinarySecureUrl: {
+            type: String,
+            required: true,
+        },
+        cloudinaryFolder: {
+            type: String,
+            required: true,
+        },
+        originalName: {
+            type: String,
+            required: true,
+        },
+        mimeType: {
+            type: String,
+            required: true,
+        },
+        fileSize: {
+            type: Number,
+            required: true,
+        },
         width: Number,
         height: Number,
         duration: Number,
-        format: { type: String, required: true },
-        isDeleted: { type: Boolean, default: false },
+        format: {
+            type: String,
+            required: true,
+        },
+        isDeleted: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
         deletedAt: Date,
-        uploadedAt: { type: Date, default: Date.now },
+        uploadedAt: {
+            type: Date,
+            default: Date.now,
+        },
     },
     {
         timestamps: true,
@@ -88,50 +130,34 @@ ActivityMediaSchema.index({ userId: 1, isDeleted: 1 });
 
 // ==================== STATIC METHODS ====================
 
-ActivityMediaSchema.statics.findByMediaId = async function (
-    mediaId: string
-): Promise<IActivityMedia | null> {
+ActivityMediaSchema.statics.findByMediaId = async function (mediaId: string): Promise<IActivityMedia | null> {
     return this.findOne({ mediaId, isDeleted: false });
 };
 
 ActivityMediaSchema.statics.findByUserId = async function (
     userId: string,
-    type?: 'image' | 'video' | 'document'
+    type?: string
 ): Promise<IActivityMedia[]> {
-    const query: { userId: string; isDeleted: boolean; type?: string } = {
-        userId,
-        isDeleted: false,
-    };
+    const query: any = { userId, isDeleted: false };
     if (type) query.type = type;
     return this.find(query).sort({ createdAt: -1 });
 };
 
-ActivityMediaSchema.statics.findByPostId = async function (
-    postId: string
-): Promise<IActivityMedia[]> {
+ActivityMediaSchema.statics.findByPostId = async function (postId: string): Promise<IActivityMedia[]> {
     return this.find({ postId, isDeleted: false }).sort({ createdAt: -1 });
 };
 
 ActivityMediaSchema.statics.getUserMediaCount = async function (
     userId: string,
-    type?: 'image' | 'video' | 'document'
+    type?: string
 ): Promise<number> {
-    const query: { userId: string; isDeleted: boolean; type?: string } = {
-        userId,
-        isDeleted: false,
-    };
+    const query: any = { userId, isDeleted: false };
     if (type) query.type = type;
     return this.countDocuments(query);
 };
 
-ActivityMediaSchema.statics.getUserMediaStats = async function (
-    userId: string
-): Promise<IMediaStats> {
-    const stats = await this.aggregate<{
-        _id: 'image' | 'video' | 'document';
-        count: number;
-        totalSize: number;
-    }>([
+ActivityMediaSchema.statics.getUserMediaStats = async function (userId: string): Promise<any> {
+    const stats = await this.aggregate([
         { $match: { userId, isDeleted: false } },
         {
             $group: {
@@ -142,7 +168,7 @@ ActivityMediaSchema.statics.getUserMediaStats = async function (
         },
     ]);
 
-    const result: IMediaStats = {
+    const result: any = {
         totalImages: 0,
         totalVideos: 0,
         totalDocuments: 0,
@@ -150,21 +176,18 @@ ActivityMediaSchema.statics.getUserMediaStats = async function (
         totalSize: 0,
     };
 
-    for (const stat of stats) {
+    stats.forEach((stat: any) => {
         if (stat._id === 'image') result.totalImages = stat.count;
         if (stat._id === 'video') result.totalVideos = stat.count;
         if (stat._id === 'document') result.totalDocuments = stat.count;
         result.totalFiles += stat.count;
         result.totalSize += stat.totalSize;
-    }
+    });
 
     return result;
 };
 
 // ==================== EXPORT ====================
 
-const ActivityMedia = mongoose.model<IActivityMedia, IActivityMediaModel>(
-    'ActivityMedia',
-    ActivityMediaSchema
-);
+const ActivityMedia = mongoose.model<IActivityMedia, IActivityMediaModel>('ActivityMedia', ActivityMediaSchema);
 export default ActivityMedia;

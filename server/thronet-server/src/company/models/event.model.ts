@@ -109,6 +109,7 @@ export const EventSchema = new Schema(
       type: String,
       required: true,
       unique: true,
+      index: true,
       default: uuidv4,
     },
     title: {
@@ -120,13 +121,14 @@ export const EventSchema = new Schema(
       type: String,
       unique: true,
       lowercase: true,
-      sparse: true,  // ? ADD THIS - allows null values
+      sparse: true,  // ✅ ADD THIS - allows null values
     },
     description: String,
     company: {
       type: Schema.Types.ObjectId,
       ref: 'Company',
       required: true,
+      index: true,
     },
     type: {
       type: String,
@@ -136,6 +138,7 @@ export const EventSchema = new Schema(
     startDate: {
       type: Date,
       required: true,
+      index: true,
     },
     endDate: Date,
     startTimeOfDay: {
@@ -166,7 +169,7 @@ export const EventSchema = new Schema(
           default: 'Point',
         },
         coordinates: {
-          type: [Number],  // ? ARRAY OF 2 NUMBERS
+          type: [Number],  // ✅ ARRAY OF 2 NUMBERS
           default: [0, 0],
         },
       },
@@ -258,7 +261,12 @@ EventSchema.index(
   }
 );
 
-
+EventSchema.index({ startDate: 1, status: 1 });
+EventSchema.index({ 'location.coordinates': '2dsphere' });
+EventSchema.index({ company: 1, startDate: -1 });
+EventSchema.index({ type: 1, mode: 1 });
+EventSchema.index({ title: 'text', description: 'text' });
+EventSchema.index({ slug: 1 }, { unique: true, sparse: true });
 
 
 // =====================================================
@@ -536,6 +544,7 @@ EventSchema.index({ status: 1, startDate: 1 });
 EventSchema.index({ type: 1, mode: 1 });
 EventSchema.index({ 'location.coordinates': '2dsphere' });
 EventSchema.index({ title: 'text', description: 'text' });
+EventSchema.index({ slug: 1 }, { unique: true });
 EventSchema.index({ startDate: 1 }, { expireAfterSeconds: 31536000 });
 
 // =====================================================
@@ -556,7 +565,6 @@ EventSchema.set('toObject', { virtuals: true });
 // MODEL CREATION & EXPORT
 // =====================================================
 
-const Event = (mongoose.models['Event'] as IEventModel) ||
-  mongoose.model<IEventDocument, IEventModel>('Event', EventSchema);
+const Event = mongoose.model<IEventDocument, IEventModel>('Event', EventSchema);
 
 export default Event;

@@ -222,9 +222,7 @@ function validateKafkaConfig(): void {
 }
 
 // Validate on load
-if (process.env['KAFKA_ENABLED'] === 'true') {
-    validateKafkaConfig();
-}
+validateKafkaConfig();
 
 // ==================== EXPORTS ====================
 

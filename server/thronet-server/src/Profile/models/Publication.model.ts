@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Publication Model - User Publications Management
  * Stores research papers, articles, books, conference papers
  * 
@@ -163,11 +163,13 @@ const PublicationSchema = new Schema<IPublication, IPublicationModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
@@ -181,6 +183,7 @@ const PublicationSchema = new Schema<IPublication, IPublicationModel>(
             trim: true,
             minlength: [5, 'Title must be at least 5 characters'],
             maxlength: [500, 'Title cannot exceed 500 characters'],
+            index: true,
         },
         publisherName: {
             type: String,
@@ -282,6 +285,7 @@ const PublicationSchema = new Schema<IPublication, IPublicationModel>(
             type: Number,
             default: 0,
             min: [0, 'Citation count cannot be negative'],
+            index: true,
         },
         citationTracking: {
             googleScholar: {
@@ -309,6 +313,7 @@ const PublicationSchema = new Schema<IPublication, IPublicationModel>(
         isPinned: {
             type: Boolean,
             default: false,
+            index: true,
         },
         pinnedOrder: {
             type: Number,
@@ -332,12 +337,14 @@ const PublicationSchema = new Schema<IPublication, IPublicationModel>(
         displayOrder: {
             type: Number,
             default: 0,
+            index: true,
         },
 
         // ==================== SOFT DELETE / ARCHIVE ====================
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: {
             type: Date,
@@ -346,6 +353,7 @@ const PublicationSchema = new Schema<IPublication, IPublicationModel>(
         isArchived: {
             type: Boolean,
             default: false,
+            index: true,
         },
         archivedAt: {
             type: Date,

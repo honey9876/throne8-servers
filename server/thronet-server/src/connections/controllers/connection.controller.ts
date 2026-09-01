@@ -150,7 +150,7 @@ class connectionController {
                         fromUserId: 1,
                         region: 1,
                         createdAt: 1
-                    }, {   });
+                    }, { background: true });
                 }
             } catch (indexError) {
                 console.log('⚠️ Emergency index creation failed (non-critical):', indexError);
@@ -314,16 +314,21 @@ class connectionController {
     static getUserConnections = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
         const authUserId = req.user?.userId;
         const { userId } = req.params;
-        const { page = '1', limit = environmentConfig.PAGINATION_DEFAULT_LIMIT, status, tag } = req.query;
+        let { page = '1', limit = environmentConfig.PAGINATION_DEFAULT_LIMIT, status, tag } = req.query;
 
         if (!authUserId) {
             return next(new ErrorResponse('Authentication required', HttpStatus.UNAUTHORIZED, 'AUTH_ERROR'));
         }
 
-        // ✅ AUTHORIZATION: User can only view their own connections (unless admin)
-        // if (userId !== authUserId && req.user?.role !== 'admin') {
-        //     return next(new ErrorResponse('You can only view your own connections', HttpStatus.FORBIDDEN, 'AUTH_ERROR'));
-        // }
+        // ✅ If status is not provided, default to 'active'
+        if (!status) {
+            status = 'active';
+        }
+
+        // ✅ AUTHORIZATION: If requesting someone else's connections, force status to 'active'
+        if (userId !== authUserId && req.user?.role !== 'admin') {
+            status = 'active';
+        }
 
         const result = await Connection.findUserConnectionsPaginated(userId, {
             page: parseInt(page as string),
@@ -341,38 +346,39 @@ class connectionController {
      * ✅ 6. GET CONNECTION COUNT
      * GET /api/v1/connections/user/:userId/count
      * @access Private
-     * @authorization User can only view their own count (or admin)
      */
     static getConnectionCount = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
         const authUserId = req.user?.userId;
         const { userId } = req.params;
-        const { status } = req.query;
+        let { status } = req.query;
 
         if (!authUserId) {
             return next(new ErrorResponse('Authentication required', HttpStatus.UNAUTHORIZED, 'AUTH_ERROR'));
         }
 
-        // ✅ AUTHORIZATION
-            // ❌ REMOVE this self-only restriction — connection count is public info
+        // ✅ If status is not provided, default to 'active'
+        if (!status) {
+            status = 'active';
+        }
 
-        // if (userId !== authUserId && req.user?.role !== 'admin') {
-        //     return next(new ErrorResponse('You can only view your own connection count', HttpStatus.FORBIDDEN, 'AUTH_ERROR'));
-        // }
+        // ✅ AUTHORIZATION: If requesting someone else's count, force status to 'active'
+        if (userId !== authUserId && req.user?.role !== 'admin') {
+            status = 'active';
+        }
 
         const filter: any = {
             $or: [{ fromUserId: userId }, { toUserId: userId }],
             isArchived: false,
-            status: 'active',  // sirf active connections count karo, pending nahi
         };
-        // if (status) filter.status = status;
+        if (status) filter.status = status;
 
         const count = await Connection.countDocuments(filter);
 
-        // logger.debug('Connection count retrieved', {
-        //     userId: authUserId,
-        //     count,
-        //     category: LogCategory.CONNECTION
-        // });
+        logger.debug('Connection count retrieved', {
+            userId: authUserId,
+            count,
+            category: LogCategory.CONNECTION
+        });
 
         res.status(HttpStatus.OK).json(SuccessResponse({ count }, 'Connection count retrieved', HttpStatus.OK));
     });
@@ -911,45 +917,6 @@ class connectionController {
         const activity = connection.metadata?.events || [];
 
         res.status(HttpStatus.OK).json(SuccessResponse(activity, 'Connection activity retrieved', HttpStatus.OK));
-    });
-
-
-
-    /**
-     * ✅ 21. GET MUTUAL CONNECTIONS
-     * GET /api/v1/connections/mutual/:userId1/:userId2
-     * @access Private
-     * @authorization Requesting user must be userId1 or userId2 (or admin)
-     */
-    static getMutualConnections = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
-        const { userId1, userId2 } = req.params;
-        const { limit = '10' } = req.query;
-        const authUserId = req.user?.userId || req.user?.id;
-
-        if (!authUserId) {
-            return next(new ErrorResponse('Authentication required', HttpStatus.UNAUTHORIZED, 'AUTH_ERROR'));
-        }
-
-        if (!userId1 || !userId2) {
-            return next(new ErrorResponse('userId1 and userId2 are required', HttpStatus.BAD_REQUEST, 'INVALID_INPUT'));
-        }
-
-        // ✅ AUTHORIZATION: Requesting user must be one of the two users (or admin)
-        if (userId1 !== authUserId && userId2 !== authUserId && req.user?.role !== 'admin') {
-            return next(new ErrorResponse('Not authorized to view these mutual connections', HttpStatus.FORBIDDEN, 'AUTH_ERROR'));
-        }
-
-        const mutuals = await connectionService.getMutualConnections(
-            userId1,
-            userId2,
-            parseInt(limit as string)
-        );
-
-        res.status(HttpStatus.OK).json(SuccessResponse(
-            { mutuals, count: mutuals.length },
-            'Mutual connections retrieved',
-            HttpStatus.OK
-        ));
     });
 }
 

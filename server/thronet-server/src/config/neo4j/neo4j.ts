@@ -488,9 +488,9 @@
 //   return await neo4jConnection.runTransaction(work, database);
 // };
 
-// export const getNeo4jDriver = async (): Promise<Driver> => {
-//     return await getNeo4jInstance().getDriver();
-// };
+export const getNeo4jDriver = async (): Promise<Driver> => {
+    return await getNeo4jInstance().getDriver();
+};
 
 // export const closeNeo4jConnection = async (): Promise<void> => {
 //   await neo4jConnection.close();

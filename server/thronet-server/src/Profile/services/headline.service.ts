@@ -16,15 +16,13 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { User, Headline } from '@/shared/models/index.models';
+import { User, Headline, IHeadline } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
 import CacheUtil from '@/shared/cache.util';
 import AuditProducer from '@/shared/kafka/producers/audit.producer';
 import headlineEmitter from '@/shared/events/emitters/headline.emitter';
 
 const logger = LoggerUtil;
-
-type IHeadline = InstanceType<typeof Headline>;
 
 // ==================== INTERFACES ====================
 
@@ -121,12 +119,16 @@ class HeadlineService {
                 { new: true }
             );
 
-            // ✅ Invalidate cached user profile so the new headlineId
-            // reflects immediately on next getUserProfile() call
-            await CacheUtil.del(`user:profile:${userId}`);
-
             // Clear cache
             await this.invalidateHeadlineCache('all');
+            try {
+                await Promise.all([
+                    CacheUtil.del(`user:profile:${userId}`),
+                    CacheUtil.del(`user:${userId}`)
+                ]);
+            } catch (cacheErr) {
+                logger.warn('Failed to clear profile cache during headline creation', { error: cacheErr.message });
+            }
 
             // Emit event
             headlineEmitter.emit('headline:created', {
@@ -201,37 +203,23 @@ class HeadlineService {
         return headline;
     }
 
-    static async getMultipleHeadlinesByIds(headlineIds: string[]): Promise<any[]> {
-        try {
-            if (!Array.isArray(headlineIds) || headlineIds.length === 0) return [];
-            const uniqueIds = [...new Set(headlineIds)];
-            const headlines = await Headline.find({
-                headlineId: { $in: uniqueIds },
-                'flags.isDeleted': false,
-            }).lean();
-            logger.debug('Multiple headlines fetched', { requested: uniqueIds.length, found: headlines.length });
-            return headlines;
-        } catch (error: any) {
-            logger.error('Failed to fetch multiple headlines', { error: error.message });
-            throw new Error(error.message || 'Failed to fetch headlines');
-        }
-    }
-
     /**
      * Get all headlines with filters
      */
     static async getAllHeadlines(filters: {
         type?: string;
         status?: string;
+        userId?: string;
         page?: number;
         limit?: number;
     }): Promise<{ headlines: IHeadline[]; total: number }> {
-        const { type, status, page = 1, limit = 20 } = filters;
+        const { type, status, userId, page = 1, limit = 20 } = filters;
 
         const query: any = { 'flags.isDeleted': false };
 
         if (type) query.type = type;
         if (status) query.status = status;
+        if (userId) query['metadata.createdBy'] = userId;
 
         const skip = (page - 1) * limit;
 

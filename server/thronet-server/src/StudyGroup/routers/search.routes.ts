@@ -14,7 +14,7 @@ import {
   getGroupsByCategory,
   getAvailableGroups,
   searchGroupsByTags,
-} from '../controllers/search.controller';
+} from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 
 const router = Router();

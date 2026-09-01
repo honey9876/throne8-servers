@@ -20,7 +20,6 @@ import aboutRoutes from './about.routes';
 import contactRoutes from './contact.routes';
 import analyticsRoutes from './analytics.routes';
 import homePostRouter from './activity/homePost.routes';
-import reportRoutes from './report.routes';
 
 // ==================== MAIN ROUTER ====================
 
@@ -102,11 +101,56 @@ router.use('/home-post', homePostRouter);
 router.use('/about', aboutRoutes);
 router.use('/skills', skillRoutes);
 router.use('/analytics', analyticsRoutes);
-router.use('/reports', reportRoutes);
-
 
 // ==================== EXPORT ====================
 
 export default router;
 
-console.log('🔍 routes/index.ts LOADING END in profile indexing');
+// now mere liye mern me ek api create karke do jisme ye yaha par experience sections ke liye api create karni hai and yaha par mujhe experience ke liye kuchh features hain jisko mai aapko mera code deta hun to aap batana ki mere existing code me kuchh update to nahi karna hai aap poori fiels ko update mat karna only changes batana and meri experience ke liye new fiels generate karke dena like models, services, controllers, routes and other validations and other fiels for your sugestions and yaha par abhi ham only crud (getbyid and getall) + archived + restore api create karnege
+// yaha par uuid form me genrate kar rahe honge and here is my experience features and my existing code jiske acroding same format me apko ye api create karna hai
+//  
+// my experience features->
+
+// 1. create Experience
+
+// 2. Current Positions(like Founder, Co-Founder, Backend Engineer etc..)
+
+// 3. Descriptions(15 to 20 words me)
+
+// 4. start date
+
+// 5. end date if completed (if (currently work is true) currently working now not required end date)
+
+// 6. Add key ahivements (like 1. Built AI platform, 2. Scaled to 50k users etc..)
+
+//  
+// now create its api and you make its only these features like =>
+
+// 1. create,
+
+// 2. get all,
+
+// 3. get by id(uuid form same as my code),
+
+// 4. update,
+
+// 5. delete soft and permanently in db,
+
+// 6. archived,
+
+// 7. restore
+
+//  
+// now give me these all files for experience
+
+// 1. models
+
+// 2. services
+
+// 3. controllers,
+
+// 4. routes,
+
+// 5. validations,
+
+// 6. other for your suggestions

@@ -8,7 +8,6 @@ import { uploadSingle } from '@/shared/upload/upload';
 import CompanyLogoController from '../controllers/companyLogo.controller';
 import CompanyCoverController from '../controllers/companyCover.controller';
 import CompanyAboutController from '../controllers/companyAbout.controller';
-import companyActivityController from '../controllers/companyActivity.controller';
 
 const router = Router();
 
@@ -77,26 +76,6 @@ router.get(
   validationMiddleware.validateParamsJoi(companyValidators.id),
   resolveCompanyUUID,
   handle(companyController.getFollowers.bind(companyController) as ControllerMethod)
-);
-
-router.get(
-  '/:id/activity',
-  validationMiddleware.validateParamsJoi(companyValidators.id),
-  resolveCompanyUUID,
-  handle((req, res) => companyActivityController.getCompanyActivities(req as any, res))
-);
-
-router.patch(
-  '/:id/activity/:activityId/read',
-  resolveCompanyUUID,
-  handle((req, res) => companyActivityController.markActivityRead(req as any, res))
-);
-
-router.post(
-  '/:id/activity/read-all',
-  validationMiddleware.validateParamsJoi(companyValidators.id),
-  resolveCompanyUUID,
-  handle((req, res) => companyActivityController.markAllActivitiesRead(req as any, res))
 );
 
 router.patch(

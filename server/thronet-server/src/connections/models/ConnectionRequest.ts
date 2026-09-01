@@ -1,10 +1,10 @@
-// src/connections/models/ConnectionRequest.ts
+
+// src/models/mongodb/ConnectionRequest.ts
 
 import { Schema, model, Document, Model, Types, Query, QueryOptions } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import logger, { LogCategory, PublicLogMetadata } from '@/shared/logger.util';
 import environmentConfig from '@/config/environment/environment';
-import { ErrorResponse } from '@/shared/response.util'; // ✅ FIX: needed for statusCode-aware errors below
 
 /**
 * ConnectionRequest Model - Optimized for 1M+ Users
@@ -51,6 +51,28 @@ export interface IQueryPerformance {
   index: string | Record<string, any>;
 }
 
+// Extended interface for logger metadata
+// interface ILogMetadata {
+//   requestId?: string;
+//   fromUserId?: Types.ObjectId | string;
+//   toUserId?: Types.ObjectId | string;
+//   status?: string;
+//   region?: string;
+//   modifiedPaths?: string[];
+//   requestIds?: number;
+//   userId?: string;
+//   modifiedCount?: number;
+//   cutoffDate?: Date;
+//   totalArchived?: number;
+//   batchSize?: number;
+//   totalDeleted?: number;
+//   shardKey?: string;
+//   fields?: string[];
+//   path?: string;
+//   name?: string;
+//   [key: string]: any;
+// }
+
 // Custom Query interface that extends mongoose Query
 interface IConnectionRequestQuery<T> extends Query<T, IConnectionRequest> {
   startTime?: number;
@@ -86,26 +108,29 @@ const ConnectionRequestSchema: Schema<IConnectionRequest> = new Schema<IConnecti
       type: String,
       required: [true, 'Request ID is required'],
       unique: true,
+      index: true,
       default: () => uuidv4(),
     },
     fromUserId: {
       type: String,
       required: [true, 'From user ID is required'],
+      index: true,
       validate: {
         validator: function (v: string) {
-          return typeof v === 'string' && v.trim().length > 0;
+          return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
         },
-        message: 'Invalid fromUserId'
+        message: 'Invalid fromUserId UUID format'
       }
     },
     toUserId: {
       type: String,
       required: [true, 'To user ID is required'],
+      index: true,
       validate: {
         validator: function (v: string) {
-          return typeof v === 'string' && v.trim().length > 0;
+          return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
         },
-        message: 'Invalid toUserId'
+        message: 'Invalid toUserId UUID format'
       }
     },
     message: {
@@ -122,10 +147,12 @@ const ConnectionRequestSchema: Schema<IConnectionRequest> = new Schema<IConnecti
       },
       required: [true, 'Status is required'],
       default: 'pending',
+      index: true,
     },
     expiresAt: {
       type: Date,
       default: () => new Date(Date.now() + environmentConfig.CONNECTION_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
+      index: true,
     },
     priority: {
       type: String,
@@ -134,6 +161,7 @@ const ConnectionRequestSchema: Schema<IConnectionRequest> = new Schema<IConnecti
         message: '{VALUE} is not a valid priority',
       },
       default: 'medium',
+      index: true,
     },
     templateId: {
       type: String,
@@ -145,6 +173,7 @@ const ConnectionRequestSchema: Schema<IConnectionRequest> = new Schema<IConnecti
     isRead: {
       type: Boolean,
       default: false,
+      index: true,
     },
     metadata: {
       type: Schema.Types.Mixed,
@@ -153,11 +182,13 @@ const ConnectionRequestSchema: Schema<IConnectionRequest> = new Schema<IConnecti
     region: {
       type: String,
       default: 'global',
+      index: true,
       maxlength: [50, 'Region cannot exceed 50 characters'],
     },
     shardKey: {
       type: String,
       required: true,
+      index: true,
       default: function (this: IConnectionRequest) {
         const userIds = [this.fromUserId?.toString(), this.toUserId?.toString()].sort();
         return `${userIds[0]}_${userIds[1]}_${this.region || 'global'}`;
@@ -166,6 +197,7 @@ const ConnectionRequestSchema: Schema<IConnectionRequest> = new Schema<IConnecti
     cacheVersion: {
       type: Number,
       default: 1,
+      index: true,
     },
   },
   {
@@ -777,12 +809,7 @@ ConnectionRequestSchema.statics.getSlowQueries = function (): IQueryPerformance[
   return [...slowQueries].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 };
 
-// ✅ FIXED ERROR HANDLING — now attaches proper statusCode via ErrorResponse
-// instead of throwing plain Error objects. Previously these all silently
-// became 500 responses because the global error middleware only checks
-// `err instanceof ErrorResponse` to read the statusCode; a plain Error
-// always fell through to the 500 default, even for validation/duplicate
-// errors that should have been 400/409.
+// OPTIMIZED ERROR HANDLING
 ConnectionRequestSchema.post('save', function (error: any, doc: IConnectionRequest, next: any) {
   if (error.name === 'MongoServerError' && error.code === 11000) {
     logger.error('Duplicate connection request error', {
@@ -793,7 +820,7 @@ ConnectionRequestSchema.post('save', function (error: any, doc: IConnectionReque
       },
       category: LogCategory.ERROR,
     } as unknown as PublicLogMetadata);
-    next(new ErrorResponse('A pending or accepted connection request already exists between these users', 409));
+    next(new Error('A pending or accepted connection request already exists between these users'));
   } else if (error.name === 'ValidationError') {
     logger.error('Connection request validation failed', {
       data: {
@@ -803,7 +830,7 @@ ConnectionRequestSchema.post('save', function (error: any, doc: IConnectionReque
       },
       category: LogCategory.ERROR,
     } as unknown as PublicLogMetadata);
-    next(new ErrorResponse(`Validation failed: ${error.message}`, 400));
+    next(new Error(`Validation failed: ${error.message}`));
   } else if (error.name === 'CastError') {
     logger.error('Connection request cast error', {
       data: {
@@ -813,7 +840,7 @@ ConnectionRequestSchema.post('save', function (error: any, doc: IConnectionReque
       },
       category: LogCategory.ERROR,
     } as unknown as PublicLogMetadata);
-    next(new ErrorResponse('Invalid data type provided', 400));
+    next(new Error('Invalid data type provided'));
   } else {
     logger.error('Connection request save error', {
       data: {
@@ -823,7 +850,7 @@ ConnectionRequestSchema.post('save', function (error: any, doc: IConnectionReque
       },
       category: LogCategory.ERROR,
     } as unknown as PublicLogMetadata);
-    next(error); // Unknown/unexpected errors: let them stay 500, that's correct
+    next(error);
   }
 });
 

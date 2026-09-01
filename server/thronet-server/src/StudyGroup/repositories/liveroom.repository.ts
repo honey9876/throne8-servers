@@ -1,4 +1,3 @@
-console.log('🟢 STEP-4: liveRoom.repository.ts file STARTED loading');
 import { BaseRepository } from './base.repository';
 import LiveRoom from '../models/LiveRoom.model';
 import { ILiveRoomDocument } from '../interfaces/ILiveRoom';
@@ -57,28 +56,6 @@ class LiveRoomRepository extends BaseRepository<ILiveRoomDocument> {
         },
       },
     ]);
-  }
-
-  /**
-   * Atomically update camera/mic settings for an active participant
-   */
-  async updateParticipantSettings(
-    roomId: string,
-    userId: string,
-    settings: { cameraOn?: boolean; micOn?: boolean }
-  ): Promise<ILiveRoomDocument | null> {
-    const updateFields: Record<string, boolean> = {};
-    if (settings.cameraOn !== undefined) updateFields['participants.$[elem].cameraOn'] = settings.cameraOn;
-    if (settings.micOn !== undefined) updateFields['participants.$[elem].micOn'] = settings.micOn;
-
-    return await this.model.findOneAndUpdate(
-      { _id: roomId },
-      { $set: updateFields },
-      {
-        arrayFilters: [{ 'elem.user': new Types.ObjectId(userId), 'elem.leftAt': null }],
-        new: true,
-      }
-    ).exec();
   }
 }
 

@@ -1,24 +1,21 @@
-﻿// src/Profile/models/Repost.model.ts
+// src/Profile/models/Repost.model.ts
 
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface IRepost extends Document {
     repostId: string;
-    originalPostEntryId: string;
-    originalPostOwnerId: string;
-    repostedBy: string;
+    originalPostEntryId: string;   // Post ka entryId
+    originalPostOwnerId: string;   // Original post creator ka userId
+    repostedBy: string;            // Repost karne wale ka userId
     repostType: 'repost' | 'quote';
-    thoughtText?: string;
+    thoughtText?: string;          // Only for quote repost
     visibility: 'public' | 'connections' | 'private';
     isDeleted: boolean;
     deletedAt?: Date;
     isEdited: boolean;
     editedAt?: Date;
     repostSource: 'feed' | 'profile' | 'search' | 'other';
-    // ✅ Sirf quote-repost ke liye use hote hain — apna independent like system
-    likesCount: number;
-    likedBy: string[];
     createdAt: Date;
     updatedAt: Date;
 }
@@ -38,18 +35,22 @@ const RepostSchema = new Schema<IRepost, IRepostModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
         },
         originalPostEntryId: {
             type: String,
             required: true,
+            index: true,
         },
         originalPostOwnerId: {
             type: String,
             required: true,
+            index: true,
         },
         repostedBy: {
             type: String,
             required: true,
+            index: true,
         },
         repostType: {
             type: String,
@@ -71,6 +72,7 @@ const RepostSchema = new Schema<IRepost, IRepostModel>(
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: Date,
         isEdited: {
@@ -83,15 +85,6 @@ const RepostSchema = new Schema<IRepost, IRepostModel>(
             enum: ['feed', 'profile', 'search', 'other'],
             default: 'feed',
         },
-        likesCount: {
-            type: Number,
-            default: 0,
-            min: 0,
-        },
-        likedBy: {
-            type: [String],
-            default: [],
-        },
     },
     {
         timestamps: true,
@@ -99,6 +92,9 @@ const RepostSchema = new Schema<IRepost, IRepostModel>(
     }
 );
 
+// ==================== INDEXES ====================
+
+// CRITICAL: Ek user ek post ko sirf ek baar repost kar sakta hai
 RepostSchema.index(
     { originalPostEntryId: 1, repostedBy: 1 },
     { unique: true, sparse: true }
@@ -106,6 +102,8 @@ RepostSchema.index(
 RepostSchema.index({ repostedBy: 1, createdAt: -1 });
 RepostSchema.index({ originalPostEntryId: 1, isDeleted: 1 });
 RepostSchema.index({ createdAt: -1 });
+
+// ==================== STATIC METHODS ====================
 
 RepostSchema.statics.findByRepostId = async function (repostId: string) {
     return this.findOne({ repostId, isDeleted: false });

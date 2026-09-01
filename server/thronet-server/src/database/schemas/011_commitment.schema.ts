@@ -1,4 +1,4 @@
-﻿import { Schema } from 'mongoose';
+import { Schema } from 'mongoose';
 
 export const CommitmentSchema = new Schema(
   {
@@ -6,6 +6,7 @@ export const CommitmentSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'Company',
       required: true,
+      index: true,
     },
     title: {
       type: String,
@@ -23,11 +24,13 @@ export const CommitmentSchema = new Schema(
         'Innovation',
       ],
       required: true,
+      index: true,
     },
     status: {
       type: String,
       enum: ['Active', 'Completed', 'In Progress', 'On Hold'],
       default: 'Active',
+      index: true,
     },
     startDate: Date,
     targetDate: Date,

@@ -1,61 +1,175 @@
-﻿import mongoose, { Schema, Document } from 'mongoose';
+/**
+ * ====================================
+ * RANKING MODEL
+ * ====================================
+ * Mongoose schema for user and group rankings
+ */
+
+import mongoose, { Schema } from 'mongoose';
 import { IRanking } from '../interfaces/IRanking';
 import { GroupCategory } from '../enums/GroupCategory.enum';
 import { validId } from '@/shared/security';
 
-const rankingSchema = new Schema(
+const rankingSchema = new Schema<IRanking>(
   {
     rankingId: {
       type: String,
       required: true,
-      default: () => validId(''),
+      unique: true,
+      index: true,
+      default: (v: any) => validId(v),
     },
     userId: {
       type: String,
       ref: 'User',
       required: [true, 'User ID is required'],
+      unique: true,
+      // ✅ REMOVED: index: true
     },
-    globalRank: { type: Number, default: 0, min: 0 },
-    categoryRank: { type: Number, default: 0, min: 0 },
-    groupRank: { type: Number, default: 0, min: 0 },
-    cityRank: { type: Number, default: 0, min: 0 },
-    totalStudyHours: { type: Number, default: 0, min: 0 },
-    attendancePercentage: { type: Number, default: 0, min: 0, max: 100 },
-    currentStreak: { type: Number, default: 0, min: 0 },
-    longestStreak: { type: Number, default: 0, min: 0 },
-    rankScore: { type: Number, default: 0, min: 0 },
+
+    // ==========================================
+    // RANK POSITIONS
+    // ==========================================
+    globalRank: {
+      type: Number,
+      default: 0,
+      min: 0,
+      // ✅ REMOVED: index: true
+    },
+    categoryRank: {
+      type: Number,
+      default: 0,
+      min: 0,
+      // ✅ REMOVED: index: true
+    },
+    groupRank: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    cityRank: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    // ==========================================
+    // METRICS FOR RANKING CALCULATION
+    // ==========================================
+    totalStudyHours: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    attendancePercentage: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    currentStreak: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    longestStreak: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    // ==========================================
+    // CALCULATED SCORE (WEIGHTED)
+    // ==========================================
+    rankScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      // ✅ REMOVED: index: true
+    },
+
+    // ==========================================
+    // FILTERS
+    // ==========================================
     category: {
       type: String,
       enum: Object.values(GroupCategory),
       default: 'Other',
+      // ✅ REMOVED: index: true
     },
-    city: { type: String, default: '', trim: true },
-    groupId: { type: String, ref: 'StudyGroup_Group', default: null },
-    lastUpdated: { type: Date, default: Date.now },
-    weeklyHours: { type: Number, default: 0, min: 0 },
-    monthlyHours: { type: Number, default: 0, min: 0 },
-    totalSessions: { type: Number, default: 0, min: 0 },
-    avgSessionLength: { type: Number, default: 0, min: 0 },
-    consistency: { type: Number, default: 0, min: 0, max: 100 },
+    city: {
+      type: String,
+      default: '',
+      trim: true,
+      // ✅ REMOVED: index: true
+    },
+    groupId: {
+      type: String,
+      ref: 'StudyGroup_Group',
+      default: null,
+      // ✅ REMOVED: index: true
+    },
+
+    // ==========================================
+    // TIME TRACKING
+    // ==========================================
+    lastUpdated: {
+      type: Date,
+      default: Date.now,
+      // ✅ REMOVED: index: true
+    },
+    weeklyHours: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    monthlyHours: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    // ==========================================
+    // ADDITIONAL STATS
+    // ==========================================
+    totalSessions: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    avgSessionLength: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    consistency: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
   },
   {
     timestamps: true,
     toJSON: {
       virtuals: true,
-   transform: function (_doc, ret) {
-  const r = ret as any;
-  r.id = r.rankingId;
-  delete r._id;
-  delete r.__v;
-  return r;
-},
+      transform: function (_doc, ret) {
+        (ret as any).id = (ret as any).rankingId;
+        delete ret._id;
+        delete ret.__v;
+        return ret;
+      }
     },
     toObject: { virtuals: true },
   }
 );
 
-rankingSchema.index({ rankingId: 1 }, { unique: true });
-rankingSchema.index({ userId: 1 }, { unique: true });
+/**
+ * ==========================================
+ * INDEXES FOR BETTER QUERY PERFORMANCE
+ * ==========================================
+ */
+// ✅ KEEP ONLY THESE - Schema-level indexes
 rankingSchema.index({ globalRank: 1 });
 rankingSchema.index({ categoryRank: 1, category: 1 });
 rankingSchema.index({ groupRank: 1, groupId: 1 });
@@ -65,27 +179,39 @@ rankingSchema.index({ totalStudyHours: -1 });
 rankingSchema.index({ currentStreak: -1 });
 rankingSchema.index({ attendancePercentage: -1 });
 rankingSchema.index({ lastUpdated: -1 });
+
+/**
+ * ==========================================
+ * COMPOUND INDEXES
+ * ==========================================
+ */
 rankingSchema.index({ category: 1, rankScore: -1 });
 rankingSchema.index({ city: 1, rankScore: -1 });
 rankingSchema.index({ groupId: 1, rankScore: -1 });
 
-rankingSchema.virtual('studyHoursFormatted').get(function (this: IRanking) {
+/**
+ * ==========================================
+ * VIRTUALS
+ * ==========================================
+ */
+
+rankingSchema.virtual('studyHoursFormatted').get(function () {
   return parseFloat(this.totalStudyHours.toFixed(2));
 });
 
-rankingSchema.virtual('weeklyHoursFormatted').get(function (this: IRanking) {
+rankingSchema.virtual('weeklyHoursFormatted').get(function () {
   return parseFloat(this.weeklyHours.toFixed(2));
 });
 
-rankingSchema.virtual('monthlyHoursFormatted').get(function (this: IRanking) {
+rankingSchema.virtual('monthlyHoursFormatted').get(function () {
   return parseFloat(this.monthlyHours.toFixed(2));
 });
 
-rankingSchema.virtual('avgSessionMinutes').get(function (this: IRanking) {
+rankingSchema.virtual('avgSessionMinutes').get(function () {
   return Math.floor(this.avgSessionLength / 60);
 });
 
-rankingSchema.virtual('rankStatus').get(function (this: IRanking) {
+rankingSchema.virtual('rankStatus').get(function () {
   if (this.globalRank === 0) return 'unranked';
   if (this.globalRank <= 10) return 'top10';
   if (this.globalRank <= 100) return 'top100';
@@ -93,7 +219,7 @@ rankingSchema.virtual('rankStatus').get(function (this: IRanking) {
   return 'ranked';
 });
 
-rankingSchema.virtual('performanceLevel').get(function (this: IRanking) {
+rankingSchema.virtual('performanceLevel').get(function () {
   if (this.rankScore >= 90) return 'excellent';
   if (this.rankScore >= 70) return 'good';
   if (this.rankScore >= 50) return 'average';
@@ -101,7 +227,13 @@ rankingSchema.virtual('performanceLevel').get(function (this: IRanking) {
   return 'needs_improvement';
 });
 
-rankingSchema.pre('save', function (this: IRanking, next) {
+/**
+ * ==========================================
+ * PRE-SAVE HOOKS
+ * ==========================================
+ */
+
+rankingSchema.pre('save', function (next) {
   const normalizedHours = Math.min(this.totalStudyHours / 10, 100);
   const normalizedStreak = Math.min((this.currentStreak / 365) * 100, 100);
 
@@ -109,31 +241,39 @@ rankingSchema.pre('save', function (this: IRanking, next) {
   const attendanceScore = this.attendancePercentage * 0.3;
   const streakScore = normalizedStreak * 0.3;
 
-  this.rankScore = parseFloat((hoursScore + attendanceScore + streakScore).toFixed(2));
+  this.rankScore = parseFloat(
+    (hoursScore + attendanceScore + streakScore).toFixed(2)
+  );
+
   next();
 });
 
-rankingSchema.pre('save', function (this: IRanking, next) {
-  if (
-    this.isModified('rankScore') ||
+rankingSchema.pre('save', function (next) {
+  if (this.isModified('rankScore') ||
     this.isModified('totalStudyHours') ||
     this.isModified('attendancePercentage') ||
-    this.isModified('currentStreak')
-  ) {
+    this.isModified('currentStreak')) {
     this.lastUpdated = new Date();
   }
   next();
 });
 
-rankingSchema.pre('save', function (this: IRanking, next) {
+rankingSchema.pre('save', function (next) {
   if (this.totalSessions > 0 && this.totalStudyHours > 0) {
     const avgDaily = this.totalStudyHours / Math.max(this.currentStreak, 1);
     const targetDaily = 2;
+
     const consistencyRatio = Math.min(avgDaily / targetDaily, 1);
     this.consistency = parseFloat((consistencyRatio * 100).toFixed(2));
   }
   next();
 });
+
+/**
+ * ==========================================
+ * STATIC METHODS
+ * ==========================================
+ */
 
 rankingSchema.statics.findByUserId = function (userId: mongoose.Types.ObjectId) {
   return this.findOne({ userId });
@@ -146,46 +286,71 @@ rankingSchema.statics.getTopRanked = function (limit: number = 100) {
     .populate('userId', 'name email avatar');
 };
 
-rankingSchema.statics.getTopRankedByCategory = function (category: string, limit: number = 100) {
-  return this.find({ category, categoryRank: { $gt: 0 } })
+rankingSchema.statics.getTopRankedByCategory = function (
+  category: string,
+  limit: number = 100
+) {
+  return this.find({
+    category,
+    categoryRank: { $gt: 0 }
+  })
     .sort({ categoryRank: 1 })
     .limit(limit)
     .populate('userId', 'name email avatar');
 };
 
-rankingSchema.statics.getTopRankedByCity = function (city: string, limit: number = 100) {
-  return this.find({ city, cityRank: { $gt: 0 } })
+rankingSchema.statics.getTopRankedByCity = function (
+  city: string,
+  limit: number = 100
+) {
+  return this.find({
+    city,
+    cityRank: { $gt: 0 }
+  })
     .sort({ cityRank: 1 })
     .limit(limit)
     .populate('userId', 'name email avatar');
 };
 
-rankingSchema.methods.updateMetrics = function (
-  this: IRanking,
-  metrics: {
-    studyHours?: number;
-    attendance?: number;
-    streak?: number;
-    longestStreak?: number;
-    sessions?: number;
+/**
+ * ==========================================
+ * INSTANCE METHODS
+ * ==========================================
+ */
+
+rankingSchema.methods.updateMetrics = function (metrics: {
+  studyHours?: number;
+  attendance?: number;
+  streak?: number;
+  longestStreak?: number;
+  sessions?: number;
+}) {
+  if (metrics.studyHours !== undefined) {
+    this.totalStudyHours = metrics.studyHours;
   }
-) {
-  if (metrics.studyHours !== undefined) this.totalStudyHours = metrics.studyHours;
-  if (metrics.attendance !== undefined) this.attendancePercentage = metrics.attendance;
-  if (metrics.streak !== undefined) this.currentStreak = metrics.streak;
-  if (metrics.longestStreak !== undefined) this.longestStreak = metrics.longestStreak;
-  if (metrics.sessions !== undefined) this.totalSessions = metrics.sessions;
+  if (metrics.attendance !== undefined) {
+    this.attendancePercentage = metrics.attendance;
+  }
+  if (metrics.streak !== undefined) {
+    this.currentStreak = metrics.streak;
+  }
+  if (metrics.longestStreak !== undefined) {
+    this.longestStreak = metrics.longestStreak;
+  }
+  if (metrics.sessions !== undefined) {
+    this.totalSessions = metrics.sessions;
+  }
+
   return this.save();
 };
 
-rankingSchema.methods.compareWith = async function (
-  this: IRanking,
-  otherUserId: mongoose.Types.ObjectId
-) {
-  const Ranking = (this as any).constructor;
+rankingSchema.methods.compareWith = async function (otherUserId: mongoose.Types.ObjectId) {
+  const Ranking = this.constructor as any;
   const otherRanking = await Ranking.findByUserId(otherUserId);
 
-  if (!otherRanking) return null;
+  if (!otherRanking) {
+    return null;
+  }
 
   return {
     globalRank: {

@@ -31,11 +31,42 @@ import { LoggerUtil } from '@/shared/logger.util';
 // ─── Config ───────────────────────────────────────────────────────────────────
 const MAX_ROOM_SIZE = 16; // WebRTC mesh: 16 peers = 120 connections — hard limit
 
+// ─── Global State for Study Sessions ──────────────────────────────────────────
+export interface RoomSession {
+  active: boolean;
+  startedAt: number | null;
+  accumulatedTime: number; // in milliseconds
+}
+const roomSessions = new Map<string, RoomSession>();
+
 // ─── Helper: verify active group membership ───────────────────────────────────
 async function isMember(userId: string, groupId: string): Promise<boolean> {
+  // Allow mock group ID '1' for frontend UI testing
+  if (groupId === '1' || groupId === 1 as any) return true;
+  
+  // OLD: ObjectId.isValid() rejects UUID strings — our app uses UUIDs, not ObjectIds
+  // if (!mongoose.Types.ObjectId.isValid(groupId) || !mongoose.Types.ObjectId.isValid(userId)) {
+  //   LoggerUtil.warn(`Invalid ObjectId passed to isMember: userId=${userId}, groupId=${groupId}`);
+  //   return false;
+  // }
+
+  // NEW: userId and groupId are UUID strings, not MongoDB ObjectIds
+  if (!userId || !groupId) {
+    LoggerUtil.warn(`Missing userId or groupId in isMember check`);
+    return false;
+  }
+
+  // OLD: field names 'user' and 'group' don't exist on GroupMember model
+  // const member = await GroupMember.findOne({
+  //   user: userId,
+  //   group: groupId,
+  //   status: 'active',
+  // }).lean();
+
+  // NEW: correct field names matching GroupMember model schema
   const member = await GroupMember.findOne({
-    user: userId,
-    group: groupId,
+    userId: userId,
+    groupId: groupId,
     status: 'active',
   }).lean();
   return !!member;
@@ -43,8 +74,8 @@ async function isMember(userId: string, groupId: string): Promise<boolean> {
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void => {
-  const userId   = socket.data.userId;
-  const userName = socket.data.userName ?? 'Unknown';
+  const userId   = socket.data.userId || (socket as any).userId;
+  const userName = socket.data.userName || (socket as any).userName || 'Unknown';
 
   // ── Join live room ─────────────────────────────────────────────────────────
   socket.on('join-live-room', async (data: JoinLiveRoomPayload) => {
@@ -75,6 +106,19 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
       socket.join(`live-room:${roomId}`);
       LoggerUtil.info(`User ${userId} joined live room ${roomId}`);
 
+      const currentSocketsAfterJoin = await io.in(`live-room:${roomId}`).fetchSockets();
+      if (currentSocketsAfterJoin.length === 1) {
+        // Start session automatically for the first user
+        if (!roomSessions.has(roomId)) {
+          roomSessions.set(roomId, {
+            active: true,
+            startedAt: Date.now(),
+            accumulatedTime: 0
+          });
+          LoggerUtil.info(`Started study session automatically for room ${roomId}`);
+        }
+      }
+
       // Tell existing participants about the new arrival
       socket.to(`live-room:${roomId}`).emit('user-joined-room', {
         userId,
@@ -104,12 +148,18 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
   });
 
   // ── Leave live room ────────────────────────────────────────────────────────
-  socket.on('leave-live-room', (data: LeaveLiveRoomPayload) => {
+  socket.on('leave-live-room', async (data: LeaveLiveRoomPayload) => {
     const { roomId } = data;
     if (!roomId) return;
 
     socket.leave(`live-room:${roomId}`);
     LoggerUtil.info(`User ${userId} left live room ${roomId}`);
+
+    const remainingSockets = await io.in(`live-room:${roomId}`).fetchSockets();
+    if (remainingSockets.length === 0) {
+      roomSessions.delete(roomId);
+      LoggerUtil.info(`Cleared study session for empty room ${roomId}`);
+    }
 
     socket.to(`live-room:${roomId}`).emit('user-left-room', {
       userId,
@@ -123,6 +173,9 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
     const { roomId, cameraOn } = data;
     if (!roomId) return;
 
+    // Store state in socket data for new users who join later
+    socket.data.camOn = cameraOn;
+
     socket.to(`live-room:${roomId}`).emit('user-camera-toggle', {
       userId,
       cameraOn,
@@ -134,6 +187,9 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
   socket.on('toggle-mic', (data: ToggleMicPayload) => {
     const { roomId, micOn } = data;
     if (!roomId) return;
+
+    // Store state in socket data for new users who join later
+    socket.data.micOn = micOn;
 
     socket.to(`live-room:${roomId}`).emit('user-mic-toggle', {
       userId,
@@ -166,6 +222,8 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
           userId:   s.data.userId,
           userName: s.data.userName ?? 'Unknown',
           socketId: s.id,
+          camOn: s.data.camOn || false,
+          micOn: s.data.micOn || false,
         }))
         .filter((p) => p.userId);
 
@@ -173,11 +231,62 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
         roomId,
         participants,
         count: participants.length,
+        session: roomSessions.get(roomId) || null,
       });
 
     } catch (error: any) {
       LoggerUtil.error('Error fetching room participants', { error: error.message, userId });
     }
+  });
+
+  // ── Session toggle ───────────────────────────────────────────────────────────
+  socket.on('toggle-session', async (data: { roomId: string, active: boolean }) => {
+    const { roomId, active } = data;
+    if (!roomId) return;
+
+    // Verify admin / leader
+    const member = await GroupMember.findOne({
+      userId,
+      groupId: roomId,
+      role: { $in: ['leader', 'moderator'] },
+      status: 'active'
+    }).lean();
+
+    if (!member) {
+      socket.emit('error', { event: 'toggle-session', message: 'Only leaders and moderators can toggle the study session' });
+      return;
+    }
+
+    let session = roomSessions.get(roomId);
+    if (!session) {
+      session = {
+        active,
+        startedAt: active ? Date.now() : null,
+        accumulatedTime: 0
+      };
+      roomSessions.set(roomId, session);
+    } else {
+      if (session.active !== active) {
+        if (active) {
+          // Resume
+          session.active = true;
+          session.startedAt = Date.now();
+        } else {
+          // Pause
+          session.active = false;
+          if (session.startedAt) {
+            session.accumulatedTime += Date.now() - session.startedAt;
+            session.startedAt = null;
+          }
+        }
+      }
+    }
+
+    // Broadcast the new session state to everyone in the room
+    io.in(`live-room:${roomId}`).emit('session-toggled', {
+      roomId,
+      session
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────

@@ -31,7 +31,8 @@ import {
   getClosedJobs, getOpenJobs, applyToJob, getJobApplications, updateApplicationStatus,
   updateJobStatus,
   getUserApplications,
-  createJobService
+  createJobService,
+  listJobs, getFeaturedJobs, getJobById, updateJob, searchJobs, getJobsByCompany
 } from '@/Job-Service/services/job.service';
 import CacheUtil from '@/shared/cache.util';
 

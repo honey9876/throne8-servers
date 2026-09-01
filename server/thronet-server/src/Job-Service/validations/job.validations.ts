@@ -26,6 +26,13 @@ const uuidSchema = () =>
 const stringRequired = (label: string, min = 1, max = 255) =>
   Joi.string().trim().min(min).max(max).required().label(label).messages(customMessages);
 
+// NEW CODE
+// Reason: The `validateListJobsFilters` schema (line 223+) calls `stringOptional()` in 4 places,
+// but only `stringRequired` was defined. This caused a ReferenceError crash (500 Internal Server Error)
+// every time the list-jobs endpoint was called.
+const stringOptional = (label: string, max = 255) =>
+  Joi.string().trim().max(max).optional().label(label).messages(customMessages);
+
 // 1. Normalize array fields helper (unchanged - it's good)
 export const normalizeArrayFields = (data: any) => {
   const arrayFields = ['skills', 'searchKeywords', 'tags', 'diversityTags'];
@@ -225,7 +232,7 @@ export const validateListJobsFilters = (input: any) => {
     page: Joi.number().integer().min(1).default(1).label('Page'),
     limit: Joi.number().integer().min(1).max(100).default(20).label('Limit'),
     title: stringOptional('Job Title', 200),
-    companyId: uuidSchema('Company ID').optional(),
+    companyId: Joi.string().uuid({ version: ['uuidv4'] }).optional().label('Company ID').messages(customMessages),
     jobType: Joi.string()
       .valid('full-time', 'part-time', 'contract', 'freelance', 'internship')
       .optional()

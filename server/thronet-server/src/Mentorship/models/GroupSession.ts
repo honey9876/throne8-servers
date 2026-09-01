@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { PaymentMethod } from '@/Mentorship/interface/session.types';
 
 export interface IParticipant {
+  sessionId: string;
   menteeId: string;             
   registeredAt: Date;
   paymentStatus: 'pending' | 'completed' | 'failed' | 'refunded';
@@ -21,7 +21,6 @@ export interface IGroupSession {
   mentorId: string;
   title: string;
   description: string;
-  thumbnailImage?: string;
   topic: string;
   category?: string;
   scheduledAt: Date;
@@ -36,16 +35,6 @@ export interface IGroupSession {
     pricePerPerson: number;
     currency: string;
     totalRevenue: number;
-  };
-  payment: {
-    method: string;
-  };
-  settings: {
-    followUp: {
-      allowed: boolean;
-      periodDays: number;
-    };
-    bufferTimeMinutes: number;
   };
   meeting: {
     platform: 'zoom' | 'google_meet' | 'daily_co' | 'custom';
@@ -88,7 +77,6 @@ export interface IGroupSession {
 }
 
 export interface GroupSessionDocument extends Omit<IGroupSession, '_id'>, Document {
-  id?: string;
   isFull: boolean;
   hasMinParticipants: boolean;
   spotsRemaining: number;
@@ -106,6 +94,12 @@ export interface GroupSessionDocument extends Omit<IGroupSession, '_id'>, Docume
 const ParticipantSchema = new Schema<IParticipant>(
   {
     // ADD after opening of GroupSessionSchema fields
+    sessionId: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+    },
     menteeId: { type: String, required: true },
     registeredAt: { type: Date, default: Date.now },
     paymentStatus: {
@@ -153,10 +147,6 @@ const GroupSessionSchema = new Schema<GroupSessionDocument>(
       required: [true, 'Description is required'],
       trim: true,
       maxlength: [2000, 'Description cannot exceed 2000 characters'],
-    },
-    thumbnailImage: {
-      type: String,
-      trim: true,
     },
     topic: {
       type: String,
@@ -214,20 +204,6 @@ const GroupSessionSchema = new Schema<GroupSessionDocument>(
       },
       currency: { type: String, default: 'INR' },
       totalRevenue: { type: Number, default: 0, min: 0 },
-    },
-    payment: {
-      method: {
-        type: String,
-        enum: Object.values(PaymentMethod),
-        required: true,
-      },
-    },
-    settings: {
-      followUp: {
-        allowed: { type: Boolean, default: false },
-        periodDays: { type: Number, default: 0, min: 0, max: 30 },
-      },
-      bufferTimeMinutes: { type: Number, default: 0, min: 0, max: 60 },
     },
     meeting: {
       platform: {

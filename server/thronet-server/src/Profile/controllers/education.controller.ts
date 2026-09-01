@@ -1,5 +1,6 @@
 /**
  * Education Controller - Handles HTTP Requests for Educational Background
+ * Only CREATE operation implemented
  * 
  * @module controllers/education.controller
  * @version 1.0.0
@@ -27,8 +28,8 @@ interface CreateEducationBody {
     degree: string;
     degreeType: "High School" | "Diploma" | "Bachelor's" | "Master's" | "Doctorate" | "Certificate" | "Other";
     specialization?: string;
-    startDate: string;
-    endDate?: string | null;
+    startDate: string;              // YYYY-MM-DD
+    endDate?: string | null;        // YYYY-MM-DD or null
     description?: string;
     educationType?: 'full-time' | 'part-time' | 'distance' | 'online';
     gradeType?: 'percentage' | 'cgpa' | 'gpa' | 'grade';
@@ -56,7 +57,10 @@ class EducationController {
     /**
      * ✅ CREATE NEW EDUCATION
      * POST /api/v1/education
+     * 
      * @access Private (requires authentication)
+     * @param req - Express request with user payload
+     * @param res - Express response
      */
     static async createEducation(
         req: Request<{}, any, CreateEducationBody> & { user?: UserPayload },
@@ -66,6 +70,7 @@ class EducationController {
         const correlationId = (req as any).correlationId || uuidv4();
 
         try {
+            // ==================== STEP 1: VALIDATE AUTHENTICATION ====================
             if (!req.user?.userId) {
                 LoggerUtil.warn('Create education failed - No userId', {
                     correlationId,
@@ -84,6 +89,7 @@ class EducationController {
                 correlationId,
             });
 
+            // ==================== STEP 2: VALIDATE REQUEST BODY ====================
             const {
                 schoolCollegeName,
                 degree,
@@ -98,6 +104,7 @@ class EducationController {
                 location,
             } = req.body;
 
+            // Basic required field validation
             if (!schoolCollegeName) {
                 ResponseUtil.validationError(
                     res,
@@ -134,6 +141,7 @@ class EducationController {
                 return;
             }
 
+            // ==================== STEP 3: CREATE EDUCATION ====================
             const education = await EducationService.createEducation({
                 userId,
                 schoolCollegeName,
@@ -149,6 +157,7 @@ class EducationController {
                 location,
             });
 
+            // ==================== STEP 4: AUDIT LOG (NON-BLOCKING) ====================
             setImmediate(async () => {
                 try {
                     await AuditProducer.connect();
@@ -179,6 +188,7 @@ class EducationController {
                 }
             });
 
+            // ==================== STEP 5: LOG PERFORMANCE ====================
             const duration = Date.now() - startTime;
             LoggerUtil.performance('education_creation', duration, {
                 userId,
@@ -194,6 +204,7 @@ class EducationController {
                 correlationId,
             });
 
+            // ==================== STEP 6: RETURN SUCCESS RESPONSE ====================
             ResponseUtil.created(
                 res,
                 {
@@ -214,6 +225,7 @@ class EducationController {
                 correlationId,
             });
 
+            // ==================== AUDIT LOG FOR ERROR (NON-BLOCKING) ====================
             setImmediate(async () => {
                 try {
                     await AuditProducer.connect();
@@ -240,6 +252,7 @@ class EducationController {
                 }
             });
 
+            // ==================== ERROR HANDLING ====================
             if (error.message === 'User not found') {
                 ResponseUtil.notFound(res, 'User not found');
                 return;
@@ -276,6 +289,7 @@ class EducationController {
     /**
      * ✅ GET ALL EDUCATION
      * GET /api/v1/education
+     * 
      * @access Private
      */
     static async getAllEducation(
@@ -291,7 +305,7 @@ class EducationController {
                 return;
             }
 
-            const userId = req.user.userId;
+            const userId = (req.query.userId as string) || req.user.userId;
             const includeArchived = req.query.includeArchived === 'true';
 
             LoggerUtil.info('Get all education request', {
@@ -330,65 +344,9 @@ class EducationController {
     }
 
     /**
-     * ✅ GET ALL EDUCATION BY USER ID (PUBLIC)
-     * GET /api/v1/education/get-all-education/:userId
-     * @access Public
-     */
-    static async getAllEducationByUserId(
-        req: Request<{ userId: string }> & { user?: UserPayload },
-        res: Response
-    ): Promise<void> {
-        const startTime = Date.now();
-        const correlationId = (req as any).correlationId || uuidv4();
-
-        try {
-            const { userId } = req.params;
-
-            if (!userId) {
-                ResponseUtil.badRequest(res, 'User ID is required');
-                return;
-            }
-
-            const includeArchived = req.query.includeArchived === 'true';
-
-            LoggerUtil.info('Get all education by userId request (public)', {
-                userId,
-                includeArchived,
-                correlationId,
-            });
-
-            const result = await EducationService.getAllEducation(userId, includeArchived);
-
-            const duration = Date.now() - startTime;
-            LoggerUtil.info('Education list fetched (public)', {
-                userId,
-                count: result.total,
-                duration,
-                correlationId,
-            });
-
-            ResponseUtil.success(
-                res,
-                result,
-                'Education records fetched successfully'
-            );
-            return;
-
-        } catch (error: any) {
-            LoggerUtil.error('Get all education by userId failed', {
-                error: error.message,
-                userId: req.params.userId,
-                correlationId,
-            });
-
-            ResponseUtil.internalError(res, error.message, error);
-            return;
-        }
-    }
-
-    /**
      * ✅ GET SINGLE EDUCATION
      * GET /api/v1/education/:educationId
+     * 
      * @access Private
      */
     static async getEducationById(
@@ -456,6 +414,7 @@ class EducationController {
     /**
      * ✅ UPDATE EDUCATION
      * PUT /api/v1/education/:educationId
+     * 
      * @access Private
      */
     static async updateEducation(
@@ -502,6 +461,7 @@ class EducationController {
                 req.body
             );
 
+            // Audit log (non-blocking)
             setImmediate(async () => {
                 try {
                     await AuditProducer.connect();
@@ -567,6 +527,7 @@ class EducationController {
     /**
      * ✅ DELETE EDUCATION
      * DELETE /api/v1/education/:educationId
+     * 
      * @access Private
      */
     static async deleteEducation(
@@ -599,6 +560,7 @@ class EducationController {
 
             const result = await EducationService.deleteEducation(educationId, userId);
 
+            // Audit log (non-blocking)
             setImmediate(async () => {
                 try {
                     await AuditProducer.connect();
@@ -654,6 +616,7 @@ class EducationController {
     /**
      * ✅ ARCHIVE EDUCATION
      * POST /api/v1/education/:educationId/archive
+     * 
      * @access Private
      */
     static async archiveEducation(
@@ -706,6 +669,7 @@ class EducationController {
     /**
      * ✅ RESTORE EDUCATION
      * POST /api/v1/education/:educationId/restore
+     * 
      * @access Private
      */
     static async restoreEducation(

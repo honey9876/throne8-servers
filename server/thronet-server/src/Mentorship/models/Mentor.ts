@@ -23,10 +23,10 @@ const MentorSchema = new Schema<MentorDocument>(
       type: String,
       required: [true, 'User ID is required'],
       unique: true,
-      index: true,
+      // index: true,
     },
     profilePic: { type: String, trim: true },
-    bannerImage: { type: String, trim: true },
+    coverImage: { type: String, trim: true },
     cloudinaryPublicId: { type: String, trim: true },
     companyId: { type: String, index: true },
     status: {
@@ -149,23 +149,6 @@ const MentorSchema = new Schema<MentorDocument>(
       isFeatured:    { type: Boolean, default: false, index: true },
       featuredUntil: { type: Date },
       featuredOrder: { type: Number, default: 0 },
-    },
-    trustScore: {
-      overall: { type: Number, default: 0 },
-      breakdown: {
-        profileCompleteness: { type: Number, default: 0 },
-        reliability: { type: Number, default: 0 },
-        studentSatisfaction: { type: Number, default: 0 },
-        engagement: { type: Number, default: 0 }
-      },
-      metrics: {
-        totalCompletedSessions: { type: Number, default: 0 },
-        totalCancelledSessions: { type: Number, default: 0 },
-        averageRating: { type: Number, default: 0 },
-        reviewCount: { type: Number, default: 0 }
-      },
-      version: { type: String, default: "1.0" },
-      lastCalculatedAt: { type: Date }
     },
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date },

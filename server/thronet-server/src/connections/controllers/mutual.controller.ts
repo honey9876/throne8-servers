@@ -6,7 +6,6 @@ import { mutualService } from '../services/index';
 import { SuccessResponse, ErrorResponse, HttpStatus } from '@/shared/response.util';
 import { IMutualConnection, MutualQueryParams } from '../types/network.types';
 import environmentConfig from '@/config/environment/environment';
-import { asyncHandler } from '@/shared/utils/helpers.util';
 
 /**
  * Mutual Controller
@@ -746,9 +745,6 @@ class mutualController {
     }
   };
 
-
-
-
   static invalidateUserCache = async (
     req: AuthRequest,
     res: Response,
@@ -808,34 +804,5 @@ class mutualController {
     }
   };
 }
-
-export const getBulkMutualConnections = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
-      const { userId, targetUserIds, limit } = req.body;
-      const authUserId = (req.user as any)?.userId || (req.user as any)?.id;
-
-      if (!authUserId) {
-          return next(new ErrorResponse('Authentication required', HttpStatus.UNAUTHORIZED));
-      }
-      if (!userId || !Array.isArray(targetUserIds) || targetUserIds.length === 0) {
-          return next(new ErrorResponse('userId and non-empty targetUserIds[] are required', HttpStatus.BAD_REQUEST));
-      }
-      if (targetUserIds.length > 100) {
-          return next(new ErrorResponse('Max 100 targetUserIds allowed per bulk request', HttpStatus.BAD_REQUEST));
-      }
-
-      const pairs: [string, string][] = targetUserIds.map((tid: string) => [userId, tid]);
-      const resultsMap = await mutualService.handleBulkMutualQueries(pairs);
-
-      const results: Record<string, { mutuals: any[]; count: number }> = {};
-      for (const [key, mutuals] of resultsMap.entries()) {
-          const trimmed = limit ? mutuals.slice(0, limit) : mutuals;
-          results[key] = { mutuals: trimmed, count: mutuals.length };
-      }
-
-      res.status(HttpStatus.OK).json(SuccessResponse(results, 'Bulk mutual connections retrieved'));
-  }
-);
-
 
 export { mutualController };

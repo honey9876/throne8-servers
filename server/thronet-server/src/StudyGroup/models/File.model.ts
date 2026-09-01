@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ====================================
  * FILE MODEL (PRODUCTION READY)
  * ====================================
@@ -16,6 +16,7 @@ fileId: {
   type: String,
   required: true,
   unique: true,
+  index: true,
   validate: (v: any) => validId(v),
 },
     groupId: {
@@ -23,14 +24,14 @@ fileId: {
       ref: 'StudyGroup_Group',
       required: [true, 'Group ID is required'],
       validate: (v: any) => validId(v),
-      // ✅ REMOVED: 
+      // ✅ REMOVED: index: true
     },
     uploadedBy: {
       type: String,
       ref: 'User',
       required: [true, 'Uploader is required'],
       validate: (v: any) => validId(v),
-      // ✅ REMOVED: 
+      // ✅ REMOVED: index: true
     },
     fileName: {
       type: String,
@@ -46,7 +47,7 @@ fileId: {
       type: String,
       enum: Object.values(FileType),
       required: [true, 'File type is required'],
-      // ✅ REMOVED: 
+      // ✅ REMOVED: index: true
     },
     mimeType: {
       type: String,
@@ -67,7 +68,7 @@ fileId: {
     isPinned: {
       type: Boolean,
       default: false,
-      // ✅ REMOVED: 
+      // ✅ REMOVED: index: true
     },
     downloadCount: {
       type: Number,
@@ -76,7 +77,7 @@ fileId: {
     isDeleted: {
       type: Boolean,
       default: false,
-      // ✅ REMOVED: 
+      // ✅ REMOVED: index: true
     },
     deletedAt: {
       type: Date,

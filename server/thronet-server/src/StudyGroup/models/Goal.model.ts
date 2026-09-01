@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ====================================
  * GOAL MODEL
  * ====================================
@@ -15,11 +15,13 @@ const goalSchema = new Schema<IGoal>(
       type: String,
       required: true,
       unique: true,
+      index: true,
     },
     user: {
       type: String,
       ref: 'User',
       required: [true, 'User is required'],
+      index: true,
     },
     title: {
       type: String,
@@ -87,15 +89,14 @@ const goalSchema = new Schema<IGoal>(
   {
     timestamps: true,
     toJSON: {
-  virtuals: true,
-  transform: function (_doc, ret) {
-    const r = ret as any;
-    r.id = r.goalId;
-    delete r._id;
-    delete r.__v;
-    return r;
-  },
-},
+      virtuals: true,
+      transform: function (_doc, ret) {
+        (ret as any).id = (ret as any).goalId;
+        delete ret._id;
+        delete ret.__v;
+        return ret;
+      }
+    },
     toObject: {
       virtuals: true,
       transform: function (_doc, ret) {

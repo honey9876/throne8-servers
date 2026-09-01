@@ -20,11 +20,13 @@ import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 import rateLimitMiddleware from '@/shared/middlewares/rateLimit.middleware';
 import LoggerUtil from '@/shared/logger.util';
 import ResponseUtil from '@/shared/response.util';
-import { User } from '../models';
+import { User, UserProfile } from '../models';
+import { OAuth2Client } from 'google-auth-library';
+import { v4 as uuidv4 } from 'uuid';
 import passport from '@/config/oauth/passport.config';
 import { csrfProtection } from '@/config/security/csrf.config';
-import { updateDateOfBirth } from '../controllers/dob.controller';
 
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const router = express.Router();
 
@@ -558,45 +560,6 @@ const updateProfileSchema = Joi.object({
             'string.pattern.base': 'Location must start with a capital letter',
         }),
 
-
-
-         // ✅ ADD THESE 4 NEW FIELDS
-    currentPosition: Joi.string()
-    .max(100)
-    .trim()
-    .optional()
-    .allow('', null)
-    .messages({
-        'string.max': 'Current position cannot exceed 100 characters',
-    }),
-
-company: Joi.string()
-    .max(100)
-    .trim()
-    .optional()
-    .allow('', null)
-    .messages({
-        'string.max': 'Company name cannot exceed 100 characters',
-    }),
-
-education: Joi.string()
-    .max(150)
-    .trim()
-    .optional()
-    .allow('', null)
-    .messages({
-        'string.max': 'Education cannot exceed 150 characters',
-    }),
-
-pronouns: Joi.string()
-    .valid('He/Him', 'She/Her', 'They/Them', 'Other')
-    .optional()
-    .allow('', null)
-    .messages({
-        'any.only': 'Pronouns must be one of: He/Him, She/Her, They/Them, Other',
-    }),
-
-
     // ==================== ONBOARDING ====================
     onboarding: Joi.object({
         userType: Joi.string()
@@ -797,10 +760,9 @@ router.post(
             next(error);
         }
     }
-
 );
 
-router.patch('/date-of-birth', AuthMiddleware.authenticate as any, updateDateOfBirth);
+
 // ==================== GOOGLE OAUTH ROUTES ====================
 
 router.get('/csrf-token', csrfProtection, (req: Request, res: Response) => {
@@ -865,6 +827,233 @@ router.get(
         }
     }
 );
+
+/**
+ * @route POST /api/v1/auth/google/verify
+ * @desc Verify Google idToken from Native SDK without auto-creating user. Returns isNewUser status.
+ * @access Public
+ */
+router.post('/google/verify', async (req: Request, res: Response): Promise<any> => {
+    try {
+        const { idToken } = req.body;
+        if (!idToken) {
+            return res.status(400).json({ success: false, message: 'idToken is required' });
+        }
+
+        const ticket = await googleClient.verifyIdToken({
+            idToken,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
+
+        const payload = ticket.getPayload();
+        if (!payload || !payload.email) {
+            return res.status(400).json({ success: false, message: 'Invalid Google token payload' });
+        }
+
+        const email = payload.email.toLowerCase();
+        let user = await User.findOne({ email });
+
+        if (!user) {
+            // New User: Return onboarding flag and basic profile info from Google
+            return res.status(200).json({
+                success: true,
+                message: 'Google token verified. User registration required.',
+                data: {
+                    isNewUser: true,
+                    googleData: {
+                        email,
+                        firstName: payload.given_name || '',
+                        lastName: payload.family_name || '',
+                        picture: payload.picture || '',
+                        providerId: payload.sub
+                    }
+                }
+            });
+        }
+
+        // Existing User: Generate authentication tokens
+        const accessToken = User.generateAccessToken({
+            userId: user.userId,
+            role: user.role
+        });
+        const refreshToken = User.generateRefreshToken({
+            userId: user.userId,
+            role: user.role
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Google login successful',
+            data: {
+                isNewUser: false,
+                tokens: {
+                    accessToken,
+                    refreshToken,
+                    expiresIn: '7d'
+                },
+                user: {
+                    userId: user.userId,
+                    email: user.email,
+                    role: user.role,
+                    firstName: user.firstName,
+                    lastName: user.lastName
+                }
+            }
+        });
+
+    } catch (error: any) {
+        console.error('❌ Native Google verify error:', error);
+        return res.status(401).json({
+            success: false,
+            message: 'Google token verification failed',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * @route POST /api/v1/auth/google/register
+ * @desc Finalize Native Google User registration with full profile after onboarding wizard
+ * @access Public
+ */
+router.post('/google/register', async (req: Request, res: Response): Promise<any> => {
+    try {
+        const { idToken, ...registrationData } = req.body;
+        if (!idToken) {
+            return res.status(400).json({ success: false, message: 'idToken is required' });
+        }
+
+        const ticket = await googleClient.verifyIdToken({
+            idToken,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
+
+        const payload = ticket.getPayload();
+        if (!payload || !payload.email) {
+            return res.status(400).json({ success: false, message: 'Invalid Google token payload' });
+        }
+
+        const email = payload.email.toLowerCase();
+        let user = await User.findOne({ email });
+
+        if (user) {
+            return res.status(400).json({ success: false, message: 'User already registered. Please log in.' });
+        }
+
+        const userType = registrationData.userType || 'fresher';
+
+        // Create new user record in DB conforming to UserSchema
+        const userId = uuidv4();
+        user = new User({
+            userId,
+            email,
+            firstName: registrationData.firstName || payload.given_name || 'User',
+            lastName: registrationData.lastName || payload.family_name || '',
+            role: 'user',
+            emailVerified: true,
+            location: registrationData.location || 'India',
+            phoneNumber: registrationData.phoneNumber,
+            oauthProviders: [
+                {
+                    provider: 'google',
+                    providerId: payload.sub,
+                    connectedAt: new Date()
+                }
+            ],
+            onboarding: {
+                userType,
+                completedAt: new Date(),
+                ...(userType === 'working' && {
+                    workingProfile: {
+                        jobTitle: registrationData.jobTitle || '',
+                        companyName: registrationData.companyName || '',
+                        startDate: registrationData.startDate ? new Date(registrationData.startDate) : new Date(),
+                        endDate: registrationData.endDate ? new Date(registrationData.endDate) : undefined
+                    }
+                }),
+                ...(userType === 'student' && {
+                    studentProfile: {
+                        collegeName: registrationData.collegeName || '',
+                        degree: registrationData.degree || '',
+                        fieldOfStudy: registrationData.fieldOfStudy || '',
+                        graduationYear: registrationData.graduationYear || ''
+                    }
+                }),
+                ...(userType === 'fresher' && {
+                    fresherProfile: {
+                        highestEducation: registrationData.highestEducation || '',
+                        preferredRole: registrationData.preferredRole || '',
+                        cgpa: registrationData.cgpa || ''
+                    }
+                })
+            }
+        });
+
+        await user.save();
+
+        // Create associated profile if profile models exist
+        try {
+            await UserProfile.create({
+                userId,
+                email,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                userType: user.userType,
+                phoneNumber: registrationData.phoneNumber,
+                location: registrationData.location,
+                jobTitle: registrationData.jobTitle,
+                companyName: registrationData.companyName,
+                collegeName: registrationData.collegeName,
+                degree: registrationData.degree,
+                fieldOfStudy: registrationData.fieldOfStudy,
+                graduationYear: registrationData.graduationYear,
+                highestEducation: registrationData.highestEducation,
+                preferredRole: registrationData.preferredRole,
+                cgpa: registrationData.cgpa,
+                skills: registrationData.skills || []
+            });
+        } catch (profileErr) {
+            console.warn('⚠️ UserProfile creation skipped or failed:', profileErr);
+        }
+
+        const accessToken = User.generateAccessToken({
+            userId: user.userId,
+            role: user.role
+        });
+        const refreshToken = User.generateRefreshToken({
+            userId: user.userId,
+            role: user.role
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: 'User registered via Google successfully',
+            data: {
+                isNewUser: false,
+                tokens: {
+                    accessToken,
+                    refreshToken,
+                    expiresIn: '7d'
+                },
+                user: {
+                    userId: user.userId,
+                    email: user.email,
+                    role: user.role,
+                    firstName: user.firstName,
+                    lastName: user.lastName
+                }
+            }
+        });
+
+    } catch (error: any) {
+        console.error('❌ Native Google register error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Google registration failed',
+            error: error.message
+        });
+    }
+});
 
 
 // ==================== GITHUB OAUTH ROUTES ====================
@@ -999,11 +1188,6 @@ router.get(
     AuthController.getAllUsers as any
 );
 
-router.post(
-    '/get-users-bulk',
-    sanitizeInput,
-    AuthController.getUsersBulk as any
-);
 /**
  * @route   PUT /api/v1/user/profile
  * @desc    Update authenticated user's profile
@@ -1080,5 +1264,3 @@ router.post(
 );
 
 export default router;
-
-console.log('🔍 auth/routes/index.ts LOADING END');

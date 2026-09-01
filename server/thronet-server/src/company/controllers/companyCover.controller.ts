@@ -9,10 +9,11 @@ class CompanyCoverController {
 
     static async uploadCover(req: AuthRequest, res: Response): Promise<void> {
         try {
-            const uploadedBy = req.user?.id || req.user?.userId || 'system';
+            if (!req.user?.userId) { ResponseUtil.unauthorized(res, 'Authentication required'); return; }
             if (!req.file) { ResponseUtil.badRequest(res, 'No file uploaded'); return; }
 
             const companyId = req.params.id;
+            const uploadedBy = req.user.userId;
             const setAsActive = req.body.setAsActive !== 'false';
 
             const result = await CompanyCoverService.uploadCover(companyId, uploadedBy, req.file, setAsActive);

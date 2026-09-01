@@ -64,7 +64,7 @@ async function processMediaJob(job: Job<MediaJobData>): Promise<MediaJobResult> 
     });
 
     return result;
-  } catch (error: any) {
+  } catch (error : any) {
     logger.error(`Media job ${job.id} failed`, {
       type,
       filename,

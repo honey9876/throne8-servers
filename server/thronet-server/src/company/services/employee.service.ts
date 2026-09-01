@@ -277,33 +277,9 @@ class EmployeeService {
 
       const { skip, limit } = pagination.paginate({ page, pageSize });
 
-      let [employees, total] = await employeeRepository.findByCompanyObjectId(
+      const [employees, total] = await employeeRepository.findByCompanyObjectId(
         companyObjectId, skip, limit
       );
-
-      if (total === 0) {
-        try {
-          const company = await companyRepository.findByObjectId(companyObjectId);
-          if (company) {
-            const slug = company.companySlug || (company as any).slug || 'company';
-            const defaultEmp = await employeeRepository.create({
-              firstName: company.companyName || 'Company',
-              lastName: 'Team',
-              email: `team@${slug}-${company._id.toString().slice(-4)}.com`,
-              company: company._id,
-              designation: 'Admin / Author',
-              department: 'Leadership',
-              isActive: true,
-              isAdvocate: true,
-              joinDate: new Date(),
-            });
-            employees = [defaultEmp];
-            total = 1;
-          }
-        } catch (autoErr: any) {
-          logger.warn('Auto-create author skipped:', autoErr.message);
-        }
-      }
 
       const formatted = employees.map(emp =>
         this.formatEmployeeResponse(emp as unknown as PopulatedEmployee)

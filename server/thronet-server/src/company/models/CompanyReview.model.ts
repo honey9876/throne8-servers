@@ -1,4 +1,4 @@
-﻿import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4 } from 'uuid';
 import mongoose, { Model, Document, Schema } from 'mongoose';
 import Company from './Company.model';
 import logger from '@/shared/logger.util';
@@ -74,16 +74,19 @@ export const CompanyReviewSchema = new Schema(
       type: String,
       required: true,
       unique: true,
+      index: true,
       default: uuidv4,
     },
     company: {
       type: Schema.Types.ObjectId,
       ref: 'Company',
       required: true,
+      index: true,
     },
     reviewer: {
       type: String,  // UUID store hoga
       required: true,
+      index: true,
     },
     title: {
       type: String,
@@ -153,6 +156,7 @@ export const CompanyReviewSchema = new Schema(
     isPublished: {
       type: Boolean,
       default: false,
+      index: true,
     },
   },
   {

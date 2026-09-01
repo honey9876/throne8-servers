@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Career Break Model - User Career Break History
  * Stores career gaps with reasons and privacy controls
  * 
@@ -64,11 +64,13 @@ const CareerBreakSchema = new Schema<ICareerBreak, ICareerBreakModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
@@ -94,6 +96,7 @@ const CareerBreakSchema = new Schema<ICareerBreak, ICareerBreakModel>(
                 'Volunteer work',
                 'Other'
             ],
+            index: true,
         },
 
         // ==================== DATES ====================
@@ -107,6 +110,7 @@ const CareerBreakSchema = new Schema<ICareerBreak, ICareerBreakModel>(
                 },
                 message: 'Start date must be between 1970 and current year + 1',
             },
+            index: true,
         },
         endDate: {
             type: Date,
@@ -130,6 +134,7 @@ const CareerBreakSchema = new Schema<ICareerBreak, ICareerBreakModel>(
             default: function (this: ICareerBreak) {
                 return !this.endDate;
             },
+            index: true,
         },
 
         // ==================== OPTIONAL DETAILS ====================
@@ -144,6 +149,7 @@ const CareerBreakSchema = new Schema<ICareerBreak, ICareerBreakModel>(
         displayOnProfile: {
             type: Boolean,
             default: true,
+            index: true,
         },
         notifyNetwork: {
             type: Boolean,
@@ -153,12 +159,14 @@ const CareerBreakSchema = new Schema<ICareerBreak, ICareerBreakModel>(
             type: String,
             enum: ['public', 'connections', 'private', 'me_only'],
             default: 'connections',
+            index: true,
         },
 
         // ==================== SOFT DELETE / ARCHIVE ====================
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: {
             type: Date,
@@ -167,6 +175,7 @@ const CareerBreakSchema = new Schema<ICareerBreak, ICareerBreakModel>(
         isArchived: {
             type: Boolean,
             default: false,
+            index: true,
         },
         archivedAt: {
             type: Date,

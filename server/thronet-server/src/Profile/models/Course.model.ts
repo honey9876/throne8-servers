@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Course Model - User Courses and Certifications
  * Stores courses, certificates, associated skills, and completion details
  * 
@@ -145,11 +145,13 @@ const CourseSchema = new Schema<ICourse, ICourseModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
@@ -163,6 +165,7 @@ const CourseSchema = new Schema<ICourse, ICourseModel>(
             trim: true,
             minlength: [2, 'Course name must be at least 2 characters'],
             maxlength: [200, 'Course name cannot exceed 200 characters'],
+            index: true,
         },
         courseNumber: {
             type: String,
@@ -175,6 +178,7 @@ const CourseSchema = new Schema<ICourse, ICourseModel>(
             trim: true,
             minlength: [2, 'School name must be at least 2 characters'],
             maxlength: [200, 'School name cannot exceed 200 characters'],
+            index: true,
         },
 
         // ==================== COMPLETION DETAILS ====================
@@ -222,12 +226,14 @@ const CourseSchema = new Schema<ICourse, ICourseModel>(
         displayOrder: {
             type: Number,
             default: 0,
+            index: true,
         },
 
         // ==================== SOFT DELETE / ARCHIVE ====================
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: {
             type: Date,
@@ -236,6 +242,7 @@ const CourseSchema = new Schema<ICourse, ICourseModel>(
         isArchived: {
             type: Boolean,
             default: false,
+            index: true,
         },
         archivedAt: {
             type: Date,

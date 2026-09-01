@@ -1,10 +1,11 @@
-// src/connections/middleware/sanitization.middleware.ts
+// src/middleware/sanitization.middleware.ts
 import { Request, Response, NextFunction } from 'express';
-import purify from 'isomorphic-dompurify';
-// ✅ isomorphic-dompurify already server-safe hai — koi manual JSDOM window
-// setup ki zaroorat nahi. Ye undici/jsdom transitive dependency resolution
-// errors (jaise 'Cannot find module undici/lib/handler/wrap-handler.js')
-// se bhi bachata hai jo raw dompurify + jsdom combo ke saath aa rahe the.
+import DOMPurify from 'dompurify';
+import { JSDOM } from 'jsdom';
+
+// Create DOMPurify instance
+const window = new JSDOM('').window;
+const purify = DOMPurify(window as any);
 
 export const sanitizeInput = (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -61,15 +62,15 @@ const sanitizeString = (str: string): string => {
 
   // Remove HTML tags and scripts
   let sanitized = purify.sanitize(str, { ALLOWED_TAGS: [] });
-
+  
   // Remove SQL injection patterns
   sanitized = sanitized.replace(/('|(\\)|;|--|\/\*|\*\/)/gi, '');
-
+  
   // Remove XSS patterns
   sanitized = sanitized.replace(/(javascript:|vbscript:|onload=|onerror=)/gi, '');
-
+  
   // Normalize whitespace
   sanitized = sanitized.replace(/\s+/g, ' ').trim();
-
+  
   return sanitized;
-};
+}

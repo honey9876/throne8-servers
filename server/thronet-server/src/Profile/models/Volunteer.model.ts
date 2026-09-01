@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Volunteer Model - User Volunteer Experience
  * Stores volunteer roles, organizations, causes, media, and skills
  * 
@@ -182,11 +182,13 @@ const VolunteerSchema = new Schema<IVolunteer, IVolunteerModel>(
             required: true,
             unique: true,
             default: () => uuidv4(),
+            index: true,
             immutable: true,
         },
         userId: {
             type: String,
             required: [true, 'User ID is required'],
+            index: true,
             validate: {
                 validator: (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v),
                 message: 'Invalid User ID format',
@@ -200,6 +202,7 @@ const VolunteerSchema = new Schema<IVolunteer, IVolunteerModel>(
             trim: true,
             minlength: [2, 'Organization name must be at least 2 characters'],
             maxlength: [200, 'Organization name cannot exceed 200 characters'],
+            index: true,
         },
         role: {
             type: String,
@@ -212,6 +215,7 @@ const VolunteerSchema = new Schema<IVolunteer, IVolunteerModel>(
             type: String,
             required: [true, 'Cause is required'],
             enum: VOLUNTEER_CAUSES,
+            index: true,
         },
 
         // ==================== DURATION ====================
@@ -290,12 +294,14 @@ const VolunteerSchema = new Schema<IVolunteer, IVolunteerModel>(
         displayOrder: {
             type: Number,
             default: 0,
+            index: true,
         },
 
         // ==================== SOFT DELETE / ARCHIVE ====================
         isDeleted: {
             type: Boolean,
             default: false,
+            index: true,
         },
         deletedAt: {
             type: Date,
@@ -304,6 +310,7 @@ const VolunteerSchema = new Schema<IVolunteer, IVolunteerModel>(
         isArchived: {
             type: Boolean,
             default: false,
+            index: true,
         },
         archivedAt: {
             type: Date,

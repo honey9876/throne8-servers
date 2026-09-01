@@ -33,15 +33,18 @@ const sanitizeInput = (req: Request, res: Response, next: NextFunction) => {
 
 // ==================== VALIDATION SCHEMAS ====================
 
+/**
+ * Create Skill Validation Schema
+ */
 const createSkillSchema = Joi.object({
     skillName: Joi.string()
-        .min(2)
+        .min(1)
         .max(100)
-        .pattern(/^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()]+$/)
+        .pattern(/^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()/&]*$/)
         .trim()
         .required()
         .messages({
-            'string.min': 'Skill name must be at least 2 characters',
+            'string.min': 'Skill name must be at least 1 character',
             'string.max': 'Skill name cannot exceed 100 characters',
             'string.pattern.base': 'Skill name must start with a letter or number',
             'string.empty': 'Skill name cannot be empty',
@@ -83,17 +86,20 @@ const createSkillSchema = Joi.object({
         }),
 });
 
+/**
+ * Update Skill Validation Schema
+ */
 const updateSkillSchema = Joi.object({
     skillName: Joi.string()
-        .min(2)
+        .min(1)
         .max(100)
-        .pattern(/^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()]+$/)
+        .pattern(/^[A-Za-z0-9][a-zA-Z0-9\s\-+#.()/&]*$/)
         .trim()
         .optional()
         .messages({
-            'string.min': 'Skill name must be at least 2 characters',
+            'string.min': 'Skill name must be at least 1 character',
             'string.max': 'Skill name cannot exceed 100 characters',
-            'string.pattern.base': 'Skill name must start with a letter or number',
+            'string.pattern.base': 'Skill name must start with a letter or number and contain valid characters',
         }),
 
     category: Joi.string()
@@ -139,6 +145,9 @@ const updateSkillSchema = Joi.object({
     'object.min': 'At least one field must be provided for update',
 });
 
+/**
+ * Pin Skill Validation Schema
+ */
 const pinSkillSchema = Joi.object({
     pinnedOrder: Joi.number()
         .valid(1, 2, 3)
@@ -150,6 +159,9 @@ const pinSkillSchema = Joi.object({
         }),
 });
 
+/**
+ * Validation middleware wrapper
+ */
 const validateCreateSkill = (req: Request, res: Response, next: NextFunction) => {
     const { error, value } = createSkillSchema.validate(req.body, {
         abortEarly: false,
@@ -261,27 +273,6 @@ router.get(
             console.log('✅ GET ALL SKILLS ROUTE COMPLETED');
         } catch (error: any) {
             console.error('❌ GET ALL SKILLS ROUTE ERROR:', error);
-            next(error);
-        }
-    }
-);
-
-/**
- * @route   GET /api/v1/skills/get-all-skills/:userId
- * @desc    Get all skills for a specific user (public profile view)
- * @access  Private
- */
-router.get(
-    '/get-all-skills/:userId',
-    AuthMiddleware.authenticate as any,
-    rateLimitMiddleware({ maxRequests: 50, windowMs: 60000 }),
-    async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            console.log('🎯 GET SKILLS BY USER ID ROUTE HIT');
-            await SkillController.getSkillsByUserId(req as any, res);
-            console.log('✅ GET SKILLS BY USER ID ROUTE COMPLETED');
-        } catch (error: any) {
-            console.error('❌ GET SKILLS BY USER ID ROUTE ERROR:', error);
             next(error);
         }
     }

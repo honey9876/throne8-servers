@@ -6,7 +6,7 @@
 
 import express from 'express';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
-import  timerController from '../controllers/timer.controller';
+import  {timerController} from '../controllers';
 
 const router = express.Router();
 

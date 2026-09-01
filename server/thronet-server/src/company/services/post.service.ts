@@ -29,35 +29,10 @@ class PostService {
     documents?: Express.Multer.File[];   // ✅ already hai — bas logic add karna hai
   }): Promise<IPostDocument> {
     try {
-      let company = await companyRepository.findByUUID(data.company);
-      if (!company && mongoose.Types.ObjectId.isValid(data.company)) {
-        company = await companyRepository.findByObjectId(data.company);
-      }
+      const company = await companyRepository.findByUUID(data.company);
       if (!company) throw new Error('Company not found');
 
-      let author = data.author ? await employeeRepository.findByUUID(data.author) : null;
-      if (!author && data.author && mongoose.Types.ObjectId.isValid(data.author)) {
-        author = await employeeRepository.findByObjectId(data.author);
-      }
-      if (!author) {
-        const [companyEmps] = await employeeRepository.findByCompanyObjectId(company._id.toString(), 0, 1);
-        if (companyEmps && companyEmps.length > 0) {
-          author = companyEmps[0];
-        } else {
-          const slug = company.companySlug || (company as any).slug || 'company';
-          author = await employeeRepository.create({
-            firstName: company.companyName || 'Company',
-            lastName: 'Team',
-            email: `team@${slug}-${company._id.toString().slice(-4)}.com`,
-            company: company._id,
-            designation: 'Admin / Author',
-            department: 'Leadership',
-            isActive: true,
-            isAdvocate: true,
-            joinDate: new Date(),
-          });
-        }
-      }
+      const author = await employeeRepository.findByUUID(data.author);
       if (!author) throw new Error('Author (employee) not found');
 
       // ✅ Media upload (images + videos) — same as before
@@ -153,31 +128,14 @@ class PostService {
         ...cleanData
       } = data;
 
-      let postStatus: PostStatus = PostStatus.PUBLISHED;
-      let isPublished = true;
+      let postStatus: PostStatus = PostStatus.DRAFT;
       let scheduledFor: Date | undefined;
 
-      if (data.status) {
-        const s = String(data.status).toLowerCase();
-        if (s === 'published') {
-          postStatus = PostStatus.PUBLISHED;
-          isPublished = true;
-        } else if (s === 'draft') {
-          postStatus = PostStatus.DRAFT;
-          isPublished = false;
-        } else if (s === 'scheduled') {
-          postStatus = PostStatus.SCHEDULED;
-          isPublished = false;
-        }
-      }
-
-      const scheduleDateVal = data.scheduledFor || (data as any).scheduledAt;
-      if (scheduleDateVal) {
-        const scheduledDate = new Date(scheduleDateVal);
+      if (data.scheduledFor) {
+        const scheduledDate = new Date(data.scheduledFor);
         if (scheduledDate > new Date()) {
           postStatus = PostStatus.SCHEDULED;
           scheduledFor = scheduledDate;
-          isPublished = false;
         }
       }
 
@@ -185,10 +143,9 @@ class PostService {
         ...cleanData,
         company: company._id,
         author: author._id,
-        status: postStatus,
-        isPublished,
-        publishedAt: isPublished ? new Date() : undefined,
-        scheduledFor,
+        status: postStatus,            
+        isPublished: false,
+        scheduledFor,                  
         media: [
           ...(cleanData.media || []),
           ...uploadedMedia,
@@ -219,7 +176,7 @@ class PostService {
     }
   }
 
-  // ✅ Cloudinary upload helper (supports images, videos, documents)
+  // ✅ YE HELPER METHOD ADD KARO PostService class mein:
   private async uploadToCloudinary(
     buffer: Buffer,
     folder: string,
@@ -229,23 +186,14 @@ class PostService {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
           folder,
-          public_id: `post_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-          resource_type: resourceType === 'video' ? 'auto' : resourceType,
-          overwrite: true,
+          resource_type: resourceType,
+          overwrite: false,
         },
         (error, result) => {
-          if (error) {
-            logger.error('❌ [CLOUDINARY UPLOAD ERROR]', {
-              folder,
-              resourceType,
-              error: error.message || error,
-            });
-            return reject(new Error(`Cloudinary upload failed: ${error.message || error}`));
-          }
+          if (error) return reject(error);
           resolve(result);
         }
       );
-
       uploadStream.end(buffer);
     });
   }
@@ -292,7 +240,6 @@ class PostService {
         return cached;
       }
 
-
       const post = await CompanyPost.findOne({ slug, isPublished: true })
         .populate('company', 'name slug logo')
         .populate('author', 'firstName lastName')
@@ -318,7 +265,7 @@ class PostService {
       const {
         page = 1,
         pageSize = 20,
-        company,
+        company,       // ← yahan company ObjectId string aayega
         author,
         type,
         status,
@@ -436,82 +383,14 @@ class PostService {
   // =====================================================
   // UPDATE POST
   // =====================================================
-  async updatePost(
-    id: string,
-    data: UpdatePostDTO & {
-      existingMedia?: Array<{ url: string; type: 'Image' | 'Video'; caption?: string }>;
-      images?: Express.Multer.File[];
-      videos?: Express.Multer.File[];
-      documents?: Express.Multer.File[];
-    }
-  ): Promise<IPostDocument | null> {
+  async updatePost(id: string, data: UpdatePostDTO): Promise<IPostDocument | null> {
     try {
-      const existing = await CompanyPost.findById(id);
-      if (!existing) return null;
-
+      // ✅ Sirf allowed fields pass karo — media/poll update nahi
       const allowedUpdate: Partial<IPostDocument> = {};
       if (data.title !== undefined) allowedUpdate.title = data.title;
       if (data.content !== undefined) allowedUpdate.content = data.content;
-      if (data.type !== undefined) allowedUpdate.type = data.type;
       if (data.tags !== undefined) allowedUpdate.tags = data.tags;
       if (data.status !== undefined) allowedUpdate.status = data.status;
-
-      // Handle Media (images and videos)
-      let updatedMedia: Array<{ url: string; type: 'Image' | 'Video'; caption?: string }> | undefined = undefined;
-
-      if (data.existingMedia !== undefined) {
-        updatedMedia = [...data.existingMedia];
-      } else if ((data.images && data.images.length > 0) || (data.videos && data.videos.length > 0)) {
-        updatedMedia = existing.media ? [...existing.media] : [];
-      }
-
-      // Upload new images to Cloudinary
-      if (data.images && data.images.length > 0) {
-        if (!updatedMedia) updatedMedia = [];
-        for (const file of data.images) {
-          const result = await this.uploadToCloudinary(
-            file.buffer, 'company-post-images', 'image'
-          );
-          updatedMedia.push({ url: result.secure_url, type: 'Image' });
-        }
-      }
-
-      // Upload new videos to Cloudinary
-      if (data.videos && data.videos.length > 0) {
-        if (!updatedMedia) updatedMedia = [];
-        for (const file of data.videos) {
-          const result = await this.uploadToCloudinary(
-            file.buffer, 'company-post-videos', 'video'
-          );
-          updatedMedia.push({ url: result.secure_url, type: 'Video' });
-        }
-      }
-
-      if (updatedMedia !== undefined) {
-        allowedUpdate.media = updatedMedia;
-      }
-
-      // Upload new documents to Cloudinary if provided
-      if (data.documents && data.documents.length > 0) {
-        const updatedDocuments = existing.documents ? [...existing.documents] : [];
-        for (const file of data.documents) {
-          const result = await this.uploadToCloudinary(
-            file.buffer, 'company-post-documents', 'raw'
-          );
-          const ext = file.originalname.split('.').pop()?.toUpperCase() || 'PDF';
-          const docType = ['PDF', 'DOC', 'DOCX', 'TXT'].includes(ext)
-            ? (ext as 'PDF' | 'DOC' | 'DOCX' | 'TXT')
-            : 'PDF';
-
-          updatedDocuments.push({
-            url: result.secure_url,
-            type: docType,
-            name: file.originalname,
-            size: file.size,
-          });
-        }
-        allowedUpdate.documents = updatedDocuments;
-      }
 
       const post = await postRepository.updateById(id, allowedUpdate);
       if (!post) return null;
@@ -541,14 +420,10 @@ class PostService {
       // Archive the post
       await post.archive();
 
-      // Decrement company post count safely
-      try {
-        const company = await Company.findById(companyId);
-        if (company) {
-          await company.decrementStat('postsCount');
-        }
-      } catch (statError: any) {
-        logger.warn(`Could not decrement postsCount for company ${companyId}:`, { error: statError?.message });
+      // Decrement company post count
+      const company = await Company.findById(companyId);
+      if (company) {
+        await company.decrementStat('postsCount');
       }
 
       // Invalidate caches

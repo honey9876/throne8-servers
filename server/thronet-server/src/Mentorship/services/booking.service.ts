@@ -12,7 +12,6 @@ import { User, UserProfile } from '@/shared/models/index.models';
 import { SessionMentor } from '../models';
 import { ConflictError } from '@/shared/errors/app.error';
 // import { redisClient } from '../../config/cache/redis.config';
-import { getRedisClient } from '@/services/redis.service';
 
 import waitlistCron from '@/jobs/waitlistCron';
 
@@ -57,8 +56,7 @@ class BookingService {
     const lockKey = `booking:lock:${input.mentorId}:${input.scheduledAt.getTime()}`;
     const lockValue = `${input.menteeId}-${Date.now()}`;
 
-    const redisClient = await getRedisClient();
-    const acquired = await redisClient.set(lockKey, lockValue, 'NX', 'EX', 60);
+    const acquired = await getRedisClient.set(lockKey, lockValue, 'NX', 'EX', 60);
     if (!acquired) {
       throw new ConflictError(
         'This slot is currently being booked by another user. Please try again in a moment.'
@@ -86,8 +84,7 @@ class BookingService {
           session._id.toString(),
           input.menteeId,
           'Video setup failed during booking',
-          authToken,
-          session.bookings[0]._id.toString()
+          authToken
         );
         throw new Error('Booking failed: Could not create video meeting. Please try again.');
       }
@@ -155,7 +152,6 @@ class BookingService {
     } finally {
       // ✅ FIX: Release lock only if this process acquired it (prevents releasing another process's lock)
       try {
-        const redisClient = await getRedisClient();
         const current = await redisClient.get(lockKey);
         if (current === lockValue) {
           await redisClient.del(lockKey);
@@ -237,24 +233,26 @@ class BookingService {
     sessionId: string,
     userId: string,
     reason: string,
-    authToken: string | undefined,
-    bookingId: string
+    authToken?: string
   ): Promise<any> {
     try {
       logger.info(`❌ Cancelling booking: ${sessionId}`);
 
-      /**
-       * TEMP FIX (UUID Lookup)
-       *
-       * Frontend passes the public UUID (sessionId),
-       * not the MongoDB ObjectId.
-       *
-       * Query by sessionId to prevent ObjectId cast errors
-       * while preserving the existing backend architecture.
-       */
       const session = await SessionMentor.findOne({ sessionId });
       if (!session) {
         throw new Error('Session not found');
+      }
+
+      // If there's no mentee, it's just a mentor's service offering (template).
+      // We don't need to process refunds or delete calendar events.
+      if (!session.menteeId) {
+        logger.info(`Session is a template. Cancelling directly: ${sessionId}`);
+        const updatedSession = await sessionService.cancelSession(sessionId, userId, reason, authToken);
+        return {
+          session: updatedSession,
+          refundAmount: 0,
+          refundEligible: false,
+        };
       }
 
       // ✅ FIX: Delegate to refund.service — single source of truth for refund logic
@@ -274,9 +272,8 @@ class BookingService {
       }
 
       // Get user details for calendar deletion
-      const actualMenteeId = session.menteeId || (session.bookings && session.bookings[0]?.menteeId);
       const [mentee, mentor] = await Promise.all([
-        actualMenteeId ? User.findByUserId(actualMenteeId) : null,
+        User.findByUserId(session.menteeId),
         User.findByUserId(session.mentorId),
       ]);
 
@@ -323,8 +320,7 @@ class BookingService {
     userId: string,
     newScheduledAt: Date,
     reason: string,
-    authToken: string | undefined,
-    bookingId: string
+    authToken?: string
   ): Promise<any> {
     try {
       logger.info(`🔄 Rescheduling booking: ${sessionId}`);
@@ -336,35 +332,33 @@ class BookingService {
 
       const oldScheduledAt = session.scheduledAt;
 
-      const updatedSession = await sessionService.rescheduleSession(
+      await sessionService.rescheduleSession(
         sessionId,
         userId,
         newScheduledAt,
         reason,
-        authToken,
-        bookingId
+        authToken
       );
 
-      const actualMenteeId = updatedSession.menteeId || (updatedSession.bookings && updatedSession.bookings[0]?.menteeId);
       const [mentee, mentor] = await Promise.all([
-        actualMenteeId ? User.findByUserId(actualMenteeId) : null,
-        User.findByUserId(updatedSession.mentorId),
+        User.findByUserId(session.menteeId),
+        User.findByUserId(session.mentorId),
       ]);
 
       if (!mentee || !mentor) {
         logger.warn('Mentee or Mentor not found for reschedule notifications', { sessionId });
-        return updatedSession;
+        return;
       }
 
       // Update calendar event (non-critical)
       try {
         await calendarService.updateCalendarEvent(sessionId, {
           startTime: newScheduledAt,
-          title: updatedSession.title,
-          description: updatedSession.description,
-          duration: updatedSession.duration,
-          timezone: updatedSession.timezone,
-          meetingUrl: updatedSession.meeting?.meetingUrl || '',
+          title: session.title,
+          description: session.description,
+          duration: session.duration,
+          timezone: session.timezone,
+          meetingUrl: session.meeting?.meetingUrl || '',
         });
       } catch (error: any) {
         // ✅ FIX: Correct template literal
@@ -373,13 +367,13 @@ class BookingService {
 
       const oldTimeFormatted = TimezoneUtils.formatInTimezone(
         oldScheduledAt,
-        updatedSession.timezone,
+        session.timezone,
         'MMMM dd, yyyy hh:mm a'
       );
 
       const newTimeFormatted = TimezoneUtils.formatInTimezone(
         newScheduledAt,
-        updatedSession.timezone,
+        session.timezone,
         'MMMM dd, yyyy hh:mm a'
       );
 
@@ -387,11 +381,11 @@ class BookingService {
         mentee.email,
         mentee.fullName || mentee.email,
         mentor.fullName || mentor.email,
-        updatedSession.sessionType,
+        session.sessionType,
         oldTimeFormatted,
         newTimeFormatted,
-        updatedSession.timezone,
-        updatedSession.meeting?.meetingUrl || ''
+        session.timezone,
+        session.meeting?.meetingUrl || ''
       );
 
       if (mentee.phoneNumber) {
@@ -403,7 +397,7 @@ class BookingService {
       }
 
       logger.info(`✅ Booking rescheduled successfully: ${sessionId}`);
-      return updatedSession;
+      return session;
     } catch (error: any) {
       // ✅ FIX: Correct template literal
       logger.error(`❌ Booking reschedule failed: ${error.message}`);
@@ -419,9 +413,8 @@ class BookingService {
       const session = await SessionMentor.findOne({ sessionId });
       if (!session) return;
 
-      const actualMenteeId = session.menteeId || (session.bookings && session.bookings[0]?.menteeId);
       const [mentee, mentor] = await Promise.all([
-        actualMenteeId ? User.findByUserId(actualMenteeId) : null,
+        User.findByUserId(session.menteeId),
         User.findByUserId(session.mentorId),
       ]);
 
@@ -469,11 +462,10 @@ class BookingService {
     try {
       const session = await sessionService.getSessionById(sessionId, undefined, authToken);
 
-      const actualMenteeId = session.menteeId || (session.bookings && session.bookings[0]?.menteeId);
       const [menteeUser, mentorUser, menteeProfile, mentorProfile] = await Promise.all([
-        actualMenteeId ? User.findByUserId(actualMenteeId) : null,
+        User.findByUserId(session.menteeId),
         User.findByUserId(session.mentorId),
-        actualMenteeId ? UserProfile.findByUserIdCached(actualMenteeId) : null,
+        UserProfile.findByUserIdCached(session.menteeId),
         UserProfile.findByUserIdCached(session.mentorId),
       ]);
 

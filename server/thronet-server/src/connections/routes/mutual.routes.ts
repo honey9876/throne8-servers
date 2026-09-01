@@ -7,9 +7,8 @@ import { mutualController } from '../controllers/index';
 import { ErrorResponse, HttpStatus } from '@/shared/response.util';
 import environmentConfig from '@/config/environment/environment';
 import { logger } from '@/shared/logger.util';
-import { getBulkMutualConnections } from '@/connections/controllers/mutual.controller';
-import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 
+// import { authenticateJWT } from '@/shared/middlewares/auth.middleware';
 /**
  * Mutual Routes
  * Defines Express routes for mutual connections-related API endpoints in the Connection Service.
@@ -81,10 +80,8 @@ const bulkSearchLimiter = rateLimit({
     },
 });
 
-// ✅ FIX: Authentication ab enable hai — pehle yeh commented tha isliye
-// req.user hamesha undefined aata tha aur "Authentication required" 500 error deta tha
-// connection.routes.ts jaisa hi pattern use kiya hai (AuthMiddleware.authenticate)
-router.use(AuthMiddleware.authenticate as any);
+// Apply authentication to all routes
+// router.use(authenticateJWT);
 
 // Request logging middleware (applied after auth)
 router.use((req: Request, _res: Response, next: NextFunction) => {
@@ -96,14 +93,6 @@ router.use((req: Request, _res: Response, next: NextFunction) => {
     });
     next();
 });
-
-
-router.post(
-    '/bulk',
-    mutualLimiter,   // ya jo bhi limiter already mutual routes pe lagta hai
-    getBulkMutualConnections
-);
-
 
 // Feature 1: Get mutual connections list
 router.get(
@@ -187,9 +176,8 @@ router.get(
 );
 
 // Feature 8: Bulk mutual queries (stricter limit)
-// Feature 8: Bulk mutual queries (stricter limit) — pairs-based, alag path
 router.post(
-    '/bulk-pairs',
+    '/bulk',
     // bulkSearchLimiter,
     celebrate({
         body: Joi.object({

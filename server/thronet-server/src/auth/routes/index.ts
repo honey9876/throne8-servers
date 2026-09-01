@@ -1,4 +1,3 @@
-console.log('🔍 Verifications routes loading started in routes/index.ts');
 /**
  * Centralized Route Management
  * 
@@ -10,10 +9,11 @@ console.log('🔍 Verifications routes loading started in routes/index.ts');
  */
 
 import { Router, Request, Response } from 'express';
+import authRoutes from './auth.routes';
 import emailVerificationRoutes from './emailVerification.routes';
-// import phoneRoutes from './phone.routes';
-// import identityVerificationRoutes from './identity.routes';
-// import passwordRoutes from './password.routes';
+import phoneRoutes from './phone.routes';
+import identityVerificationRoutes from './identity.routes';
+import passwordRoutes from './password.routes';
 // import coverRoutes from './profile/cover.routes';
 
 
@@ -82,20 +82,10 @@ router.get('/health', async (_req: Request, res: Response) => {
 
 // ==================== ROUTE MOUNTING ====================
 
-console.log("here is mounting all verify routes .......")
-
 router.use('/email', emailVerificationRoutes);
-console.log("email route mouted............")
-
-// router.use('/phone', phoneRoutes);
-// console.log("phone route mouted............")
-
-// router.use('/identity', identityVerificationRoutes);
-// console.log("identity route mouted............")
-
-// router.use('/password', passwordRoutes);
-// console.log("password route mouted............")
-
+router.use('/phone', phoneRoutes);
+router.use('/identity', identityVerificationRoutes);
+router.use('/password', passwordRoutes);
 // ==================== 404 HANDLER ====================
 
 /**
@@ -112,5 +102,3 @@ console.log("email route mouted............")
 // ==================== EXPORT ====================
 
 export default router;
-
-console.log('🔍 Verifications routes loaded successfully in routes/index.ts');

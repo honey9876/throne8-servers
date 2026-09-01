@@ -1,5 +1,5 @@
 // src/routes/index.ts
-import { Router, Request, Response } from 'express';
+import { Router } from 'express';
 import ReminderCron from '@/jobs/reminderCron';
 import mentorRoutes from './mentor.routes';
 import searchRoutes from './search.routes';
@@ -14,12 +14,11 @@ import reviewRoutes from './review.routes'; // ✅ PHASE 11
 import analyticsRoutes from './analytics.routes'; // ✅ PHASE 11
 import adminRoutes from './admin.routes'; // ✅ PHASE 11
 import notificationRoutes from './notification.routes'; // ✅ PHASE 11 - NEW
-import seniorMentorApplicationRoutes from './seniorMentorApplication.routes';
 
 const router = Router();
 
 // Health check
-router.get('/health', (_req: Request, res: Response) => {
+router.get('/health', (_req, res) => {
   res.json({
     status: 'OK',
     service: 'Mentorship Service',
@@ -29,15 +28,15 @@ router.get('/health', (_req: Request, res: Response) => {
 });
 
 // ✅ TEST ROUTE - Manually trigger reminder cron job (REMOVE IN PRODUCTION)
-router.post('/test/trigger-reminders', async (_req: Request, res: Response) => {
+router.post('/test/trigger-reminders', async (_req, res) => {
   try {
     await ReminderCron.triggerManually();
-    res.json({ 
+    res.json({
       success: true,
-      message: 'Reminders triggered successfully!' 
+      message: 'Reminders triggered successfully!'
     });
-  } catch(error : any) {
-    res.status(500).json({ 
+  } catch (error: any) {
+    res.status(500).json({
       success: false,
       message: 'Failed to trigger reminders',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -59,6 +58,5 @@ router.use('/reviews', reviewRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/admin', adminRoutes);
 router.use('/notifications', notificationRoutes);
-router.use('/senior-mentor-applications', seniorMentorApplicationRoutes);
 
 export default router;

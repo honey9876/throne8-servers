@@ -4,34 +4,15 @@ import logger from '@/config/logging/logger.config';
 import { mentorshipanalyticsService } from '../services';
 import ResponseHandler from '@/shared/utils/mentorship/responseHandler';
 import { Request, Response } from 'express';
-import { Mentor } from '../models';
 
 
 class AnalyticsController {
   /**
    * Check if user is admin or the mentor
    */
-  private async canAccessMentorAnalytics(req: Request, mentorId: string): Promise<boolean> {
+  private canAccessMentorAnalytics(req: Request, mentorId: string): boolean {
     const userId = req.user?.id;
-    if (req.user?.role === 'admin') return true;
-    
-    // Log for debugging
-    console.log({
-      authUserId: req.user?.id,
-      requestedMentorId: req.params.mentorId || mentorId,
-    });
-
-    const mentor = await Mentor.findOne({
-      userId: req.user?.id,
-      isDeleted: false,
-    });
-
-    console.log({
-      mentorFound: !!mentor,
-      mentorProfileId: mentor?.mentorId,
-    });
-
-    return mentor?.mentorId === mentorId;
+    return req.user?.role === 'admin' || userId === mentorId;
   }
 
   /**
@@ -50,7 +31,7 @@ class AnalyticsController {
       const { mentorId } = req.params;
       const { startDate, endDate } = req.query;
 
-      if (!(await this.canAccessMentorAnalytics(req, mentorId))) {
+      if (!this.canAccessMentorAnalytics(req, mentorId)) {
         ResponseHandler.forbidden(res, 'Access denied');
         return;
       }
@@ -80,7 +61,7 @@ class AnalyticsController {
       const { mentorId } = req.params;
       const { startDate, endDate } = req.query;
 
-      if (!(await this.canAccessMentorAnalytics(req, mentorId))) {
+      if (!this.canAccessMentorAnalytics(req, mentorId)) {
         ResponseHandler.forbidden(res, 'Access denied');
         return;
       }
@@ -114,7 +95,7 @@ class AnalyticsController {
       const { mentorId } = req.params;
       const { startDate, endDate } = req.query;
 
-      if (!(await this.canAccessMentorAnalytics(req, mentorId))) {
+      if (!this.canAccessMentorAnalytics(req, mentorId)) {
         ResponseHandler.forbidden(res, 'Access denied');
         return;
       }
@@ -146,7 +127,7 @@ class AnalyticsController {
     try {
       const { mentorId } = req.params;
 
-      if (!(await this.canAccessMentorAnalytics(req, mentorId))) {
+      if (!this.canAccessMentorAnalytics(req, mentorId)) {
         ResponseHandler.forbidden(res, 'Access denied');
         return;
       }

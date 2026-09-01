@@ -12,7 +12,7 @@ import {
   getWeeklyProgress,
   getTotalProgress,
   getGraphData,
-} from '../controllers/progress.controller';
+} from '../controllers';
 
 const router = Router();
 

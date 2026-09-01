@@ -1,6 +1,6 @@
 /**
  * rateLimit.policies.ts
- * Per-endpoint request limits.
+ * 5 requests per 1 minute per endpoint.
  * req.path format: "/register", "/login" etc. (without /api/v1/auth prefix)
  */
 
@@ -12,57 +12,68 @@ interface RateLimitPolicy {
 }
 
 const ONE_MINUTE = 60 * 1000;
-
-const isDev = process.env.NODE_ENV !== 'production';
+const FIVE_MINUTES = 5 * 60 * 1000;
 
 const rateLimitPolicies: Record<string, RateLimitPolicy> = {
 
-    // ── Sensitive/mutation endpoints — keep these STRICT ──────────
+    // ── Auth endpoints ─────────────────────────────────────────────
 
     '/register': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 10,
         redisPrefix: 'rl:register',
         message: 'Too many registration attempts. Try again in 1 minute.',
     },
 
     '/login': {
         windowMs: ONE_MINUTE,
-        maxRequests: 8,
+        maxRequests: 10,
         redisPrefix: 'rl:login',
         message: 'Too many login attempts. Try again in 1 minute.',
     },
 
     '/refresh-token': {
-        // ✅ Refresh token endpoint fires often (auto token refresh on 401s
-        // across many components). Kept high but still bounded.
         windowMs: ONE_MINUTE,
-        maxRequests: isDev ? 100 : 30,
+        maxRequests: 30,
         redisPrefix: 'rl:refresh',
         message: 'Too many token refresh requests. Try again in 1 minute.',
     },
 
     '/logout': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 20,
         redisPrefix: 'rl:logout',
         message: 'Too many logout requests. Try again in 1 minute.',
     },
 
     '/logout-all': {
         windowMs: ONE_MINUTE,
-        maxRequests: 5,
+        maxRequests: 10,
         redisPrefix: 'rl:logout-all',
         message: 'Too many logout-all requests. Try again in 1 minute.',
     },
 
-    '/update-profile': {
-        // Mutation — keep strict-ish, but not so strict that a couple
-        // of retries lock the user out.
+    // ── Profile / read-heavy endpoints ─────────────────────────────
+
+    '/profile': {
         windowMs: ONE_MINUTE,
-        maxRequests: 10,
+        maxRequests: 120,
+        redisPrefix: 'rl:profile',
+        message: 'Too many profile requests. Try again in 1 minute.',
+    },
+
+    '/update-profile': {
+        windowMs: ONE_MINUTE,
+        maxRequests: 20,
         redisPrefix: 'rl:update-profile',
         message: 'Too many update requests. Try again in 1 minute.',
+    },
+
+    '/users': {
+        windowMs: ONE_MINUTE,
+        maxRequests: 120,
+        redisPrefix: 'rl:users',
+        message: 'Too many requests. Try again in 1 minute.',
     },
 
     '/user-account-deactivate': {
@@ -72,36 +83,12 @@ const rateLimitPolicies: Record<string, RateLimitPolicy> = {
         message: 'Too many deactivation requests. Try again in 1 minute.',
     },
 
-    // ── Read-heavy endpoints hit by normal page loads ──────────────
-    // ✅ FIX: These were previously capped at 5-10 req/min, but a single
-    // profile/dashboard page load legitimately fires many parallel GET
-    // requests across multiple components (connections, posts, analytics,
-    // education, experience, skills, etc). 5/min was causing normal usage
-    // to trip 429s constantly. Bumped these up to realistic numbers for
-    // read-only, non-sensitive data.
-
-    '/profile': {
-        windowMs: ONE_MINUTE,
-        maxRequests: isDev ? 300 : 100,
-        redisPrefix: 'rl:profile',
-        message: 'Too many profile requests. Try again in 1 minute.',
-    },
-
-    '/users': {
-        windowMs: ONE_MINUTE,
-        maxRequests: isDev ? 300 : 100,
-        redisPrefix: 'rl:users',
-        message: 'Too many requests. Try again in 1 minute.',
-    },
-
     // ── Global fallback ────────────────────────────────────────────
-    // ✅ FIX: was 5 req/min for EVERY route not explicitly listed above
-    // (connections, company, messaging, analytics, education, experience,
-    // skills, activity/posts, reposts, etc. all fell into this bucket).
-    // That's why almost everything was 429ing. Bumped to a sane default.
+    // Raised to 120/min — enough for normal app navigation + feed refreshes
+
     '*': {
         windowMs: ONE_MINUTE,
-        maxRequests: isDev ? 300 : 120,
+        maxRequests: 120,
         redisPrefix: 'rl:global',
         message: 'Too many requests. Try again in 1 minute.',
     },
@@ -109,3 +96,67 @@ const rateLimitPolicies: Record<string, RateLimitPolicy> = {
 
 export default rateLimitPolicies;
 export type { RateLimitPolicy };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// /**
+//  * rateLimit.policies.ts
+//  * Professional-level endpoint-specific rate limiting policies for auth-service-phase3-kafka
+//  * Defines per-endpoint rate limits
+//  * Compliant with NIST 800-63B and OWASP guidelines
+//  */
+
+// interface RateLimitPolicy {
+//     windowMs: number;
+//     maxRequests: number;
+//     redisPrefix: string;
+//     lockoutDuration?: number;
+// }
+
+// export default {
+//     '/auth/login': {
+//         windowMs: 15 * 60 * 1000, // 15 minutes
+//         maxRequests: 5,
+//         redisPrefix: 'rate_limit_auth_login',
+//         lockoutDuration: 30 * 60 * 1000, // 30 minutes
+//     } as RateLimitPolicy,
+//     '/auth/register': {
+//         windowMs: 60 * 60 * 1000, // 1 hour
+//         maxRequests: 3,
+//         redisPrefix: 'rate_limit_auth_register',
+//     } as RateLimitPolicy,
+//     '/auth/mfa/verify': {
+//         windowMs: 15 * 60 * 1000, // 15 minutes
+//         maxRequests: 5,
+//         redisPrefix: 'rate_limit_mfa_verify',
+//         lockoutDuration: 15 * 60 * 1000, // 15 minutes
+//     } as RateLimitPolicy,
+//     '/notification/send': {
+//         windowMs: 60 * 1000, // 1 minute
+//         maxRequests: 10,
+//         redisPrefix: 'rate_limit_notification_send',
+//     } as RateLimitPolicy,
+//     '/oauth/authorize': {
+//         windowMs: 15 * 60 * 1000, // 15 minutes
+//         maxRequests: 10,
+//         redisPrefix: 'rate_limit_oauth_authorize',
+//     } as RateLimitPolicy,
+//     '/oauth/token': {
+//         windowMs: 15 * 60 * 1000, // 15 minutes
+//         maxRequests: 10,
+//         redisPrefix: 'rate_limit_oauth_token',
+//     } as RateLimitPolicy,
+// } as Record<string, RateLimitPolicy>;

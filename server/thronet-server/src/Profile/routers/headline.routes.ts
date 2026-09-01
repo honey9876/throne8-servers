@@ -132,12 +132,6 @@ router.get(
     HeadlineController.getHeadlineById as any
 );
 
-router.post(
-    '/get-multiple-headlines',
-    AuthMiddleware.authenticate as any,
-    rateLimitByKey('get_multiple_headlines', 100, 60000),
-    HeadlineController.getMultipleHeadlines as any
-);
 /**
  * GET /api/v1/headlines
  * Get all headlines with filters

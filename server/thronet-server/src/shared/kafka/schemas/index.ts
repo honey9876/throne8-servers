@@ -10,6 +10,7 @@
 
 import { SchemaRegistry, SchemaType } from '@kafkajs/confluent-schema-registry';
 import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import LoggerUtil from '@/shared/logger.util';
 
@@ -40,7 +41,8 @@ interface SchemaMap {
 
 // ==================== DIRECTORY SETUP ====================
 
-// __dirname natively available in CommonJS
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ==================== SCHEMA REGISTRY CONFIGURATION ====================
 

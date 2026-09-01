@@ -1,11 +1,13 @@
 // src/middleware/rateLimiter.middleware.ts
+
 import { Request, Response, NextFunction } from 'express';
 import rateLimit, { Options } from 'express-rate-limit';
 import RedisStore from 'rate-limit-redis';
-import { ErrorResponse, HttpStatus } from '@/shared/response.util';
-import logger, { LogCategory } from '@/shared/logger.util';
-import environmentConfig from '@/config/environment/environment';
-import  redisManager  from '@/config/cache/redis.config';
+import { ErrorResponse, HttpStatus } from '../utils/response';
+import logger from '../utils/logger';
+import environmentConfig from '../config/environment';
+import { LogCategory } from '../utils/logger';
+import { redisManager } from '../config/redis';
 
 /**
  * Creates a Redis store for rate limiting using the shared Redis connection

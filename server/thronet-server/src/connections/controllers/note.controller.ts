@@ -2,14 +2,12 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { Types } from 'mongoose';
-import noteService from '../services/note.service';
-import { ConnectionNote, INoteSearchOptions, NotePriority, NoteType, NoteStatus } from '@/connections/models/ConnectionNote';
-import { sendResponse, HttpStatus, ErrorResponse } from '@/shared/response.util';
-import constants from '@/shared/constants.util';import logger, { LogCategory } from '@/shared/logger.util';
-
-import environmentConfig from '@/config/environment/environment';
-const { ERROR_CODES } = constants;
-const DEFAULT_VALUES = constants.CONNECTION_SERVICE_CONSTANTS.DEFAULT_VALUES;
+import noteService from '../services/noteService';
+import { ConnectionNote, INoteSearchOptions, NotePriority, NoteType, NoteStatus } from '../models/mongodb/ConnectionNote';
+import { sendResponse, HttpStatus, ErrorResponse } from '../utils/response';
+import { ERROR_CODES, DEFAULT_VALUES } from '../utils/constants';
+import logger, { LogCategory } from '../utils/logger';
+import environmentConfig from '../config/environment';
 // import { validateObjectId } from '../utils/validation';
 
 // ✅ HELPER: Validate both ObjectId and UUID formats

@@ -62,19 +62,7 @@ class RefundService {
       logger.info(`Processing refund for session: ${input.sessionId}`);
 
       // Step 1: Get session details
-      /**
-       * TEMP FIX (UUID Lookup)
-       *
-       * Refund flow receives the public sessionId (UUID)
-       * from the cancellation pipeline.
-       *
-       * Query by sessionId instead of MongoDB _id to
-       * prevent ObjectId cast errors while preserving
-       * the existing backend architecture.
-       */
-      const session = await SessionMentor.findOne({
-          sessionId: input.sessionId,
-      });
+      const session = await SessionMentor.findById(input.sessionId);
       if (!session) {
         throw new Error('Session not found');
       }

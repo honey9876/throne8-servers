@@ -1,4 +1,4 @@
-﻿// src/models/mongodb/NetworkMetrics.ts
+// src/models/mongodb/NetworkMetrics.ts
 
 import mongoose, { Schema, Document } from 'mongoose';
 import logger from '@/shared/logger.util'; // Fixed import
@@ -111,6 +111,7 @@ const networkMetricsSchema: Schema = new Schema<INetworkMetrics>(
       ref: 'User',
       required: [true, 'User ID is required'],
       unique: true,
+      // index: true,
     },
 
     connectionCount: {
@@ -118,6 +119,7 @@ const networkMetricsSchema: Schema = new Schema<INetworkMetrics>(
       default: 0,
       min: [0, 'Connection count cannot be negative'],
       max: [100000, 'Connection count limit exceeded'],
+      index: true,
     },
 
     growthRate: {
@@ -160,6 +162,7 @@ const networkMetricsSchema: Schema = new Schema<INetworkMetrics>(
       default: 0,
       min: [0, 'Health score cannot be negative'],
       max: [100, 'Health score cannot exceed 100'],
+      index: true,
     },
 
     density: {
@@ -181,6 +184,7 @@ const networkMetricsSchema: Schema = new Schema<INetworkMetrics>(
       default: 0,
       min: [0, 'Influence score cannot be negative'],
       max: [100, 'Influence score cannot exceed 100'],
+      index: true,
     },
 
     engagementRate: {
@@ -205,6 +209,7 @@ const networkMetricsSchema: Schema = new Schema<INetworkMetrics>(
     lastCalculated: {
       type: Date,
       default: Date.now,
+      index: true,
     },
 
     version: {
@@ -216,6 +221,7 @@ const networkMetricsSchema: Schema = new Schema<INetworkMetrics>(
     createdAt: {
       type: Date,
       default: Date.now,
+      index: true,
     },
   },
   {

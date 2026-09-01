@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import validator from 'validator';
 import { LoggerUtil } from '@/shared/logger.util';
 import userEmitter from '@/shared/events/emitters/user.emitter';
@@ -31,7 +31,13 @@ export interface ILoginAttempt extends Document {
 }
 
 export interface ILoginAttemptModel extends Model<ILoginAttempt> {
-    recordAttempt(userId: string | null, ipAddress: string, attemptType: string, status: string, options?: any): Promise<ILoginAttempt>;
+    recordAttempt(
+        userId: string | null,
+        ipAddress: string,
+        attemptType: string,
+        status: string,
+        options?: any
+    ): Promise<ILoginAttempt>;
     isBlocked(userId: string | null, ipAddress: string): Promise<boolean>;
     getRecentAttempts(userId: string, options?: { limit?: number }): Promise<any[]>;
     getSuspiciousActivity(options?: { timeframeHours?: number; limit?: number }): Promise<any[]>;
@@ -41,6 +47,7 @@ const LoginAttemptSchema = new Schema<ILoginAttempt, ILoginAttemptModel>(
     {
         userId: {
             type: String,
+            index: true,
         },
         ipAddress: {
             type: String,
@@ -50,6 +57,7 @@ const LoginAttemptSchema = new Schema<ILoginAttempt, ILoginAttemptModel>(
         userAgent: String,
         deviceId: {
             type: String,
+            index: true,
         },
         attemptType: {
             type: String,
@@ -61,6 +69,7 @@ const LoginAttemptSchema = new Schema<ILoginAttempt, ILoginAttemptModel>(
             type: String,
             enum: ['success', 'failed', 'blocked'],
             required: true,
+            index: true,
         },
         failureReason: {
             type: String,
@@ -117,8 +126,9 @@ LoginAttemptSchema.statics.recordAttempt = async function (
     try {
         const { userAgent, deviceId, failureReason, metadata = {} } = options;
 
+        let profile = null;
         if (userId) {
-            const profile = await UserProfile.findByUserIdCached(userId);
+            profile = await UserProfile.findByUserIdCached(userId);
             if (!profile && status !== 'failed') throw new Error('User profile not found');
         }
 
@@ -145,7 +155,6 @@ LoginAttemptSchema.statics.recordAttempt = async function (
 
         let riskScore = 0;
         const suspiciousFactors: ISuspiciousFactor[] = [];
-
         if (status === 'failed') riskScore += 10;
         if (recentAttempts > 2) {
             riskScore += Math.min(recentAttempts * 5, 30);
@@ -205,7 +214,7 @@ LoginAttemptSchema.statics.recordAttempt = async function (
         if (isBlocked) throw new Error('Account locked due to too many attempts');
 
         return attempt;
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Login attempt recording failed', { error: (error as Error).message, userId: userId || 'anonymous' });
         throw error;
     }
@@ -220,7 +229,7 @@ LoginAttemptSchema.statics.isBlocked = async function (userId: string | null, ip
             attemptedAt: { $gte: new Date(Date.now() - 15 * 60 * 1000) },
         });
         return recentAttempts >= 3;
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Block check failed', { error: (error as Error).message, userId: userId || 'anonymous' });
         throw error;
     }
@@ -230,6 +239,7 @@ LoginAttemptSchema.statics.getRecentAttempts = async function (userId: string, {
     if (!userId) return [];
     try {
         const attempts = await this.find({ userId }).sort({ attemptedAt: -1 }).limit(limit).lean();
+
         return attempts.map((attempt) => ({
             id: attempt._id,
             ipAddress: attempt.ipAddress,
@@ -239,7 +249,7 @@ LoginAttemptSchema.statics.getRecentAttempts = async function (userId: string, {
             riskScore: attempt.riskScore,
             attemptedAt: attempt.attemptedAt,
         }));
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Recent attempts retrieval failed', { error: (error as Error).message, userId });
         throw error;
     }
@@ -248,7 +258,10 @@ LoginAttemptSchema.statics.getRecentAttempts = async function (userId: string, {
 LoginAttemptSchema.statics.getSuspiciousActivity = async function ({
     timeframeHours = 24,
     limit = 100,
-}: { timeframeHours?: number; limit?: number } = {}): Promise<any[]> {
+}: {
+    timeframeHours?: number;
+    limit?: number;
+} = {}): Promise<any[]> {
     try {
         const since = new Date(Date.now() - timeframeHours * 60 * 60 * 1000);
         return await this.aggregate([
@@ -270,7 +283,7 @@ LoginAttemptSchema.statics.getSuspiciousActivity = async function ({
             { $sort: { maxRiskScore: -1, totalAttempts: -1 } },
             { $limit: limit },
         ]);
-    } catch (error: any) {
+    } catch(error : any) {
         logger.error('Suspicious activity retrieval failed', { error: (error as Error).message });
         throw error;
     }

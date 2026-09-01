@@ -1,4 +1,4 @@
-﻿// src/models/Assignment.model.ts
+// src/models/Assignment.model.ts
 
 import mongoose, { Schema } from 'mongoose';
 import { IAssignment, IAssignmentSubmission } from '../interfaces/IAssignment';
@@ -13,6 +13,7 @@ const AssignmentSchema = new Schema<IAssignment>(
       type: String,
       required: true,
       unique: true,
+      index: true,
       validator: (v: any) => validId(v),  // UUID generate
     },
     title: {
@@ -37,11 +38,13 @@ const AssignmentSchema = new Schema<IAssignment>(
       type: String, // ✅ Correct
       ref: 'StudyGroup_Group',
       required: [true, 'Group reference is required'],
+      index: true,
     },
     creator: {
       type: String, // ✅ Correct
       ref: 'User',
       required: [true, 'Creator reference is required'],
+      index: true,
     },
     assignmentType: {
       type: String,
@@ -163,17 +166,20 @@ const AssignmentSubmissionSchema = new Schema<IAssignmentSubmission>(
       type: String,
       required: true,
       unique: true,
+      index: true,
       validate: (v: any) => validId(v),
     },
     assignment: {
       type: String, // ✅ Correct
       ref: 'StudyGroup_Assignment',
       required: [true, 'Assignment reference is required'],
+      index: true,
     },
     student: {
       type: String, // ✅ Correct
       ref: 'User',
       required: [true, 'Student reference is required'],
+      index: true,
     },
     submittedFiles: [{
       fileName: {

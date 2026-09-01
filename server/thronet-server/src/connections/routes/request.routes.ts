@@ -15,7 +15,7 @@ import AuthMiddleware from '@/shared/middlewares/auth.middleware';
  * Request Routes
  * Defines Express routes for connection request-related API endpoints in the Connection Service.
  * Optimized for 100M+ users with rate limiting, authentication, and validation.
- *
+ * 
  * Features (Aligned with requestController.ts - 18 endpoints):
  * 1. POST / - Send a new connection request
  * 2. POST /:requestId/accept - Accept a connection request
@@ -35,6 +35,31 @@ import AuthMiddleware from '@/shared/middlewares/auth.middleware';
  * 16. GET /user/:userId/status/:status - Get requests by status
  * 17. GET /user/:userId/export - Export connection requests to CSV
  * 18. POST /archive - Archive old connection requests
+ * 
+ * Dependencies:
+ * - express: For routing
+ * - express-rate-limit: For rate limiting
+ * - winston: For logging (logger)
+ * - environmentConfig: For validated environment variables
+ * - requestController: For endpoint handlers
+ * - asyncHandler: For async error handling
+ * - response: For standardized ErrorResponse and HttpStatus
+ * - auth.middleware: For JWT authentication
+ * - validation.middleware: For request validation
+ * - requestValidationSchemas: For validation schemas
+ * 
+ * Scalability Considerations:
+ * - Rate limiting to prevent abuse
+ * - Authentication for secure access
+ * - Validation to ensure data integrity
+ * - Async operations for performance
+ * - Audit logging for critical actions
+ * 
+ * Integration:
+ * - Uses requestController.ts for endpoint logic
+ * - Aligns with .env (RATE_LIMIT_*, CONNECTION_REQUEST_RATE_LIMIT, API_VERSION)
+ * - Logs to LOG_FILE_PATH and LOG_ACCESS_FILE_PATH
+ * - Supports health endpoints from server output
  */
 
 // Extend Express Request interface to include ip property
@@ -217,7 +242,7 @@ router.use((req: Request, _res: Response, next: NextFunction) => {
     logger.info('Request route accessed', {
         method: req.method,
         path: req.path,
-        userId: (req as any).user?.userId || 'anonymous',
+        userId: (req as any).user?.id || 'anonymous',
         ip: req.ip,
     });
     next();

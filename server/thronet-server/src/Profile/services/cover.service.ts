@@ -3,7 +3,7 @@
  * Handles Cloudinary upload/delete operations
  * 
  * @module services/coverPhoto.service
- * @version 1.0.1 - Added auth cache invalidation fix
+ * @version 1.0.0
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -12,8 +12,7 @@ import sharp from 'sharp';
 import Constants from '@/shared/constants.util';
 import { CoverPhoto, User } from '@/shared/models/index.models';
 import { LoggerUtil } from '@/shared/logger.util';
-// ✅ NEW IMPORT — needed to clear stale auth cache after coverPhotoId changes
-import { AuthCacheRepository } from '@/auth/repository/auth.repository';
+import CacheUtil from '@/shared/cache.util';
 
 // ==================== INTERFACES ====================
 
@@ -149,11 +148,6 @@ class CoverPhotoService {
                     { new: true }
                 );
 
-                // ✅ FIX: Invalidate stale auth cache so getUserById() 
-                // returns the fresh coverPhotoId immediately, instead of
-                // waiting for the 15-min cache TTL to expire
-                await AuthCacheRepository.invalidateUserCaches(userId);
-
                 LoggerUtil.info('User coverPhotoId updated', {
                     userId,
                     coverPhotoId: coverId,
@@ -167,6 +161,9 @@ class CoverPhotoService {
                 isActive: cover.isActive,
                 correlationId,
             });
+
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
 
             return {
                 coverId: coverId,
@@ -263,9 +260,6 @@ class CoverPhotoService {
 
     /**
      * ✅ Get single cover by ID
-     * ✅ FIX: userId ko query filter se hataya — coverId already globally unique hai (UUID),
-     * isliye viewer ka userId match karne ki zaroorat nahi. Ye hi bug tha jiski wajah se
-     * doosre user ki profile pe cover kabhi load nahi hoti thi (viewer ka userId != owner ka userId).
      */
     static async getCoverById(coverId: string, userId: string): Promise<any> {
         const correlationId = uuidv4();
@@ -273,12 +267,13 @@ class CoverPhotoService {
         try {
             LoggerUtil.info('Fetching cover by ID', {
                 coverId,
-                requestedBy: userId,
+                userId,
                 correlationId,
             });
 
             const cover = await CoverPhoto.findOne({
                 coverId,
+                userId,
                 isDeleted: false,
             });
 
@@ -288,7 +283,7 @@ class CoverPhotoService {
 
             LoggerUtil.info('Cover fetched successfully', {
                 coverId,
-                requestedBy: userId,
+                userId,
                 correlationId,
             });
 
@@ -405,6 +400,9 @@ class CoverPhotoService {
                 correlationId,
             });
 
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
+
             return {
                 coverId: existingCover.coverId,
                 cloudinaryPublicId: existingCover.cloudinaryPublicId,
@@ -451,14 +449,14 @@ class CoverPhotoService {
                 { new: true }
             );
 
-            // ✅ FIX: Invalidate stale auth cache
-            await AuthCacheRepository.invalidateUserCaches(userId);
-
             LoggerUtil.info('Active cover set successfully', {
                 coverId,
                 userId,
                 correlationId,
             });
+
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
 
             return cover;
 
@@ -475,9 +473,6 @@ class CoverPhotoService {
 
     /**
      * ✅ Delete cover (soft delete + Cloudinary removal)
-     * ✅ FIX: wasActive ko photo.isActive = false set karne SE PEHLE capture kiya,
-     * warna neeche wala check hamesha false hi milta (upar hi false kar diya tha).
-     * Isi wajah se User.coverPhotoId kabhi clear nahi hota tha delete hone ke baad.
      */
     static async deleteCover(coverId: string, userId: string): Promise<any> {
         const correlationId = uuidv4();
@@ -509,22 +504,17 @@ class CoverPhotoService {
             });
 
             // Soft delete in DB
-            const wasActive = cover.isActive;
-
             cover.isDeleted = true;
             cover.deletedAt = new Date();
             cover.isActive = false;
             await cover.save();
 
-            if (wasActive) {
+            if (cover.isActive) {
                 await User.findOneAndUpdate(
                     { userId },
                     { $unset: { coverPhotoId: 1 } },
                     { new: true }
                 );
-
-                // ✅ FIX: Invalidate stale auth cache
-                await AuthCacheRepository.invalidateUserCaches(userId);
 
                 LoggerUtil.info('User coverPhotoId cleared', {
                     userId,
@@ -538,6 +528,9 @@ class CoverPhotoService {
                 userId,
                 correlationId,
             });
+
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
 
             return {
                 coverId: cover.coverId,
@@ -594,6 +587,9 @@ class CoverPhotoService {
                 correlationId,
             });
 
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
+
             return {
                 coverId: cover.coverId,
                 isArchived: cover.isArchived,
@@ -648,6 +644,9 @@ class CoverPhotoService {
                 userId,
                 correlationId,
             });
+
+            // ✅ Invalidate profile cache so the new image URL is loaded next time
+            await CacheUtil.del(`user:profile:${userId}`);
 
             return {
                 coverId: cover.coverId,

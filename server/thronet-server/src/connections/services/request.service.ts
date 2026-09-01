@@ -1,4 +1,4 @@
-// src/connections/services/request.service.ts
+// src/services/requestService.ts
 
 import { Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -109,7 +109,6 @@ class connectionRequestService {
    * ✅ KAFKA: Publishes REQUEST_SENT event - FIXED
    */
   static async sendConnectionRequest(
-    
     fromUserId: string,
     toUserId: string,
     message?: string,
@@ -117,10 +116,6 @@ class connectionRequestService {
     templateId?: string,
     region: string = 'global'
   ): Promise<IConnectionRequest> {
-    console.log('🔥🔥🔥 SEND CONNECTION SERVICE REACHED 🔥🔥🔥', {
-  fromUserId,
-  toUserId,
-});
     if (!['low', 'medium', 'high'].includes(priority)) {
       throw new ErrorResponse('Invalid priority', 400);
     }
@@ -175,46 +170,17 @@ class connectionRequestService {
       });
     }
 
-    // ✅ Persist Notification document so Notifications page can fetch it
-    logger.info('🔴 BEFORE notifyConnectionRequest', {
-  category: LogCategory.CONNECTION,
-  data: {
-    fromUserId,
-    toUserId,
-    requestId: request.requestId,
-  },
-});
-
-try {
-  await NotificationService.notifyConnectionRequest(
-    fromUserId,
-    toUserId,
-    request.requestId
-  );
-
-  logger.info('🟢 AFTER notifyConnectionRequest SUCCESS', {
-    category: LogCategory.CONNECTION,
-    data: {
-      fromUserId,
-      toUserId,
-      requestId: request.requestId,
-    },
-  });
-} catch (err) {
-  logger.error('🔴 notifyConnectionRequest FAILED', {
-    category: LogCategory.CONNECTION,
-    data: {
-      error: err instanceof Error ? err.stack : String(err),
-      fromUserId,
-      toUserId,
-      requestId: request.requestId,
-    },
-  });
-}
-
     logger.info(`Connection request sent - RequestID: ${request.requestId}, From: ${fromUserId}, To: ${toUserId}, Region: ${region}, Priority: ${priority}`, {
       category: LogCategory.CONNECTION
     });
+
+    // Create Notification
+    NotificationService.createConnectionNotification(
+      toUserId,
+      fromUserId,
+      'connection_request',
+      request.requestId
+    ).catch(err => logger.error('Failed to create connection notification', { error: err }));
 
     // ✅ KAFKA: Publish REQUEST_SENT event - FIXED
     // try {
@@ -253,16 +219,6 @@ try {
         category: LogCategory.CONNECTION
       });
     });
-
-    // ✅ Invalidate feed cache for both users so home feed reflects pending status immediately
-    try {
-      await Promise.all([
-        redisService.deleteByPattern(`feed:v1:${fromUserId}:*`),
-        redisService.deleteByPattern(`feed:v1:${toUserId}:*`),
-      ]);
-    } catch (cacheErr) {
-      logger.warn('Failed to clear feed cache after connection request', cacheErr);
-    }
 
     return request;
   }
@@ -311,31 +267,32 @@ try {
       metadata: { createdFromRequest: requestId },
     });
 
-    // ✅ Algorithm: When User B accepts User A's request, User A follows User B
-    // (User A following count +1, User B follower count +1)
     try {
-      await Follow.findOneAndUpdate(
-        { followerId: request.fromUserId.toString(), followingId: request.toUserId.toString() },
+      const followOps = [
         {
-          $set: { status: 'active', isBlocked: false, updatedAt: new Date() },
-          $setOnInsert: {
-            followerId: request.fromUserId.toString(),
-            followingId: request.toUserId.toString(),
-            createdAt: new Date(),
-            notificationEnabled: true,
-          },
+          updateOne: {
+            filter: { followerId: request.fromUserId.toString(), followingId: request.toUserId.toString() },
+            update: { 
+              $set: { status: 'active', updatedAt: new Date() },
+              $setOnInsert: { createdAt: new Date(), notificationEnabled: true, isBlocked: false } 
+            },
+            upsert: true
+          }
         },
-        { upsert: true, new: true }
-      );
-    } catch (followError) {
-      logger.error('Failed to create follow relationship after connection accept (non-critical)', {
-        category: LogCategory.CONNECTION,
-        data: {
-          error: followError instanceof Error ? followError.message : 'Unknown error',
-          fromUserId: request.fromUserId,
-          toUserId: request.toUserId,
-        },
-      });
+        {
+          updateOne: {
+            filter: { followerId: request.toUserId.toString(), followingId: request.fromUserId.toString() },
+            update: { 
+              $set: { status: 'active', updatedAt: new Date() },
+              $setOnInsert: { createdAt: new Date(), notificationEnabled: true, isBlocked: false } 
+            },
+            upsert: true
+          }
+        }
+      ];
+      await Follow.bulkWrite(followOps, { ordered: false });
+    } catch (error) {
+      logger.warn(`Failed to create mutual follows - RequestID: ${requestId}`, { category: LogCategory.CONNECTION });
     }
 
     // ✅ EMIT SOCKET EVENT
@@ -366,17 +323,13 @@ try {
       });
     }
 
-    // ✅ Persist Notification document for the original request sender
-    NotificationService.notifyConnectionAccepted(
-      userId,                              // acceptedByUserId (User B)
-      request.fromUserId.toString(),       // originalSenderId (User A)
+    // Create Notification
+    NotificationService.createConnectionNotification(
+      request.fromUserId.toString(),
+      userId,
+      'connection_accepted',
       connection.connectionId
-    ).catch((err) => {
-      logger.warn('Failed to persist connection_accepted notification (non-critical)', {
-        category: LogCategory.CONNECTION,
-        data: { error: err instanceof Error ? err.message : 'Unknown' },
-      });
-    });
+    ).catch(err => logger.error('Failed to create connection accepted notification', { error: err }));
 
     // ✅ KAFKA: Publish REQUEST_ACCEPTED event - FIXED
     // try {
@@ -562,7 +515,7 @@ try {
           category: LogCategory.CONNECTION
         });
       }
-    } catch (error: any) {
+    } catch (error : any) {
       logger.warn(`Failed to get request from cache - RequestID: ${requestId}, Error: ${error instanceof Error ? error.message : 'Unknown error'}`, {
         category: LogCategory.CONNECTION
       });
@@ -816,30 +769,34 @@ try {
 
     await ConnectionRequest.bulkUpdateStatus(authorizedIds, 'accepted', userId);
 
-    // ✅ Directional follow for bulk accept: requester follows acceptor
     try {
-      await Promise.all(
-        authorizedRequests.map((request) =>
-          Follow.findOneAndUpdate(
-            { followerId: request.fromUserId.toString(), followingId: request.toUserId.toString() },
-            {
-              $set: { status: 'active', isBlocked: false, updatedAt: new Date() },
-              $setOnInsert: {
-                followerId: request.fromUserId.toString(),
-                followingId: request.toUserId.toString(),
-                createdAt: new Date(),
-                notificationEnabled: true,
-              },
+      const followOps = authorizedRequests.flatMap(request => [
+        {
+          updateOne: {
+            filter: { followerId: request.fromUserId.toString(), followingId: request.toUserId.toString() },
+            update: { 
+              $set: { status: 'active', updatedAt: new Date() },
+              $setOnInsert: { createdAt: new Date(), notificationEnabled: true, isBlocked: false } 
             },
-            { upsert: true, new: true }
-          )
-        )
-      );
-    } catch (followError) {
-      logger.error('Failed to create follow relationships after bulk accept (non-critical)', {
-        category: LogCategory.CONNECTION,
-        data: { error: followError instanceof Error ? followError.message : 'Unknown error' },
-      });
+            upsert: true
+          }
+        },
+        {
+          updateOne: {
+            filter: { followerId: request.toUserId.toString(), followingId: request.fromUserId.toString() },
+            update: { 
+              $set: { status: 'active', updatedAt: new Date() },
+              $setOnInsert: { createdAt: new Date(), notificationEnabled: true, isBlocked: false } 
+            },
+            upsert: true
+          }
+        }
+      ]);
+      if (followOps.length > 0) {
+        await Follow.bulkWrite(followOps, { ordered: false });
+      }
+    } catch (error) {
+      logger.warn(`Failed to create mutual follows in bulk accept - RequestCount: ${authorizedIds.length}`, { category: LogCategory.CONNECTION });
     }
 
     Promise.all([
@@ -855,6 +812,16 @@ try {
     logger.info(`Bulk connection requests accepted - RequestCount: ${authorizedIds.length}, AcceptedCount: ${connections.length}`, {
       category: LogCategory.CONNECTION
     });
+
+    // Create Notifications
+    Promise.all(connections.map((conn, idx) => 
+      NotificationService.createConnectionNotification(
+        authorizedRequests[idx].fromUserId.toString(),
+        userId,
+        'connection_accepted',
+        conn.connectionId
+      )
+    )).catch(err => logger.error('Failed to create bulk connection accepted notifications', { error: err }));
 
     return { connections: connections.map(c => c.toObject() as IConnection), acceptedCount: authorizedIds.length };
   }
@@ -953,7 +920,7 @@ try {
           });
           return JSON.parse(cachedStats);
         }
-      } catch (error: any) {
+      } catch (error : any) {
         logger.warn(`Failed to get stats from cache - UserID: ${userId}, Error: ${error instanceof Error ? error.message : 'Unknown error'}`, {
           category: LogCategory.CONNECTION
         });
@@ -1131,7 +1098,7 @@ try {
           category: LogCategory.CONNECTION
         });
       }
-    } catch (error: any) {
+    } catch (error : any) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.warn(`Cache operation failed - RequestID: ${requestId}, Action: ${action}, Error: ${errorMessage}`, {
         category: LogCategory.CONNECTION
@@ -1168,7 +1135,7 @@ try {
           category: LogCategory.CONNECTION
         });
       }
-    } catch (error: any) {
+    } catch (error : any) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.warn(`Connection cache operation failed - ConnectionID: ${connectionId}, Action: ${action}, Error: ${errorMessage}`, {
         category: LogCategory.CONNECTION
@@ -1369,7 +1336,7 @@ try {
         category: LogCategory.CONNECTION
       });
 
-    } catch (error: any) {
+    } catch (error : any) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       errors.push(`Batch processing failed: ${errorMessage}`);
       logger.error(`Batch processing error - ProcessingType: ${processingType}, Error: ${errorMessage}`, {

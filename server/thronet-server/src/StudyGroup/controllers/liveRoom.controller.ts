@@ -1,4 +1,3 @@
-console.log('🟢 STEP-2: liveRoom.controller.ts file STARTED loading');
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import { asyncHandler } from '@/shared/utils/helpers.util';
@@ -14,10 +13,10 @@ import {
   toggleScreenShareSchema,
   liveRoomQuerySchema,
   liveRoomIdSchema,
-} from '../validators/liveRoom.validator';
-import liveRoomRepository from '../repositories/liveRoom.repository';
-import { LoggerUtil } from '@/shared/logger.util';
-import { AuthRequest } from '@/shared/middlewares/auth.middleware';
+} from '../validators/liveRoom.validator.js';
+import liveRoomRepository from '../repositories/liveroom.repository.js';
+import { LoggerUtil } from '@/shared/logger.util.js';
+import { AuthRequest } from '@/shared/middlewares/auth.middleware.js';
 
 /**
  * @route   POST /api/v1/study-group/live-rooms

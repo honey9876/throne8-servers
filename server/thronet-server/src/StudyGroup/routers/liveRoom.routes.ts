@@ -4,9 +4,9 @@
  * ====================================
  * API routes for live room management
  */
-console.log('🟢 STEP-1: liveRoom.routes.ts file STARTED loading');
+
 import express from 'express';
-import liveRoomController  from '../controllers/liveRoom.controller';
+import {liveRoomController } from '../controllers';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 
 const router = express.Router();

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * conversation.model.ts
  * MongoDB schema for conversations (direct + group)
  * unreadCounts stored as Map<userId(UUID), count>
@@ -36,6 +36,7 @@ const ConversationSchema = new Schema<IConversation>(
             required: true,
             unique: true,
             default: uuidv4,
+            index: true,
             immutable: true,
         },
 
@@ -44,7 +45,7 @@ const ConversationSchema = new Schema<IConversation>(
             enum: Object.values(ConversationType),
             required: true,
             default: ConversationType.DIRECT,
-            // 
+            // index: true,
         },
 
         // Array of User.userId (UUID strings) — max 2 for direct, unlimited for group
@@ -55,7 +56,7 @@ const ConversationSchema = new Schema<IConversation>(
                 validator: (arr: string[]) => arr.length >= 2,
                 message: 'A conversation must have at least 2 members',
             },
-            // 
+            // index: true,
         },
 
         lastMessage: {
@@ -87,10 +88,15 @@ const ConversationSchema = new Schema<IConversation>(
             default: [],
         },
 
+        archivedBy: {
+            type: [String],   // UUIDs
+            default: [],
+        },
+
         isActive: {
             type: Boolean,
             default: true,
-            // 
+            // index: true,
         },
     },
     {

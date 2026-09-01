@@ -12,6 +12,7 @@
  */
 
 import mongoose from 'mongoose';
+import User from '@/auth/models/User.model';
 import {
   CreateGroupData,
   UpdateGroupData,
@@ -27,6 +28,7 @@ import groupRepository from '../repositories/group.repository';
 import groupMemberRepository from '../repositories/groupMember.repository';
 import { generateSecureId } from '@/shared/security';
 import { logger } from '@/shared/logger.util';
+import Ranking from '../models/Ranking.model';
 
 class GroupService {
 
@@ -286,9 +288,21 @@ class GroupService {
       if (!group) throw new NotFoundError(ERROR_MESSAGES.GROUP_NOT_FOUND);
 
       if (group.leaderId === userId) {
-        throw new BadRequestError(
-          'Group leader cannot leave. Please delete the group or transfer leadership first'
-        );
+        if (group.currentMemberCount <= 1) {
+          // If the leader is the only member, disband the group instead of failing
+          await groupRepository.softDeleteById(groupId, session);
+          await groupMemberRepository.updateMany(
+            { groupId },
+            { status: MemberStatus.INACTIVE },
+            session
+          );
+          await session.commitTransaction();
+          return;
+        } else {
+          throw new BadRequestError(
+            'Group leader cannot leave. Please delete the group or transfer leadership first'
+          );
+        }
       }
 
       const membership = await groupMemberRepository.findActiveOne(groupId, userId);
@@ -331,13 +345,34 @@ class GroupService {
 
     const members = await groupMemberRepository.findByGroupId(groupId);
 
-    return members.map((member) => ({
-      _id: member._id,
-      userId: member.userId,
-      role: member.role,
-      joinedAt: member.joinedAt,
-      lastActive: member.lastActive,
-    }));
+    const userIds = members.map((m) => m.userId);
+    const [users, rankings] = await Promise.all([
+      User.find({ userId: { $in: userIds } }).select('userId firstName lastName profilePhotoId username').lean(),
+      Ranking.find({ userId: { $in: userIds } }).lean()
+    ]);
+
+    return members.map((member) => {
+      const user = users.find((u) => u.userId === member.userId);
+      const ranking = rankings.find((r) => r.userId === member.userId);
+      const name = user ? `${user.firstName} ${user.lastName || ''}`.trim() : 'Unknown User';
+      const avatar = user?.profilePhotoId || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png';
+      
+      return {
+        _id: member._id,
+        userId: member.userId,
+        role: member.role,
+        joinedAt: member.joinedAt,
+        lastActive: member.lastActive,
+        name,
+        avatar,
+        // Real stats fetched from Ranking model
+        studyTime: ranking?.totalStudyHours ? parseFloat(ranking.totalStudyHours.toFixed(1)) : 0,
+        attendance: ranking?.attendancePercentage || 0,
+        streak: ranking?.currentStreak || 0,
+        rank: ranking?.globalRank || 0,
+        violations: member.warningCount || 0,
+      };
+    });
   };
 
   /**
@@ -372,7 +407,12 @@ class GroupService {
     let memberGroupIds = new Set<string>();
     if (userId) {
       const userMemberships = await groupMemberRepository.findByUserId(userId);
-      memberGroupIds = new Set(userMemberships.map((m: any) => m.groupId));
+      // findByUserId may populate groupId as full object — extract the string groupId
+      memberGroupIds = new Set(userMemberships.map((m: any) => {
+        const gid = m.groupId;
+        if (typeof gid === 'string') return gid;
+        return gid?.groupId || String(gid);
+      }));
     }
 
     const scored = groups
@@ -403,7 +443,12 @@ class GroupService {
       GroupService.formatGroupResponseSync(g, userId, memberGroupIds)
     );
 
+    // OLD: logger.info(`Top ranked groups formatted: ${result.length}`);
+    // NEW: added diagnostic logging to debug fallback ID issue
     logger.info(`Top ranked groups formatted: ${result.length}`);
+    if (result.length > 0) {
+      logger.info(`Sample top-ranked group — id: ${(result[0] as any).id}, groupId: ${result[0].groupId}, _id: ${result[0]._id}`);
+    }
     return result;
   };
 
@@ -457,7 +502,12 @@ class GroupService {
     let memberGroupIds = new Set<string>();
     if (userId) {
       const userMemberships = await groupMemberRepository.findByUserId(userId);
-      memberGroupIds = new Set(userMemberships.map((m: any) => m.groupId));
+      // findByUserId may populate groupId as full object — extract the string groupId
+      memberGroupIds = new Set(userMemberships.map((m: any) => {
+        const gid = m.groupId;
+        if (typeof gid === 'string') return gid;
+        return gid?.groupId || String(gid);
+      }));
     }
 
     return groups.map((group) =>
@@ -476,6 +526,9 @@ class GroupService {
   ): GroupResponse => {
     return {
       _id: group._id?.toString() ?? '',
+      // OLD: (no id field — toJSON transform sets id=groupId but buildGroupResponse is a plain object, so toJSON never runs)
+      // NEW: explicitly set id = groupId so frontend can find the group ID
+      id: group.groupId,
       groupId: group.groupId,
       title: group.title,
       description: group.description,
@@ -485,7 +538,7 @@ class GroupService {
       coverImage: group.coverImage,
       capacity: group.capacity,
       currentMemberCount: group.currentMemberCount,
-      leaderId: group.leaderId,
+      leaderId: group.leader? `${group.leader.firstName} ${group.leader.lastName}`.trim() : group.leaderID,
       goalHours: group.goalHours,
       tags: group.tags,
       joinCode: isMember || group.leaderId === userId ? group.joinCode : undefined,
@@ -497,6 +550,7 @@ class GroupService {
       updatedAt: group.updatedAt,
       memberRole,
       isMember,
+      isCreator: userId ? group.leaderId === userId : false,
     };
   };
 }

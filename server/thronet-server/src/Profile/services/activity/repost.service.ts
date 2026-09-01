@@ -1,13 +1,10 @@
 // src/Profile/services/repost.service.ts
 
 import { v4 as uuidv4 } from 'uuid';
-import { Post, User } from '@/shared/models/index.models';
+import { Post, User, ProfilePhoto, Headline } from '@/shared/models/index.models';
 import Repost from '@/Profile/models/Repost.model';
 import { IPostEntry } from '@/Profile/models/Post.model';
 import { LoggerUtil } from '@/shared/logger.util';
-import AnalyticsService from '../analytics.service';
-import redisService from '@/services/redis.service';
-import { emitToUser } from '@/socket/index';
 
 class RepostService {
 
@@ -29,10 +26,12 @@ class RepostService {
                 repostedBy, originalPostEntryId, repostType, correlationId
             });
 
+            // Step 1: Validate user
             const user = await User.findOne({ userId: repostedBy });
             if (!user) throw new Error('User not found');
             if (user.status !== 'active') throw new Error('User account is not active');
 
+            // Step 2: Find original post
             const originalDoc = await Post.findOne({ 'posts.entryId': originalPostEntryId });
             if (!originalDoc) throw new Error('Original post not found');
 
@@ -41,13 +40,16 @@ class RepostService {
             );
             if (!originalEntry) throw new Error('Original post not found or deleted');
 
+            // Step 3: Quote repost ke liye thoughtText required
             if (repostType === 'quote' && (!thoughtText || !thoughtText.trim())) {
                 throw new Error('Thought text is required for quote repost');
             }
 
+            // Step 4: Check duplicate repost
             const alreadyReposted = await Repost.hasUserReposted(originalPostEntryId, repostedBy);
             if (alreadyReposted) throw new Error('You have already reposted this post');
 
+            // Step 5: Create repost record
             const repost = new Repost({
                 repostId: uuidv4(),
                 originalPostEntryId,
@@ -61,79 +63,13 @@ class RepostService {
 
             await repost.save();
 
+            // Step 6: Update original post analytics (reposts count)
+            // Post model me reposts field nahi hai directly,
+            // isliye User stats update karo
             await User.findOneAndUpdate(
                 { userId: originalDoc.userId },
                 { $inc: { 'activityStats.totalReposts': 1 } }
             );
-
-            // ✅ FIX: yeh missing tha — originalEntry.repostsCount kabhi
-            // increment hi nahi ho raha tha, isliye feed pe repost count
-            // kabhi dikhta hi nahi tha. Same document (originalDoc) pe
-            // mutate + save karo taaki subdocument change persist ho.
-            originalEntry.repostsCount = (originalEntry.repostsCount || 0) + 1;
-            await originalDoc.save();
-
-            try {
-                await AnalyticsService.recordShare(originalDoc.userId, {
-                    postId: originalPostEntryId,
-                    shareType: 'direct',
-                    sharerId: repostedBy,
-                });
-            } catch (analyticsError: any) {
-                LoggerUtil.error('Failed to record share analytics', {
-                    error: analyticsError.message,
-                    repostId: repost.repostId,
-                });
-            }
-
-            try {
-                await redisService.deleteByPattern(`feed:v1:${repostedBy}:page:*`);
-                // ✅ FIX: original post owner ka feed cache bhi invalidate
-                // karo — unki feed pe bhi naya repostsCount turant dikhna
-                // chahiye, na ki 3-min TTL expire hone ka wait
-                if (originalDoc.userId !== repostedBy) {
-                    await redisService.deleteByPattern(`feed:v1:${originalDoc.userId}:page:*`);
-                }
-            } catch (cacheError: any) {
-                LoggerUtil.warn('Feed cache invalidation failed after repost (non-critical)', {
-                    error: cacheError.message,
-                    repostedBy,
-                });
-            }
-
-            try {
-                emitToUser(repostedBy, 'feed:new-post', {
-                    feedItemType: 'repost',
-                    repostId: repost.repostId,
-                    repostType: repost.repostType,
-                    thoughtText: repost.thoughtText,
-                    userId: repostedBy,
-                    likesCount: 0,
-                    isLikedByCurrentUser: false,
-                    createdAt: repost.createdAt,
-                    originalPost: {
-                        entryId: originalEntry.entryId,
-                        title: originalEntry.title,
-                        content: originalEntry.content,
-                        userId: originalDoc.userId,
-                        images: originalEntry.images || [],
-                        videos: originalEntry.videos || [],
-                        documents: originalEntry.documents || [],
-                        likesCount: originalEntry.likesCount,
-                        commentsCount: originalEntry.commentsCount,
-                        // ✅ NEW
-                        repostsCount: originalEntry.repostsCount || 0,
-                        sendsCount: originalEntry.sendsCount || 0,
-                        isLikedByCurrentUser: originalEntry.likedBy?.includes(repostedBy) || false,
-                        createdAt: originalEntry.createdAt,
-                    },
-                });
-            } catch (emitError: any) {
-                LoggerUtil.warn('Socket emit failed after repost (non-critical)', {
-                    error: emitError.message,
-                    repostedBy,
-                });
-            }
 
             LoggerUtil.info('Repost created successfully', {
                 repostId: repost.repostId,
@@ -150,7 +86,6 @@ class RepostService {
                 thoughtText: repost.thoughtText,
                 visibility: repost.visibility,
                 createdAt: repost.createdAt,
-                repostsCount: originalEntry.repostsCount,
                 message: repostType === 'quote'
                     ? 'Quote repost created successfully'
                     : 'Repost created successfully',
@@ -179,39 +114,11 @@ class RepostService {
             repost.deletedAt = new Date();
             await repost.save();
 
+            // Revert analytics
             await User.findOneAndUpdate(
                 { userId: repost.originalPostOwnerId },
                 { $inc: { 'activityStats.totalReposts': -1 } }
             );
-
-            // ✅ FIX: matching decrement — repostsCount originally increment
-            // hota hi nahi tha, ab delete pe symmetric decrement bhi hai
-            try {
-                const originalDoc = await Post.findOne({ 'posts.entryId': repost.originalPostEntryId });
-                if (originalDoc) {
-                    const originalEntry = originalDoc.posts.find(
-                        (p: IPostEntry) => p.entryId === repost.originalPostEntryId
-                    );
-                    if (originalEntry) {
-                        originalEntry.repostsCount = Math.max(0, (originalEntry.repostsCount || 0) - 1);
-                        await originalDoc.save();
-                    }
-                }
-            } catch (decErr: any) {
-                LoggerUtil.warn('repostsCount decrement failed (non-critical)', { error: decErr.message, repostId });
-            }
-
-            try {
-                await redisService.deleteByPattern(`feed:v1:${userId}:page:*`);
-                if (repost.originalPostOwnerId !== userId) {
-                    await redisService.deleteByPattern(`feed:v1:${repost.originalPostOwnerId}:page:*`);
-                }
-            } catch (cacheError: any) {
-                LoggerUtil.warn('Feed cache invalidation failed after repost delete (non-critical)', {
-                    error: cacheError.message,
-                    userId,
-                });
-            }
 
             LoggerUtil.info('Repost deleted', { repostId, userId, correlationId });
 
@@ -246,15 +153,14 @@ class RepostService {
     /**
      * ✅ Get user's reposts (for profile page)
      */
-    static async getUserReposts(profileUserId: string, viewerId?: string): Promise<any> {
+    static async getUserReposts(userId: string): Promise<any> {
         try {
             const reposts = await Repost.find({
-                repostedBy: profileUserId,
+                repostedBy: userId,
                 isDeleted: false,
             }).sort({ createdAt: -1 });
 
-            const effectiveViewerId = viewerId || profileUserId;
-
+            // Enrich with original post data
             const enriched = await Promise.all(
                 reposts.map(async (repost) => {
                     const originalDoc = await Post.findOne({
@@ -264,16 +170,40 @@ class RepostService {
                         (p: IPostEntry) => p.entryId === repost.originalPostEntryId
                     );
 
+                    const authorUser = await User.findOne({ userId: originalDoc?.userId })
+                        .select('userId username firstName lastName profilePhotoId headlineId')
+                        .lean();
+                    let authorName = 'Throne8 User';
+                    let authorAvatar = '';
+                    let authorHeadline = '';
+
+                    if (authorUser) {
+                        authorName = authorUser.firstName
+                            ? `${authorUser.firstName} ${authorUser.lastName || ''}`.trim()
+                            : (authorUser.username || 'Throne8 User');
+                        
+                        const photo = await ProfilePhoto.findOne({ userId: authorUser.userId, isActive: true }).lean();
+                        if (photo) {
+                            authorAvatar = photo.cloudinarySecureUrl;
+                        }
+
+                        if (authorUser.headlineId) {
+                            const headline = await Headline.findOne({
+                                headlineId: authorUser.headlineId,
+                                'flags.isDeleted': false,
+                            }).lean();
+                            if (headline) {
+                                authorHeadline = headline.title || headline.message || headline.headline || '';
+                            }
+                        }
+                    }
+
                     return {
                         repostId: repost.repostId,
                         repostType: repost.repostType,
                         thoughtText: repost.thoughtText,
                         repostedBy: repost.repostedBy,
                         createdAt: repost.createdAt,
-                        likesCount: repost.repostType === 'quote' ? repost.likesCount : 0,
-                        isLikedByCurrentUser: repost.repostType === 'quote'
-                            ? repost.likedBy.includes(effectiveViewerId)
-                            : false,
                         originalPost: originalEntry
                             ? {
                                 entryId: originalEntry.entryId,
@@ -285,11 +215,10 @@ class RepostService {
                                 documents: originalEntry.documents,
                                 likesCount: originalEntry.likesCount,
                                 commentsCount: originalEntry.commentsCount,
-                                // ✅ NEW
-                                repostsCount: originalEntry.repostsCount || 0,
-                                sendsCount: originalEntry.sendsCount || 0,
                                 createdAt: originalEntry.createdAt,
-                                isLikedByCurrentUser: originalEntry.likedBy?.includes(effectiveViewerId) || false,
+                                authorName,
+                                authorAvatar,
+                                authorHeadline,
                             }
                             : null,
                     };
@@ -326,6 +255,7 @@ class RepostService {
 
     /**
      * ✅ Get Feed Reposts (home feed ke liye)
+     * Posts + Reposts combine karke sort karta hai
      */
     static async getFeedReposts(
         currentUserId: string,
@@ -349,17 +279,45 @@ class RepostService {
 
                     if (!originalEntry) return null;
 
+                    const reposterUser = await User.findOne({ userId: repost.repostedBy }).lean();
+                    const reposterName = reposterUser ? (reposterUser.firstName ? `${reposterUser.firstName} ${reposterUser.lastName || ''}`.trim() : reposterUser.username) : repost.repostedBy;
+
+                    const authorUser = await User.findOne({ userId: originalDoc?.userId })
+                        .select('userId username firstName lastName profilePhotoId headlineId')
+                        .lean();
+                    let authorName = 'Throne8 User';
+                    let authorAvatar = '';
+                    let authorHeadline = '';
+
+                    if (authorUser) {
+                        authorName = authorUser.firstName
+                            ? `${authorUser.firstName} ${authorUser.lastName || ''}`.trim()
+                            : (authorUser.username || 'Throne8 User');
+                        
+                        const photo = await ProfilePhoto.findOne({ userId: authorUser.userId, isActive: true }).lean();
+                        if (photo) {
+                            authorAvatar = photo.cloudinarySecureUrl;
+                        }
+
+                        if (authorUser.headlineId) {
+                            const headline = await Headline.findOne({
+                                headlineId: authorUser.headlineId,
+                                'flags.isDeleted': false,
+                            }).lean();
+                            if (headline) {
+                                authorHeadline = headline.title || headline.message || headline.headline || '';
+                            }
+                        }
+                    }
+
                     return {
                         feedItemType: 'repost',
                         repostId: repost.repostId,
                         repostType: repost.repostType,
                         thoughtText: repost.thoughtText || null,
                         repostedBy: repost.repostedBy,
+                        repostedByName: reposterName,
                         createdAt: repost.createdAt,
-                        likesCount: repost.repostType === 'quote' ? repost.likesCount : 0,
-                        isLikedByCurrentUser: repost.repostType === 'quote'
-                            ? repost.likedBy.includes(currentUserId)
-                            : false,
                         originalPost: {
                             entryId: originalEntry.entryId,
                             title: originalEntry.title,
@@ -370,11 +328,11 @@ class RepostService {
                             documents: originalEntry.documents || [],
                             likesCount: originalEntry.likesCount,
                             commentsCount: originalEntry.commentsCount,
-                            // ✅ NEW
-                            repostsCount: originalEntry.repostsCount || 0,
-                            sendsCount: originalEntry.sendsCount || 0,
-                            isLikedByCurrentUser: originalEntry.likedBy?.includes(currentUserId) || false,
+                            isLikedByCurrentUser: originalEntry.likedBy?.includes(currentUserId),
                             createdAt: originalEntry.createdAt,
+                            authorName,
+                            authorAvatar,
+                            authorHeadline,
                         },
                     };
                 })
@@ -389,48 +347,6 @@ class RepostService {
             LoggerUtil.error('Get feed reposts failed', { error: error.message });
             throw error;
         }
-    }
-
-    /**
-     * ✅ Like a quote-repost (independent like system, sirf quote type ke liye)
-     */
-    static async likeRepost(repostId: string, userId: string): Promise<any> {
-        const repost = await Repost.findOne({ repostId, isDeleted: false });
-        if (!repost) throw new Error('Repost not found');
-        if (repost.repostType !== 'quote') {
-            throw new Error('Only quote reposts can be liked independently');
-        }
-        if (repost.likedBy.includes(userId)) {
-            throw new Error('Already liked');
-        }
-
-        repost.likedBy.push(userId);
-        repost.likesCount = repost.likedBy.length;
-        await repost.save();
-
-        return {
-            repostId: repost.repostId,
-            likesCount: repost.likesCount,
-            isLikedByCurrentUser: true,
-        };
-    }
-
-    /**
-     * ✅ Unlike a quote-repost
-     */
-    static async unlikeRepost(repostId: string, userId: string): Promise<any> {
-        const repost = await Repost.findOne({ repostId, isDeleted: false });
-        if (!repost) throw new Error('Repost not found');
-
-        repost.likedBy = repost.likedBy.filter((id) => id !== userId);
-        repost.likesCount = repost.likedBy.length;
-        await repost.save();
-
-        return {
-            repostId: repost.repostId,
-            likesCount: repost.likesCount,
-            isLikedByCurrentUser: false,
-        };
     }
 }
 

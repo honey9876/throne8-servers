@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4, validate as uuidValidate } from 'uuid';
 import logger from '@/shared/logger.util';
 import { cacheHits } from '@/shared/metrics';
@@ -431,6 +431,7 @@ const professionalDevSchema = new Schema<IProfessionalDev>(
       type: String,
       required: true,
       unique: true,
+      // index: true,
       validate: {
         validator: (v: string) => validUUIDRegex.test(v),
         message: 'Invalid userId UUID',

@@ -242,7 +242,7 @@ const ResumeSchema = new Schema<ResumeDocument>(
 
 // Indexes
 ResumeSchema.index({ userId: 1, isLatest: 1, isDeleted: 1 });
-ResumeSchema.index({ sessionId: 1 });
+// Removed duplicate index: ResumeSchema.index({ sessionId: 1 });
 ResumeSchema.index({ 'analysis.atsScore': 1 });
 
 // Virtuals

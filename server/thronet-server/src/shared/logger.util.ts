@@ -25,11 +25,14 @@ import nodemailer from 'nodemailer';
 import winston, { Logger as WinstonLogger, transport, format as WinstonFormat } from 'winston';
 import WinstonCloudWatch from 'winston-cloudwatch';
 import DailyRotateFile from 'winston-daily-rotate-file';
-import { join } from 'path';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import * as os from 'os';
 
-// __dirname is natively available in CommonJS
+// Get current directory for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ==================== CONFIGURATION ====================
 
@@ -112,7 +115,7 @@ if (!existsSync(logsDir)) {
 const loggerConfig: LoggerConfig = {
     logFilePath: join(logsDir, 'combined.log'),
     errorFilePath: join(logsDir, 'error.log'),
-    enableRotation: process.env['LOG_ENABLE_ROTATION'] !== 'false',
+    enableRotation: process.env['LOG_ENABLE_ROTATION'] === 'true' || true,
     cloudWatch: {
         groupName: process.env['CLOUDWATCH_GROUP_NAME'] || 'auth-service',
         streamName: process.env['CLOUDWATCH_STREAM_NAME'] || `auth-service-${process.env['NODE_ENV'] || 'development'}`,
@@ -432,33 +435,13 @@ const customFormat = WinstonFormat.combine(
     })
 );
 
-// const consoleFormat = WinstonFormat.combine(
-//     WinstonFormat.colorize(),
-//     WinstonFormat.timestamp({ format: 'HH:mm:ss' }),
-//     WinstonFormat.printf(({ timestamp, level, message, correlationId, duration }) => {
-//         let msg = `[${timestamp}] ${level}: ${message}`;
-//         if (correlationId) msg += ` [CID: ${correlationId}]`;
-//         if (duration !== undefined) msg += ` (${duration}ms)`;
-//         return msg;
-//     })
-// );
-
 const consoleFormat = WinstonFormat.combine(
     WinstonFormat.colorize(),
     WinstonFormat.timestamp({ format: 'HH:mm:ss' }),
-    WinstonFormat.printf(({ timestamp, level, message, correlationId, duration, ...rest }) => {
+    WinstonFormat.printf(({ timestamp, level, message, correlationId, duration }) => {
         let msg = `[${timestamp}] ${level}: ${message}`;
         if (correlationId) msg += ` [CID: ${correlationId}]`;
         if (duration !== undefined) msg += ` (${duration}ms)`;
-
-
-        // ✅ Print actual error details that were previously hidden
-        
-        const { service, timestamp: _t, hostname, pid, workerId, env, version, ...usefulRest } = rest as any;
-        if (Object.keys(usefulRest).length > 0) {
-            msg += `\n   → ${JSON.stringify(usefulRest)}`;
-        }
-        return msg;
         return msg;
     })
 );

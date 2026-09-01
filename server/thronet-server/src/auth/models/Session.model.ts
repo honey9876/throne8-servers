@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import crypto from 'crypto';
 import { LoggerUtil } from '@/shared/logger.util';
 import UserEmitter from '@/shared/events/emitters/user.emitter';
@@ -22,7 +22,7 @@ export interface IMetadata {
         longitude?: number;
     };
     device?: {
-        deviceType?: string;
+        type?: string;
         os?: string;
         browser?: string;
     };
@@ -51,6 +51,7 @@ export interface ISession extends Document<string> {
     isVerified: boolean;
     createdAt: Date;
     updatedAt: Date;
+
     extend(additionalTime?: number): Promise<ISession>;
     refreshTokens(): Promise<{ accessToken: string; refreshToken: string }>;
 }
@@ -72,8 +73,16 @@ const sessionSchema = new Schema<ISession, ISessionModel>(
             type: String,
             default: () => crypto.randomBytes(32).toString('hex'),
         },
-        userId: { type: String, required: true },
-        deviceId: { type: String, required: true },
+        userId: {
+            type: String,
+            required: true,
+            index: true,
+        },
+        deviceId: {
+            type: String,
+            required: true,
+            index: true,
+        },
         deviceInfo: {
             userAgent: String,
             platform: String,
@@ -85,11 +94,30 @@ const sessionSchema = new Schema<ISession, ISessionModel>(
                 default: 'other',
             },
         },
-        ipAddress: { type: String, required: true },
-        refreshToken: { type: String, required: true, unique: true },
-        accessToken: { type: String, sparse: true },
-        isActive: { type: Boolean, default: true },
-        lastActivity: { type: Date, default: Date.now },
+        ipAddress: {
+            type: String,
+            required: true,
+        },
+        refreshToken: {
+            type: String,
+            required: true,
+            unique: true,
+        },
+        accessToken: {
+            type: String,
+            sparse: true,
+            index: true,
+        },
+        isActive: {
+            type: Boolean,
+            default: true,
+            index: true,
+        },
+        lastActivity: {
+            type: Date,
+            default: Date.now,
+            index: true,
+        },
         expiresAt: {
             type: Date,
             required: true,
@@ -109,7 +137,7 @@ const sessionSchema = new Schema<ISession, ISessionModel>(
                 longitude: Number,
             },
             device: {
-                deviceType: String,
+                type: String,
                 os: String,
                 browser: String,
             },
@@ -123,9 +151,18 @@ const sessionSchema = new Schema<ISession, ISessionModel>(
             mfaVerified: { type: Boolean, default: false },
             riskScore: { type: Number, min: 0, max: 100, default: 0 },
         },
-        isUnusualActivity: { type: Boolean, default: false },
-        isSuspiciousLocation: { type: Boolean, default: false },
-        isVerified: { type: Boolean, default: false },
+        isUnusualActivity: {
+            type: Boolean,
+            default: false,
+        },
+        isSuspiciousLocation: {
+            type: Boolean,
+            default: false,
+        },
+        isVerified: {
+            type: Boolean,
+            default: false,
+        },
     },
     {
         timestamps: true,
@@ -133,16 +170,14 @@ const sessionSchema = new Schema<ISession, ISessionModel>(
     }
 );
 
-// ==================== INDEXES ====================
-// ✅ Sirf compound indexes yahan - single field indexes upar defined hain
 sessionSchema.index({ userId: 1, isActive: 1, lastActivity: -1 });
 sessionSchema.index({ deviceId: 1, userId: 1 });
-// ✅ FIX: sessionSchema.index({ expiresAt: 1 }) NAHI hai yahan
-// expiresAt ka TTL index field definition mein index:{ expireAfterSeconds: 0 } se handle ho raha hai
 
 sessionSchema.statics.createSession = async function (data: Partial<ISession>): Promise<ISession> {
     try {
-        const ttl = data.sessionType === 'mobile' ? 90 * 24 * 3600 : 30 * 24 * 3600;
+        const ttl = data.sessionType === 'mobile'
+            ? 90 * 24 * 3600   // 90 days mobile
+            : 30 * 24 * 3600;  // 30 days web (persistent)
         const expiresAt = new Date(Date.now() + ttl * 1000);
 
         const session = new this({
@@ -170,10 +205,7 @@ sessionSchema.statics.createSession = async function (data: Partial<ISession>): 
 };
 
 sessionSchema.statics.revokeAllUserSessions = async function (userId: string, reason: string): Promise<any> {
-    return this.updateMany(
-        { userId, isActive: true },
-        { $set: { isActive: false, revokedAt: new Date(), revokedReason: reason } }
-    );
+    return this.updateMany({ userId, isActive: true }, { isActive: false, revokedAt: new Date(), revokedReason: reason });
 };
 
 sessionSchema.statics.findUserSessions = async function (
@@ -203,6 +235,7 @@ sessionSchema.statics.validateSession = async function (
             await this.invalidateSession(sessionId);
             return { valid: false, reason: 'Session expired' };
         }
+
         await this.updateActivity(sessionId);
         return { valid: true, session };
     } catch (error: any) {
@@ -219,9 +252,15 @@ sessionSchema.statics.invalidateSession = async function (sessionId: string): Pr
     try {
         const session = await this.findById(sessionId);
         if (!session) return;
+
         session.isActive = false;
         await session.save();
-        UserEmitter.emit('session:invalidated', { sessionId, userId: session.userId, timestamp: new Date() });
+
+        UserEmitter.emit('session:invalidated', {
+            sessionId,
+            userId: session.userId,
+            timestamp: new Date(),
+        });
     } catch (error: any) {
         logger.error('Session invalidation failed', { error: (error as Error).message });
         throw error;
@@ -232,11 +271,13 @@ sessionSchema.statics.invalidateUserSessions = async function (userId: string): 
     try {
         const sessions = await this.find({ userId, isActive: true });
         await this.updateMany({ userId, isActive: true }, { $set: { isActive: false } });
+
         UserEmitter.emit('user:all_sessions_invalidated', {
             userId,
             sessionCount: sessions.length,
             timestamp: new Date(),
         });
+
         return { invalidatedCount: sessions.length };
     } catch (error: any) {
         logger.error('User sessions invalidation failed', { error: (error as Error).message });
@@ -262,7 +303,11 @@ sessionSchema.statics.detectAnomalies = async function (userId: string): Promise
         }
 
         if (anomalies.length) {
-            UserEmitter.emit('session:anomaly', { userId, anomalies, timestamp: new Date() });
+            UserEmitter.emit('session:anomaly', {
+                userId,
+                anomalies,
+                timestamp: new Date(),
+            });
         }
 
         return anomalies;
@@ -282,16 +327,20 @@ sessionSchema.methods.refreshTokens = async function (): Promise<{ accessToken: 
     this.accessToken = crypto.randomBytes(48).toString('hex');
     this.refreshToken = crypto.randomBytes(64).toString('hex');
     await this.save();
+
     UserEmitter.emit('session:tokens_refreshed', {
         sessionId: this._id,
         userId: this.userId,
         timestamp: new Date(),
     });
+
     return { accessToken: this.accessToken!, refreshToken: this.refreshToken };
 };
 
 sessionSchema.pre('save', function (next) {
-    if (this.expiresAt && new Date(this.expiresAt) < new Date()) this.isActive = false;
+    if (this.expiresAt && new Date(this.expiresAt) < new Date()) {
+        this.isActive = false;
+    }
     next();
 });
 

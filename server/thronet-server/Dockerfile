@@ -71,67 +71,88 @@
 
 
 
-# ============================================================
-# Dockerfile — thronet-server (PRODUCTION)
-# Place this at: server/thronet-server/Dockerfile.production
-# ============================================================
 
-# ── Stage 1: Builder ────────────────────────────────────────
-FROM node:22-slim AS builder
+
+
+
+
+
+
+
+
+# Dockerfile.auth
+# Builder stage - Install dependencies
+FROM node:18-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ git \
+    python3 \
+    make \
+    g++ \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 1. Dependencies first (layer cache)
+# Copy package files first
 COPY package*.json ./
-COPY tsconfig.json ./
 
+# Copy tsconfig if exists
+COPY tsconfig.json* ./
+
+# Install ALL dependencies (production + dev for TypeScript runtime)
 RUN npm install --ignore-scripts --no-audit --no-fund && \
     npm cache clean --force
 
-# 2. Source code AFTER install
+# 🔥 IMPORTANT: Copy source code AFTER npm install
 COPY src ./src
-# ✅ FIX: server.ts bhi copy karo (pehle miss tha)
 COPY server.ts ./
 
-# ── Stage 2: Production Runtime ─────────────────────────────
-FROM node:22-slim
+# Production stage
+FROM node:18-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    dumb-init curl ca-certificates wget \
+    dumb-init \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -r nodejs --gid=1001 \
     && useradd -r -g nodejs --uid=1001 nodejs
 
 WORKDIR /app
 
+# Set Node environment
 ENV NODE_ENV=production
-ENV NODE_OPTIONS="--max-old-space-size=2048"
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 
-# Copy from builder
+# Copy package files
 COPY --from=builder --chown=nodejs:nodejs /app/package*.json ./
-COPY --from=builder --chown=nodejs:nodejs /app/tsconfig.json ./
+
+# Copy tsconfig
+COPY --from=builder --chown=nodejs:nodejs /app/tsconfig.json* ./
+
+# Copy ALL node_modules (including ts-node, typescript for runtime)
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
+
+# Copy TypeScript source code
 COPY --from=builder --chown=nodejs:nodejs /app/src ./src
-# ✅ FIX: server.ts production image mein bhi chahiye
 COPY --from=builder --chown=nodejs:nodejs /app/server.ts ./
 
-# Runtime directories
-RUN mkdir -p logs temp uploads && \
-    chown -R nodejs:nodejs logs temp uploads
+# Create necessary directories
+RUN mkdir -p logs temp uploads certs && \
+    chown -R nodejs:nodejs logs temp uploads certs
 
+# Switch to non-root user
 USER nodejs
 
-# ✅ FIX: Correct port (app 4000 pe chalta hai, 3000 nahi)
-EXPOSE 4000
+# Expose ports
+EXPOSE 4000 9100
 
-# ✅ FIX: Health check sahi port pe
-HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:4000/api/v1/health || exit 1
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-4000}/api/health || exit 1
 
+# Entry point
 ENTRYPOINT ["dumb-init", "--"]
-# ✅ No command: override — ye directly chalega, nodemon nahi
-CMD ["npx", "tsx", "server.ts"]
+
+# Run TypeScript directly with ts-node (production-safe)
+CMD ["node", "--import", "tsx/esm", "server.ts"]

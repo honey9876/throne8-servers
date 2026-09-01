@@ -1,31 +1,10 @@
 import mentorService from './mentor.service';
 import { SESSION_DURATIONS, SessionType } from '@/shared/constants/sessionTypes';
-import { PaymentMethod, PaymentStatus, ISessionMentor } from '@/Mentorship/interface/session.types';
-import { Types } from 'mongoose';
+import { PaymentMethod, PaymentStatus } from '@/Mentorship/interface/session.types';
 import { Availability, Mentor, SessionMentor } from '../models';
 import { logger } from '@/shared/logger.util';
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/shared/errors/app.error';
-import { TrustScoreEvents } from '../events/trustScore.events';
-/**
- * ============================================================
- * TEMP FIX SUMMARY
- * ------------------------------------------------------------
- * Purpose:
- * Minimal compatibility fixes for the mentorship booking flow.
- *
- * Changes:
- * - Fixed booking lifecycle compatibility.
- * - Fixed mentee session retrieval using bookings[].
- * - Preserved existing API contracts.
- * - No database/schema changes.
- *
- * Notes:
- * These are temporary compatibility fixes only.
- * A future architecture refactor should separate reusable
- * service templates from actual booked session instances.
- * ============================================================
- */
-import { User } from '@/shared/models/index.models';
+import { User, ProfilePhoto } from '@/shared/models/index.models';
 import { BookingStatus } from '@/shared/constants/bookingStatus';
 import sessionRepository from '../repositories/session.repository';
 import mentorRepository from '../repositories/mentor.repository';
@@ -57,28 +36,6 @@ interface SessionFilters {
 }
 
 class MentorshipSessionService {
-  private async uploadImageToCloudinary(buffer: Buffer, sessionId: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        {
-          folder: 'session-thumbnails',
-          public_id: `session_${sessionId}_${Date.now()}`,
-          resource_type: 'image',
-          transformation: [
-            { width: 1200, height: 1200, crop: 'limit' },
-            { quality: 'auto:good' },
-          ],
-          overwrite: true,
-        },
-        (error: any, result: any) => {
-          if (error) return reject(error);
-          resolve(result.secure_url);
-        }
-      );
-      uploadStream.end(buffer);
-    });
-  }
-
   /**
    * Create a new session
    */
@@ -93,12 +50,12 @@ class MentorshipSessionService {
       if (!user) throw new NotFoundError('MENTEE_NOT_FOUND');
 
       const duration = SESSION_DURATIONS[input.sessionType];
-      const isFree   = input.paymentMethod === PaymentMethod.FREE;
+      const isFree = input.paymentMethod === PaymentMethod.FREE;
 
-      const basePrice   = isFree ? 0 : input.pricing.basePrice;
+      const basePrice = isFree ? 0 : input.pricing.basePrice;
       const platformFee = isFree ? 0 : input.pricing.platformFee;
       const totalAmount = isFree ? 0 : input.pricing.totalAmount;
-      const currency    = input.pricing?.currency || 'INR';
+      const currency = input.pricing?.currency || 'INR';
 
       if (!isFree) {
         const priceKey = this.mapSessionTypeToPrice(input.sessionType);
@@ -138,15 +95,16 @@ class MentorshipSessionService {
   /**
    * Create a mentor-side session template (mentor posts an open slot)
    */
-  async createMentorSession(mentorUserId: string, input: any, file?: any): Promise<any> {
+  async createMentorSession(mentorUserId: string, input: any): Promise<any> {
     try {
       logger.info(`Creating mentor session template by: ${mentorUserId}`);
 
       const mentor = await Mentor.findOne({ userId: mentorUserId, isDeleted: false });
       if (!mentor) throw new NotFoundError('Mentor profile not found');
 
-      if (file) {
-        input.thumbnailImage = await this.uploadImageToCloudinary(file.buffer, mentorUserId);
+      let thumbnailImage = undefined;
+      if (input.thumbnailImageFile && input.thumbnailImageFile.buffer) {
+        thumbnailImage = await this.uploadImageToCloudinary(input.thumbnailImageFile.buffer);
       }
 
       const sessionData = {
@@ -159,7 +117,6 @@ class MentorshipSessionService {
         timezone: input.timezone,
         title: input.title,
         description: input.description,
-        thumbnailImage: input.thumbnailImage,
         pricing: {
           basePrice: input.pricing.basePrice,
           platformFee: input.pricing.platformFee || 0,
@@ -171,6 +128,7 @@ class MentorshipSessionService {
           method: input.paymentMethod,
         },
         reschedule: { count: 0, previousDates: [] },
+        ...(thumbnailImage && { thumbnailImage }),
       };
 
       const session = await sessionRepository.create(sessionData);
@@ -180,6 +138,69 @@ class MentorshipSessionService {
       logger.error(`Failed to create mentor session: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Helper to enrich sessions and their bookings with real user details (fullName, profilePhoto)
+   */
+  async enrichSessionsWithUserDetails(sessions: any[]): Promise<any[]> {
+    if (!sessions || sessions.length === 0) return sessions;
+
+    const userIds = new Set<string>();
+    for (const session of sessions) {
+      if (session.menteeId) {
+        userIds.add(session.menteeId);
+      }
+      if (session.bookings && Array.isArray(session.bookings)) {
+        for (const b of session.bookings) {
+          if (b.menteeId) userIds.add(b.menteeId);
+          if (b.bookedBy) userIds.add(b.bookedBy);
+        }
+      }
+    }
+
+    const userIdList = Array.from(userIds);
+    const usersMap = new Map<string, { name: string; photo: string }>();
+
+    if (userIdList.length > 0) {
+      const users = await User.find({ userId: { $in: userIdList } }).lean();
+      const profilePhotos = await ProfilePhoto.find({ userId: { $in: userIdList }, isActive: true }).lean();
+
+      const photoMap = new Map<string, string>();
+      for (const photo of profilePhotos) {
+        photoMap.set(photo.userId, photo.cloudinarySecureUrl);
+      }
+
+      for (const u of users) {
+        const fullName = (u.firstName || u.lastName)
+          ? `${u.firstName || ''} ${u.lastName || ''}`.trim()
+          : (u.username || (u.email ? u.email.split('@')[0] : 'User'));
+        const photoUrl = photoMap.get(u.userId) || '';
+        usersMap.set(u.userId, { name: fullName, photo: photoUrl });
+      }
+    }
+
+    for (const session of sessions) {
+      if (session.menteeId) {
+        const userInfo = usersMap.get(session.menteeId);
+        if (userInfo) {
+          session.menteeName = userInfo.name;
+          session.menteeProfilePhoto = userInfo.photo;
+          session.bookedMenteeName = userInfo.name;
+        }
+      }
+      if (session.bookings && Array.isArray(session.bookings)) {
+        for (const b of session.bookings) {
+          const userInfo = usersMap.get(b.menteeId || b.bookedBy);
+          if (userInfo) {
+            b.menteeName = userInfo.name;
+            b.menteeProfilePhoto = userInfo.photo;
+          }
+        }
+      }
+    }
+
+    return sessions;
   }
 
   /**
@@ -193,92 +214,7 @@ class MentorshipSessionService {
         .sort({ scheduledAt: 1 })
         .lean();
 
-      /**
-       * Mentee Enrichment
-       *
-       * We intentionally enrich mentee data on the backend instead of
-       * forcing the mobile application to perform N+1 profile requests.
-       *
-       * Benefits:
-       * - Single API request from React Native
-       * - Faster rendering on mobile networks
-       * - Reduced battery and bandwidth usage
-       * - Consistent payload shape for BookingsPage
-       *
-       * We use a 2-query in-memory mapping strategy instead of MongoDB
-       * aggregation lookups because SessionMentor stores UUID strings
-       * rather than ObjectId references and nested booking lookups would
-       * require expensive unwind/group operations.
-       */
-      const userIds = new Set<string>();
-
-      sessions.forEach((session: ISessionMentor) => {
-        if (session.menteeId) {
-          userIds.add(session.menteeId);
-        }
-        if (session.bookings && Array.isArray(session.bookings)) {
-          session.bookings.forEach((booking: any) => {
-            if (booking.menteeId) userIds.add(booking.menteeId);
-            if (booking.bookedBy) userIds.add(booking.bookedBy);
-          });
-        }
-      });
-
-      if (userIds.size === 0) {
-        return sessions;
-      }
-
-      const users = await User.find({ userId: { $in: Array.from(userIds) } })
-        .select('userId firstName lastName email profilePhotoId')
-        .lean();
-
-      interface EnrichedMentee {
-        userId: string;
-        fullName: string;
-        email: string;
-        profilePic: string;
-      }
-      type SessionBooking = NonNullable<ISessionMentor['bookings']>[0];
-      interface EnrichedBooking extends SessionBooking {
-        mentee?: EnrichedMentee;
-      }
-      interface EnrichedSession extends Omit<ISessionMentor, 'bookings'> {
-        mentee?: EnrichedMentee;
-        bookings?: EnrichedBooking[];
-      }
-
-      const userMap = new Map<string, EnrichedMentee>();
-      users.forEach((u: any) => {
-        userMap.set(u.userId, {
-          userId: u.userId,
-          fullName: `${u.firstName || ''} ${u.lastName || ''}`.trim(),
-          email: u.email,
-          profilePic: u.profilePhotoId
-        });
-      });
-
-      const enrichedSessions = sessions.map((session: ISessionMentor) => {
-        const enriched: EnrichedSession = { ...session };
-        
-        if (session.menteeId && userMap.has(session.menteeId)) {
-          enriched.mentee = userMap.get(session.menteeId);
-        }
-
-        if (session.bookings && Array.isArray(session.bookings)) {
-          enriched.bookings = session.bookings.map((booking: SessionBooking) => {
-            const bEnriched: EnrichedBooking = { ...booking };
-            const targetId = booking.bookedBy || booking.menteeId;
-            if (targetId && userMap.has(targetId)) {
-              bEnriched.mentee = userMap.get(targetId);
-            }
-            return bEnriched;
-          });
-        }
-        
-        return enriched;
-      });
-
-      return enrichedSessions;
+      return await this.enrichSessionsWithUserDetails(sessions);
     } catch (error: any) {
       logger.error(`Failed to fetch mentor assigned sessions: ${error.message}`);
       throw error;
@@ -293,36 +229,12 @@ class MentorshipSessionService {
    */
   async bookSession(input: any, authToken?: string): Promise<any> {
     try {
-      console.log('>>> [SERVICE] bookSession started with input:', JSON.stringify(input, null, 2));
       logger.info(`Booking session: ${input.sessionId} by mentee: ${input.menteeId}`);
 
-      let query: any = { sessionId: input.sessionId };
-      if (Types.ObjectId.isValid(input.sessionId)) {
-        query = { 
-          $or: [
-            { sessionId: input.sessionId },
-            { _id: new Types.ObjectId(input.sessionId) }
-          ]
-        };
-      }
-      const session = await SessionMentor.findOne(query);
+      const session = await SessionMentor.findOne({ sessionId: input.sessionId });
       if (!session) throw new NotFoundError('Session not found');
 
-      // OLD IMPLEMENTATION (Reference)
-      // if (session.status !== BookingStatus.AVAILABLE) {
-      //   throw new BadRequestError('Session is not available for booking');
-      // }
-      
-      // TEMP FIX (Pallav)
-      // Reason: Session templates hold multiple bookings. Confirming one booking changes the template status, blocking new bookings.
-      // Previous: Strictly required AVAILABLE status.
-      // Current: Allows booking on active template states (AVAILABLE, CONFIRMED, IN_PROGRESS).
-      // TODO: Refactor during architecture cleanup.
-      if (
-        session.status === BookingStatus.CANCELLED ||
-        session.status === BookingStatus.NO_SHOW ||
-        session.status === BookingStatus.REFUNDED
-      ) {
+      if (session.status !== BookingStatus.AVAILABLE) {
         throw new BadRequestError('Session is not available for booking');
       }
 
@@ -346,51 +258,30 @@ class MentorshipSessionService {
       const slot = availability.slots.find(
         (s: any) => `${s.startTime} - ${s.endTime}` === input.slotTime
       );
-      if (!slot)          throw new BadRequestError('Slot not found');
-      if (slot.isBooked)  throw new BadRequestError('Slot already booked');
+      if (!slot) throw new BadRequestError('Slot not found');
+      if (slot.isBooked) throw new BadRequestError('Slot already booked');
       if (slot.isBlocked) throw new BadRequestError('Slot is blocked');
 
       session.bookings = session.bookings || [];
       session.bookings.push({
-        menteeId:       input.menteeId,
-        bookedBy:       input.menteeId,
-        bookedAt:       new Date(),
-        status:         'pending',
-        slotTime:       input.slotTime,
-        scheduledAt:    new Date(input.scheduledAt),
+        menteeId: input.menteeId,
+        bookedBy: input.menteeId,
+        bookedAt: new Date(),
+        status: 'pending',
+        slotTime: input.slotTime,
+        scheduledAt: new Date(input.scheduledAt),
         availabilityId: input.availabilityId,
         payment: {
           status: PaymentStatus.PENDING,
           method: input.paymentMethod,
         },
         pricing: {
-          basePrice:   input.pricing.basePrice,
+          basePrice: input.pricing.basePrice,
           platformFee: input.pricing.platformFee,
           totalAmount: input.pricing.totalAmount,
-          currency:    input.pricing.currency || 'INR',
+          currency: input.pricing.currency || 'INR',
         },
       } as any);
-
-      /**
-       * TEMP FIX (Pallav)
-       *
-       * Compatibility layer for the legacy mentorship architecture.
-       *
-       * Existing modules (Authorization, Refunds, Notifications,
-       * Interview, Cron, etc.) still read the root booking fields.
-       *
-       * Keep these fields synchronized with the first booking until
-       * the backend is fully migrated to bookings[].
-       * 
-       * Controller logic check the menteeID throguh root 
-       * Which was supposed to go though bookings array 
-       */
-      if (session.bookings.length === 1) {
-        session.menteeId = input.menteeId;
-        session.bookedBy = input.menteeId;
-        session.bookedAt = new Date();
-        session.isBooked = true;
-      }
 
       await session.save();
 
@@ -399,18 +290,18 @@ class MentorshipSessionService {
 
       logger.info(`✅ Booking added: ${session.sessionId} for mentee: ${input.menteeId}`);
 
-      const myBooking = session.bookings[session.bookings.length - 1];
+      const enrichedSessions = await this.enrichSessionsWithUserDetails([session.toObject()]);
+      const myEnrichedBooking = enrichedSessions[0].bookings.find((b: any) => b.bookedBy === input.menteeId);
       return {
-        sessionId:     session.sessionId,
-        mentorId:      session.mentorId,
-        title:         session.title,
-        sessionType:   session.sessionType,
-        duration:      session.duration,
-        booking:       myBooking,
+        sessionId: session.sessionId,
+        mentorId: session.mentorId,
+        title: session.title,
+        sessionType: session.sessionType,
+        duration: session.duration,
+        booking: myEnrichedBooking,
         totalBookings: session.bookings.length,
       };
     } catch (error: any) {
-      console.log('>>> [SERVICE] ERROR in bookSession:', error);
       logger.error(`Failed to book session: ${error.message}`);
       throw error;
     }
@@ -425,19 +316,19 @@ class MentorshipSessionService {
         $or: [{ menteeId: userId }, { mentorId: userId }],
       }).lean();
 
-      const total     = sessions.length;
-      const completed = sessions.filter((s: ISessionMentor) => s.status === BookingStatus.COMPLETED).length;
-      const left      = sessions.filter((s: ISessionMentor) => s.completion?.leftAt !== undefined).length;
+      const total = sessions.length;
+      const completed = sessions.filter((s) => s.status === BookingStatus.COMPLETED).length;
+      const left = sessions.filter((s) => s.completion?.leftAt !== undefined).length;
       const totalTimeSpent = sessions
-        .filter((s: ISessionMentor) => s.completion?.actualDuration)
-        .reduce((acc: number, s: ISessionMentor) => acc + (s.completion?.actualDuration || 0), 0);
+        .filter((s) => s.completion?.actualDuration)
+        .reduce((acc, s) => acc + (s.completion?.actualDuration || 0), 0);
 
       return {
-        totalSessionsBooked:   total,
-        completedSessions:     completed,
-        leftSessions:          left,
+        totalSessionsBooked: total,
+        completedSessions: completed,
+        leftSessions: left,
         totalTimeSpentMinutes: totalTimeSpent,
-        completionRate:        total > 0 ? Math.round((completed / total) * 100) : 0,
+        completionRate: total > 0 ? Math.round((completed / total) * 100) : 0,
       };
     } catch (error: any) {
       logger.error(`Failed to fetch session progress: ${error.message}`);
@@ -464,18 +355,9 @@ class MentorshipSessionService {
       if (!session) throw new NotFoundError('Session not found');
 
       if (userId) {
-        const mentor  = await Mentor.findOne({ userId, isDeleted: false });
+        const mentor = await Mentor.findOne({ userId, isDeleted: false });
         const isMentor = mentor && session.mentorId === mentor.mentorId;
-        // OLD IMPLEMENTATION (Reference)
-        // const isMentee = session.menteeId === userId;
-        // END OLD IMPLEMENTATION
-        
-        // TEMP FIX (Pallav)
-        // Reason: Because bookings are appended to an array, the root menteeId is null.
-        // Previous: Checked root menteeId only.
-        // Current: Checks both root and within the bookings array.
-        // TODO: Refactor during architecture cleanup.
-        const isMentee = session.menteeId === userId || (session.bookings && session.bookings.some((b: any) => b.menteeId === userId));
+        const isMentee = session.menteeId === userId;
 
         if (!isMentor && !isMentee) {
           throw new ForbiddenError('You are not authorized to view this session');
@@ -511,24 +393,15 @@ class MentorshipSessionService {
         if (!mentor) throw new NotFoundError('MENTOR_NOT_FOUND');
         query.mentorId = mentor.mentorId;
       } else {
-        // OLD IMPLEMENTATION (Reference)
-        // query.menteeId = userId;
-        // END OLD IMPLEMENTATION
-        
-        // TEMP FIX (Pallav)
-        // Reason: Because bookings are appended to an array, the root menteeId is null.
-        // Previous: Queried root menteeId.
-        // Current: Queries bookings.menteeId to allow mentees to see their sessions.
-        // TODO: Refactor during architecture cleanup.
-        query['bookings.menteeId'] = userId;
+        query.menteeId = userId;
       }
 
-      if (filters?.status)      query.status      = filters.status;
-      if (filters?.sessionType) query.sessionType  = filters.sessionType;
+      if (filters?.status) query.status = filters.status;
+      if (filters?.sessionType) query.sessionType = filters.sessionType;
       if (filters?.startDate || filters?.endDate) {
         query.scheduledAt = {};
         if (filters.startDate) query.scheduledAt.$gte = filters.startDate;
-        if (filters.endDate)   query.scheduledAt.$lte = filters.endDate;
+        if (filters.endDate) query.scheduledAt.$lte = filters.endDate;
       }
 
       const skip = (page - 1) * limit;
@@ -536,7 +409,8 @@ class MentorshipSessionService {
       // ✅ FIX: findAll returns { data, total } — not [sessions, total]
       const { data: sessions, total } = await sessionRepository.findAll(query, skip, limit);
 
-      return { sessions, total, page, limit };
+      const enriched = await this.enrichSessionsWithUserDetails(sessions);
+      return { sessions: enriched, total, page, limit };
     } catch (error: any) {
       logger.error(`Failed to fetch sessions: ${error.message}`);
       throw error;
@@ -553,7 +427,8 @@ class MentorshipSessionService {
 
       // ✅ FIX: findAll returns { data, total }
       const { data: sessions, total } = await sessionRepository.findAll({}, skip, limit);
-      return { sessions, total, page, limit };
+      const enriched = await this.enrichSessionsWithUserDetails(sessions);
+      return { sessions: enriched, total, page, limit };
     } catch (error: any) {
       logger.error(`Failed to fetch all sessions: ${error.message}`);
       throw error;
@@ -578,22 +453,15 @@ class MentorshipSessionService {
       if (role === 'mentor') {
         query.mentorId = userId;
       } else {
-        // OLD IMPLEMENTATION (Reference)
-        // query.menteeId = userId;
-        // END OLD IMPLEMENTATION
-        
-        // TEMP FIX (Pallav)
-        // Reason: Because bookings are appended to an array, the root menteeId is null.
-        // Previous: Queried root menteeId.
-        // Current: Queries bookings.menteeId to allow mentees to see their upcoming sessions.
-        // TODO: Refactor during architecture cleanup.
-        query['bookings.menteeId'] = userId;
+        query.menteeId = userId;
       }
 
-      return await SessionMentor.find(query)
+      const sessions = await SessionMentor.find(query)
         .sort({ scheduledAt: 1 })
         .limit(limit)
         .lean();
+
+      return await this.enrichSessionsWithUserDetails(sessions);
     } catch (error: any) {
       logger.error(`Failed to fetch upcoming sessions: ${error.message}`);
       throw error;
@@ -618,22 +486,15 @@ class MentorshipSessionService {
       if (role === 'mentor') {
         query.mentorId = userId;
       } else {
-        // OLD IMPLEMENTATION (Reference)
-        // query.menteeId = userId;
-        // END OLD IMPLEMENTATION
-        
-        // TEMP FIX (Pallav)
-        // Reason: Because bookings are appended to an array, the root menteeId is null.
-        // Previous: Queried root menteeId.
-        // Current: Queries bookings.menteeId to allow mentees to see their past sessions.
-        // TODO: Refactor during architecture cleanup.
-        query['bookings.menteeId'] = userId;
+        query.menteeId = userId;
       }
 
-      return await SessionMentor.find(query)
+      const sessions = await SessionMentor.find(query)
         .sort({ scheduledAt: -1 })
         .limit(limit)
         .lean();
+
+      return await this.enrichSessionsWithUserDetails(sessions);
     } catch (error: any) {
       logger.error(`Failed to fetch past sessions: ${error.message}`);
       throw error;
@@ -649,22 +510,22 @@ class MentorshipSessionService {
     sessionId: string,
     userId: string,
     updates: Partial<any>,
-    authToken?: string,
-    file?: any
+    authToken?: string
   ): Promise<any> {
     try {
       const session = await this.getSessionById(sessionId, userId, authToken);
 
-      if (file) {
-        updates.thumbnailImage = await this.uploadImageToCloudinary(file.buffer, userId);
-      }
-
-      const allowedUpdates = ['notes', 'description', 'title', 'thumbnailImage'];
-      const isValidUpdate  = Object.keys(updates).every((key) => allowedUpdates.includes(key));
+      const allowedUpdates = ['notes', 'description', 'title', 'thumbnailImageFile'];
+      const isValidUpdate = Object.keys(updates).every((key) => allowedUpdates.includes(key));
 
       if (!isValidUpdate) {
-        throw new BadRequestError('Invalid update fields. Only notes, description, title, thumbnailImage are allowed.');
+        throw new BadRequestError('Invalid update fields. Only notes, description, title, thumbnailImageFile are allowed.');
       }
+
+      if (updates.thumbnailImageFile && updates.thumbnailImageFile.buffer) {
+        updates.thumbnailImage = await this.uploadImageToCloudinary(updates.thumbnailImageFile.buffer);
+      }
+      delete updates.thumbnailImageFile;
 
       Object.assign(session, updates);
       await session.save();
@@ -693,36 +554,28 @@ class MentorshipSessionService {
         throw new ForbiddenError('Only the mentor of this session can confirm bookings');
       }
 
-      if (!bookingId) {
-        throw new BadRequestError('bookingId is required to confirm a session booking');
+      if (bookingId) {
+        const booking = session.bookings?.find((b: any) => b.bookedBy === bookingId);
+        if (!booking) throw new BadRequestError('Booking not found');
+        if (booking.status !== 'pending') throw new BadRequestError('Booking is not pending');
+
+        session.bookings = session.bookings.map((b: any) =>
+          b.bookedBy === bookingId ? { ...b, status: 'confirmed' } : b
+        );
+      } else {
+        const hasPending = session.bookings?.some((b: any) => b.status === 'pending');
+        if (!hasPending) throw new BadRequestError('No pending bookings to confirm');
+
+        session.bookings = session.bookings?.map((b: any) =>
+          b.status === 'pending' ? { ...b, status: 'confirmed' } : b
+        );
       }
 
-      const booking = session.bookings?.find((b: any) => b._id?.toString() === bookingId);
-      if (!booking) {
-        const available = session.bookings?.map((b: any) => b._id?.toString());
-        throw new BadRequestError(`Booking not found. Expected: ${bookingId}, Available: ${JSON.stringify(available)}`);
-      }
-      if (booking.status !== 'pending') {
-        throw new BadRequestError(`Booking is not pending. Current status: ${booking.status}`);
-      }
-
-      // Perform an atomic update to avoid any Document.save() validation issues
-      await SessionMentor.updateOne(
-        { sessionId, 'bookings._id': bookingId },
-        { 
-          $set: { 
-            'bookings.$.status': BookingStatus.CONFIRMED,
-            status: BookingStatus.CONFIRMED
-          } 
-        }
-      );
-
-      logger.info(`Session confirmed: ${sessionId}, bookedBy/bookingId: ${bookingId}`);
-      
-      // Fetch the updated document returning lean for response
-      return await SessionMentor.findOne({ sessionId });
+      await session.save();
+      logger.info(`Session confirmed: ${sessionId}, bookedBy: ${bookingId}`);
+      return session;
     } catch (error: any) {
-      logger.error(`Failed to confirm session (${sessionId}): ${error.message}`);
+      logger.error(`Failed to confirm session: ${error.message}`);
       throw error;
     }
   }
@@ -744,15 +597,7 @@ class MentorshipSessionService {
         throw new ForbiddenError('Only the mentor of this session can start it');
       }
 
-      const hasConfirmedBooking = session.bookings?.some((b: any) => 
-        b.status === BookingStatus.CONFIRMED || b.status === BookingStatus.RESCHEDULED
-      );
-
-      if (
-        session.status !== BookingStatus.CONFIRMED && 
-        session.status !== BookingStatus.RESCHEDULED &&
-        !hasConfirmedBooking
-      ) {
+      if (session.status !== BookingStatus.CONFIRMED) {
         throw new BadRequestError('Session must be confirmed before starting');
       }
 
@@ -797,12 +642,6 @@ class MentorshipSessionService {
         completionData.followUpNotes
       );
 
-      TrustScoreEvents.emit('SessionCompleted', {
-        mentorId: session.mentorId,
-        sessionId,
-        timestamp: new Date()
-      });
-
       logger.info(`Session completed: ${sessionId}`);
 
       // TODO: Update mentor stats
@@ -826,51 +665,15 @@ class MentorshipSessionService {
     sessionId: string,
     userId: string,
     reason: string,
-    authToken: string | undefined,
-    bookingId: string
+    authToken?: string
   ): Promise<any> {
     try {
-      if (!bookingId) {
-        throw new BadRequestError('bookingId is required to cancel a session booking');
-      }
-
       const session = await this.getSessionById(sessionId, userId, authToken);
 
-      const booking = session.bookings?.find((b: any) => b._id?.toString() === bookingId);
-      if (!booking) {
-        throw new BadRequestError('Booking not found');
-      }
-
-      const hoursDiff    = (session.scheduledAt.getTime() - Date.now()) / (1000 * 60 * 60);
+      const hoursDiff = (session.scheduledAt.getTime() - Date.now()) / (1000 * 60 * 60);
       const refundEligible = hoursDiff >= 24;
 
-      const updateData: any = {
-        $set: { 
-          'bookings.$.status': BookingStatus.CANCELLED,
-          'cancellation': {
-            cancelledBy: userId,
-            cancelledAt: new Date(),
-            reason,
-            refundEligible
-          }
-        }
-      };
-
-      if (session.sessionType !== SessionType.GROUP_SESSION) {
-        updateData.$set.status = BookingStatus.CANCELLED;
-      }
-
-      await SessionMentor.updateOne(
-        { sessionId, 'bookings._id': bookingId },
-        updateData
-      );
-
-      TrustScoreEvents.emit('SessionCancelled', {
-        mentorId: session.mentorId,
-        sessionId,
-        timestamp: new Date()
-      });
-
+      await session.cancelSession(userId, reason, refundEligible);
       logger.info(`Session cancelled: ${sessionId}`);
 
       return session;
@@ -881,268 +684,28 @@ class MentorshipSessionService {
   }
 
   /**
-   * Reschedule sessio# STRICT Runtime Investigation – Determine the Correct Location for Review Submission UI
-
-IMPORTANT
-
-DO NOT MODIFY ANY CODE.
-
-DO NOT CREATE ANY FILES.
-
-DO NOT IMPLEMENT ANY UI.
-
-This is a READ-ONLY investigation.
-
-The previous audit confirmed:
-
-- ReviewService.submitReview() exists.
-- The backend review API works.
-- There is currently no Review Submission UI.
-- Users cannot submit reviews from the React Native app.
-
-Your task is to determine the EXACT place where the review submission feature should live within the existing mentorship architecture.
-
-====================================================
-PHASE 1 — Locate the Mentee Completed Sessions
-====================================================
-
-Search the React Native project for every screen that displays sessions/bookings belonging to the mentee.
-
-Examples include:
-
-- My Sessions
-- Session History
-- Bookings
-- Completed Sessions
-- Dashboard
-- Session Details
-
-For every screen found, provide:
-
-- File path
-- Purpose
-- Whether it displays completed sessions
-- Whether it belongs to Mentor or Mentee
-
-====================================================
-PHASE 2 — Identify the Correct Entry Point
-====================================================
-
-Determine the best location to place the "Leave Review" action.
-
-Do NOT assume.
-
-Verify where the user naturally reaches a completed session.
-
-State:
-
-- Which component renders the completed session card.
-- Which component owns the action buttons.
-- Which file should be modified.
-
-====================================================
-PHASE 3 — Existing Session Data
-====================================================
-
-Inspect the completed session object passed to the UI.
-
-Determine whether it already contains:
-
-- sessionId
-- mentorId
-- mentorName
-- mentorAvatar
-- sessionStatus
-- bookingStatus
-
-Identify every field available without requiring another API call.
-
-====================================================
-PHASE 4 — Review Status Detection
-====================================================
-
-Determine how the frontend can know whether the session has already been reviewed.
-
-Search for:
-
-- reviewed
-- hasReview
-- reviewId
-- isReviewed
-
-If none exist:
-
-Determine the smallest backend/frontend addition required.
-
-Do NOT implement it.
-
-====================================================
-PHASE 5 — Existing UI Components
-====================================================
-
-Search for reusable components.
-
-Examples:
-
-- Star Rating
-- Rating Input
-- Modal
-- Bottom Sheet
-- TextArea
-- Review Card
-
-Determine whether existing components can be reused instead of creating duplicates.
-
-====================================================
-PHASE 6 — UX Investigation
-====================================================
-
-Determine the best UX.
-
-Should the review be:
-
-A.
-A full screen
-
-B.
-A modal
-
-C.
-A bottom sheet
-
-D.
-Embedded inside Session Details
-
-Justify your recommendation using the existing architecture.
-
-====================================================
-PHASE 7 — Navigation
-====================================================
-
-Verify whether a Session Details screen already exists.
-
-If yes:
-
-Would it be better to launch the review from Session Details?
-
-If no:
-
-Recommend the smallest UI addition.
-
-====================================================
-PHASE 8 — API Readiness
-====================================================
-
-Verify ReviewService.submitReview().
-
-List its required payload.
-
-Verify that every payload field already exists inside the completed session object.
-
-If any field is missing:
-
-Identify exactly where it should come from.
-
-====================================================
-PHASE 9 — Refresh Behaviour
-====================================================
-
-After a successful review, determine exactly what should refresh.
-
-Examples:
-
-- Completed sessions
-- Mentor profile
-- Review list
-- Dashboard statistics
-- Average rating
-
-Explain which components need refreshing and which do not.
-
-====================================================
-PHASE 10 — Final Architecture Recommendation
-====================================================
-
-Provide:
-
-1. Exact file that should contain the "Leave Review" button.
-
-2. Exact file that should own the Review Modal.
-
-3. Existing reusable components that should be reused.
-
-4. New components (only if absolutely necessary).
-
-5. Files that require modification.
-
-6. APIs that will be called.
-
-7. Complete user flow from:
-Completed Session
-→ Leave Review
-→ Submit
-→ Success
-→ UI Refresh
-
-IMPORTANT
-
-Do NOT write code.
-
-Do NOT implement anything.
-
-Only produce the final architectural plan with the smallest possible implementation that follows the existing mentorship module architecture.n
+   * Reschedule session
    */
   async rescheduleSession(
     sessionId: string,
     userId: string,
     newScheduledAt: Date,
-    reason: string | undefined,
-    authToken: string | undefined,
-    bookingId: string
+    _reason?: string,
+    authToken?: string
   ): Promise<any> {
     try {
-      if (!bookingId) {
-        throw new BadRequestError('bookingId is required to reschedule a session booking');
-      }
-
       const session = await this.getSessionById(sessionId, userId, authToken);
-      const booking = session.bookings?.find((b: any) => b._id?.toString() === bookingId);
-      if (!booking) {
-        throw new BadRequestError('Booking not found');
-      }
 
-      // Use the specific booking's start time for the 24-hour check
-      const existingStartTime = booking.scheduledAt || session.scheduledAt;
-      const hoursDiff = (existingStartTime.getTime() - Date.now()) / (1000 * 60 * 60);
+      const hoursDiff = (session.scheduledAt.getTime() - Date.now()) / (1000 * 60 * 60);
       if (hoursDiff < 24) {
-        throw new BadRequestError('Cannot reschedule less than 24 hours before start time');
+        throw new BadRequestError('Cannot reschedule within 24 hours of session');
       }
 
       if (newScheduledAt <= new Date()) {
         throw new BadRequestError('New scheduled time must be in the future');
       }
 
-      const updateData: any = {
-        $set: { 
-          'bookings.$.status': BookingStatus.RESCHEDULED,
-          'bookings.$.scheduledAt': newScheduledAt,
-          'reschedule.lastRescheduledAt': new Date(),
-          'reschedule.rescheduledBy': userId,
-          'reschedule.reason': reason || 'Rescheduled by user'
-        },
-        $inc: { 'reschedule.count': 1 },
-        $push: { 'reschedule.previousDates': session.scheduledAt }
-      };
-
-      if (session.sessionType !== SessionType.GROUP_SESSION) {
-        updateData.$set.scheduledAt = newScheduledAt;
-        updateData.$set.status = BookingStatus.RESCHEDULED;
-      }
-
-      await SessionMentor.updateOne(
-        { sessionId, 'bookings._id': bookingId },
-        updateData
-      );
+      await session.rescheduleSession(newScheduledAt, userId);
       logger.info(`Session rescheduled: ${sessionId}`);
 
       // TODO: Update calendar via calendarSync.service
@@ -1172,7 +735,7 @@ Only produce the final architectural plan with the smallest possible implementat
         throw new BadRequestError('Can only review completed sessions');
       }
 
-      const mentor       = await Mentor.findOne({ userId, isDeleted: false });
+      const mentor = await Mentor.findOne({ userId, isDeleted: false });
       const reviewerType = mentor && session.mentorId === mentor.mentorId ? 'mentor' : 'mentee';
 
       await session.addReview(rating, review, reviewerType);
@@ -1203,10 +766,10 @@ Only produce the final architectural plan with the smallest possible implementat
         {
           $group: {
             _id: null,
-            total:     { $sum: 1 },
+            total: { $sum: 1 },
             completed: { $sum: { $cond: [{ $eq: ['$status', BookingStatus.COMPLETED] }, 1, 0] } },
             cancelled: { $sum: { $cond: [{ $eq: ['$status', BookingStatus.CANCELLED] }, 1, 0] } },
-            upcoming:  {
+            upcoming: {
               $sum: {
                 $cond: [
                   {
@@ -1239,16 +802,38 @@ Only produce the final architectural plan with the smallest possible implementat
    */
   private mapSessionTypeToPrice(sessionType: SessionType): string {
     const mapping: Record<SessionType, string> = {
-      [SessionType.QUICK_CALL]:      'quickCall',
-      [SessionType.DEEP_DIVE]:       'deepDive',
-      [SessionType.RESUME_REVIEW]:   'resumeReview',
-      [SessionType.MOCK_INTERVIEW]:  'mockInterview',
+      [SessionType.QUICK_CALL]: 'quickCall',
+      [SessionType.DEEP_DIVE]: 'deepDive',
+      [SessionType.RESUME_REVIEW]: 'resumeReview',
+      [SessionType.MOCK_INTERVIEW]: 'mockInterview',
       [SessionType.CAREER_PLANNING]: 'careerPlanning',
-      [SessionType.PORTFOLIO_REVIEW]:'portfolioReview',
-      [SessionType.ASK_QUERY]:       'askQuery',
-      [SessionType.GROUP_SESSION]:   'groupSession',
+      [SessionType.PORTFOLIO_REVIEW]: 'portfolioReview',
+      [SessionType.ASK_QUERY]: 'askQuery',
+      [SessionType.GROUP_SESSION]: 'groupSession',
     };
     return mapping[sessionType] as any;
+  }
+
+  private async uploadImageToCloudinary(buffer: Buffer): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'session-thumbnails',
+          public_id: `session_${Date.now()}`,
+          resource_type: 'image',
+          transformation: [
+            { width: 800, height: 600, crop: 'limit' },
+            { quality: 'auto:good' },
+          ],
+          overwrite: true,
+        },
+        (error: any, result: any) => {
+          if (error) return reject(error);
+          resolve(result.secure_url);
+        }
+      );
+      uploadStream.end(buffer);
+    });
   }
 }
 

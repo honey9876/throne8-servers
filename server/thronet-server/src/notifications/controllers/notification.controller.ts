@@ -17,8 +17,6 @@ export default class NotificationController {
         const limit = parseInt(req.query.limit as string) || 20;
 
         const result = await NotificationService.getNotifications(userId, page, limit);
-        const hasNewPost = result.notifications.some(n => n.type === 'post_created');
-        console.log(`--- NOTIF TRACE: Notification API returning ${result.notifications.length} notifications (post_created present: ${hasNewPost}) ---`);
         res.json(SuccessResponse(result, 'Notifications fetched'));
     });
 

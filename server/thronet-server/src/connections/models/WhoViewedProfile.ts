@@ -1,4 +1,4 @@
-﻿// src/models/mongodb/WhoViewedProfile.ts
+// src/models/mongodb/WhoViewedProfile.ts
 import { Schema, model, Document, Model, Types, Query, QueryOptions,  } from 'mongoose';  //ToObjectOptions
 import { v4 as uuidv4 } from 'uuid';
 import logger, { LogCategory, PublicLogMetadata } from '@/shared/logger.util';
@@ -30,8 +30,8 @@ import environmentConfig from '@/config/environment/environment';
 
 export interface IWhoViewedProfile extends Document {
   viewId: string;
-  viewerId: string; // UUID — matches User.userId convention used across the app
-  viewedId: string; // UUID — matches User.userId convention used across the app
+  viewerId: Types.ObjectId;
+  viewedId: Types.ObjectId;
   timestamp: Date;
   visibility: 'public' | 'connections' | 'private';
   isNotified: boolean;
@@ -86,20 +86,24 @@ const WhoViewedProfileSchema = new Schema<IWhoViewedProfile, IWhoViewedProfileMo
       type: String,
       required: [true, 'View ID is required'],
       unique: true,
+      index: true,
       default: () => uuidv4(),
     },
     viewerId: {
-      type: String,
+      type: Schema.Types.ObjectId,
       required: [true, 'Viewer ID is required'],
+      index: true,
     },
     viewedId: {
-      type: String,
+      type: Schema.Types.ObjectId,
       required: [true, 'Viewed ID is required'],
+      index: true,
     },
     timestamp: {
       type: Date,
       required: true,
       default: Date.now,
+      index: true,
     },
     visibility: {
       type: String,
@@ -108,10 +112,12 @@ const WhoViewedProfileSchema = new Schema<IWhoViewedProfile, IWhoViewedProfileMo
         message: '{VALUE} is not a valid visibility',
       },
       default: environmentConfig.DEFAULT_PROFILE_VISIBILITY as 'public' | 'connections' | 'private',
+      index: true,
     },
     isNotified: {
       type: Boolean,
       default: false,
+      index: true,
     },
     metadata: {
       type: Schema.Types.Mixed,
@@ -120,19 +126,22 @@ const WhoViewedProfileSchema = new Schema<IWhoViewedProfile, IWhoViewedProfileMo
     region: {
       type: String,
       default: 'global',
+      index: true,
       maxlength: [50, 'Region cannot exceed 50 characters'],
     },
     shardKey: {
       type: String,
       required: true,
+      index: true,
       default: function (this: IWhoViewedProfile) {
-        const userIds = [this.viewerId, this.viewedId].sort();
+        const userIds = [this.viewerId?.toString(), this.viewedId?.toString()].sort();
         return `${userIds[0]}_${userIds[1]}_${this.region || 'global'}`;
       },
     },
     cacheVersion: {
       type: Number,
       default: 1,
+      index: true,
     },
   },
   {
@@ -204,16 +213,16 @@ WhoViewedProfileSchema.post(/^find/, function (this: ExtendedQuery<any, IWhoView
 });
 
 WhoViewedProfileSchema.pre('validate', function (next) {
-  if (this.viewerId === this.viewedId) {
+  if (this.viewerId?.equals(this.viewedId)) {
     logger.error('Validation failed: Users cannot view their own profile', {
       category: LogCategory.CONNECTION,
-      data: { viewId: this.viewId, viewerId: this.viewerId }
+      data: { viewId: this.viewId, viewerId: this.viewerId?.toString() }
     } as unknown as PublicLogMetadata);
     next(new Error('Users cannot view their own profile'));
     return;
   }
   if (!this.shardKey && this.viewerId && this.viewedId) {
-    const userIds = [this.viewerId, this.viewedId].sort();
+    const userIds = [this.viewerId.toString(), this.viewedId.toString()].sort();
     this.shardKey = `${userIds[0]}_${userIds[1]}_${this.region || 'global'}`;
   }
   next();
@@ -282,7 +291,7 @@ WhoViewedProfileSchema.statics.findUserViewsPaginated = async function (
   options: { page?: number; limit?: number; projection?: string; useEstimatedCount?: boolean; region?: string } = {}
 ): Promise<IPaginationResult<IWhoViewedProfile>> {
   const { page = 1, limit = environmentConfig.PAGINATION_DEFAULT_LIMIT || 20, projection, useEstimatedCount = false, region = 'global' } = options;
-  let query = this.find({ viewedId: userId, region }).sort({ timestamp: -1 }).hint('user_views');
+  let query = this.find({ viewedId: new Types.ObjectId(userId), region }).sort({ timestamp: -1 }).hint('user_views');
   if (projection) query = query.select(projection);
   return paginateQuery(query, page, limit, useEstimatedCount);
 };
@@ -292,7 +301,7 @@ WhoViewedProfileSchema.statics.bulkMarkAsNotified = async function (
   userId: string
 ): Promise<any> {
   const result = await this.updateMany(
-    { viewId: { $in: viewIds }, viewedId: userId, isNotified: false },
+    { viewId: { $in: viewIds }, viewedId: new Types.ObjectId(userId), isNotified: false },
     { $set: { isNotified: true, updatedAt: new Date() }, $inc: { cacheVersion: 1 } },
     { writeConcern: { w: 'majority' } }
   );
@@ -306,7 +315,7 @@ WhoViewedProfileSchema.statics.bulkMarkAsNotified = async function (
 
 WhoViewedProfileSchema.statics.getViewStats = async function (userId: string): Promise<any> {
   const pipeline = [
-    { $match: { viewedId: userId } },
+    { $match: { viewedId: new Types.ObjectId(userId) } },
     {
       $group: {
         _id: '$isNotified',
