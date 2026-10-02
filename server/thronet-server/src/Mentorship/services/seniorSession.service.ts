@@ -9,6 +9,8 @@ import SeniorMentorApplicationService from './seniorMentorApplication.service';
 import { ForbiddenError, NotFoundError, BadRequestError } from '@/shared/errors/app.error';
 import seniorAvailabilityService from './seniorAvailability.service';
 import { DateTime } from 'luxon';
+import { User } from '@/shared/models/index.models';
+import { BookingStatus, isStartAllowed } from '@/shared/constants/bookingStatus';
 
 // If your project uses different error imports,
 // replace the above imports with your existing error classes.
@@ -119,9 +121,6 @@ class SeniorSessionService {
       mentorId: userId,
       thumbnailImage,
       bookings: [],
-      isBooked: false,
-      bookedBy: null,
-      bookedAt: null,
       status: payload.status ?? 'pending',
     } as unknown as ISeniorSession;
 
@@ -133,10 +132,53 @@ class SeniorSessionService {
    */
   async getMySessions(
     userId: string
-  ): Promise<ISeniorSession[]> {
+  ): Promise<any[]> {
     await this.ensureSeniorMentor(userId);
 
-    return this.repository.findByMentorId(userId) as unknown as ISeniorSession[];
+    const sessions = await this.repository.findByMentorId(userId) as unknown as ISeniorSession[];
+    
+    // Aggregation Logic for Mentees
+    const menteeIds = new Set<string>();
+    for (const session of sessions) {
+      if (session.bookings && Array.isArray(session.bookings)) {
+        for (const booking of session.bookings) {
+          if (booking.menteeId) {
+            menteeIds.add(booking.menteeId);
+          }
+        }
+      }
+    }
+
+    if (menteeIds.size > 0) {
+      const users = await User.find({ userId: { $in: Array.from(menteeIds) } })
+        .select('userId firstName lastName email profilePhotoId')
+        .lean();
+      
+      const userMap = new Map<string, any>();
+      users.forEach((u: any) => {
+        userMap.set(u.userId, {
+          fullName: `${u.firstName || ''} ${u.lastName || ''}`.trim(),
+          email: u.email,
+          profilePic: u.profilePhotoId
+        });
+      });
+
+      // Inject mentee details implicitly inside response mappings without mutating Document structure
+      return sessions.map((session: any) => {
+         const obj = typeof session.toObject === 'function' ? session.toObject() : { ...session };
+         if (obj.bookings && Array.isArray(obj.bookings)) {
+           obj.bookings = obj.bookings.map((booking: any) => {
+              if (booking.menteeId && userMap.has(booking.menteeId)) {
+                 return { ...booking, mentee: userMap.get(booking.menteeId) };
+              }
+              return booking;
+           });
+         }
+         return obj;
+      });
+    }
+
+    return sessions;
   }
 
   /**
@@ -163,6 +205,29 @@ class SeniorSessionService {
       throw new BadRequestError('Cannot book a cancelled session');
     }
 
+    if (!payload.slotTime) {
+      throw new BadRequestError('slotTime is required for booking');
+    }
+
+    // Availability validation check
+    const parts = payload.slotTime.split('-').map((p: string) => p.trim());
+    const timeStr = parts[0];
+    const tz = session.timezone || 'Asia/Kolkata';
+    const dateStr = payload.scheduledAt
+      ? DateTime.fromISO(new Date(payload.scheduledAt).toISOString()).setZone(tz).toFormat('yyyy-MM-dd')
+      : DateTime.now().setZone(tz).toFormat('yyyy-MM-dd'); // Fallback though it should ideally be provided
+
+    const isValid = await seniorAvailabilityService.validateSlot(
+      session.mentorId,
+      dateStr,
+      timeStr,
+      session.duration
+    );
+
+    if (!isValid) {
+      throw new BadRequestError('The selected time slot is not available or falls outside configured hours.');
+    }
+
     const bookingId = uuidv4();
 
     const booking = {
@@ -182,7 +247,7 @@ class SeniorSessionService {
     const updatedSession = await this.repository.addBooking(sessionId, booking as unknown as any);
 
     if (!updatedSession) {
-      throw new BadRequestError('Failed to book session');
+      throw new BadRequestError('Failed to book session. The requested time slot may have just been booked by another user.');
     }
 
     return updatedSession as unknown as ISeniorSession;
@@ -333,6 +398,140 @@ class SeniorSessionService {
       userId
     ) as unknown as ISeniorSession;
   }
+  /**
+   * Accept/Confirm a pending Junior Booking for a Senior Session
+   */
+  async acceptBooking(
+    userId: string,
+    sessionId: string,
+    bookingId: string
+  ): Promise<ISeniorSession> {
+    await this.ensureSeniorMentor(userId);
+    const session = await this.repository.findBySessionIdAndMentorId(sessionId, userId);
+    
+    if (!session) {
+      throw new NotFoundError('Senior Session not found or access denied');
+    }
+
+    const bookingIndex = session.bookings.findIndex((b: any) => b._id.toString() === bookingId);
+    if (bookingIndex === -1) {
+      throw new NotFoundError('Booking not found');
+    }
+    
+    if (session.bookings[bookingIndex].status !== 'pending') {
+      throw new BadRequestError('Only pending bookings can be accepted');
+    }
+
+    session.bookings[bookingIndex].status = 'upcoming'; // Mapping to 'upcoming' as standard in SeniorSessionSchema
+
+    await (session as any).save();
+
+    return session as unknown as ISeniorSession;
+  }
+
+  /**
+   * Reject/Cancel a Junior Booking for a Senior Session
+   */
+  async rejectBooking(
+    userId: string,
+    sessionId: string,
+    bookingId: string,
+    reason?: string
+  ): Promise<ISeniorSession> {
+    await this.ensureSeniorMentor(userId);
+    const session = await this.repository.findBySessionIdAndMentorId(sessionId, userId);
+    
+    if (!session) {
+      throw new NotFoundError('Senior Session not found or access denied');
+    }
+
+    const bookingIndex = session.bookings.findIndex((b: any) => b._id.toString() === bookingId);
+    if (bookingIndex === -1) {
+      throw new NotFoundError('Booking not found');
+    }
+
+    const currentStatus = session.bookings[bookingIndex].status;
+    if (currentStatus === 'cancelled' || currentStatus === 'completed') {
+      throw new BadRequestError('Cannot reject an already completed or cancelled booking');
+    }
+
+    session.bookings[bookingIndex].status = 'cancelled';
+    
+    await (session as any).save();
+
+    return session as unknown as ISeniorSession;
+  }
+
+  /**
+   * Start an Upcoming Senior Booking
+   */
+  async startBooking(
+    userId: string,
+    sessionId: string,
+    bookingId: string
+  ): Promise<ISeniorSession> {
+    await this.ensureSeniorMentor(userId);
+    const session = await this.repository.findBySessionIdAndMentorId(sessionId, userId);
+    
+    if (!session) {
+      throw new NotFoundError('Senior Session not found or access denied');
+    }
+
+    const bookingIndex = session.bookings.findIndex((b: any) => b._id.toString() === bookingId);
+    if (bookingIndex === -1) {
+      throw new NotFoundError('Booking not found');
+    }
+
+    const booking = session.bookings[bookingIndex];
+
+    if (booking.status !== 'upcoming' && booking.status !== 'confirmed') {
+      throw new BadRequestError('Only confirmed/upcoming bookings can be started');
+    }
+
+    const bookingScheduledAt = booking.scheduledAt || session.scheduledAt;
+    if (!isStartAllowed(bookingScheduledAt)) {
+      const isTooEarly = Date.now() < new Date(bookingScheduledAt).getTime();
+      throw new BadRequestError(isTooEarly ? 'Session cannot be started yet — too early.' : 'Session start window has expired.');
+    }
+
+    session.bookings[bookingIndex].status = 'in_progress';
+    
+    await (session as any).save();
+
+    return session as unknown as ISeniorSession;
+  }
+
+  /**
+   * Complete an In-Progress Senior Booking
+   */
+  async completeBooking(
+    userId: string,
+    sessionId: string,
+    bookingId: string
+  ): Promise<ISeniorSession> {
+    await this.ensureSeniorMentor(userId);
+    const session = await this.repository.findBySessionIdAndMentorId(sessionId, userId);
+    
+    if (!session) {
+      throw new NotFoundError('Senior Session not found or access denied');
+    }
+
+    const bookingIndex = session.bookings.findIndex((b: any) => b._id.toString() === bookingId);
+    if (bookingIndex === -1) {
+      throw new NotFoundError('Booking not found');
+    }
+
+    if (session.bookings[bookingIndex].status !== 'in_progress') {
+      throw new BadRequestError('Only in-progress bookings can be completed');
+    }
+
+    session.bookings[bookingIndex].status = 'completed';
+    
+    await (session as any).save();
+
+    return session as unknown as ISeniorSession;
+  }
+
 }
 
 export default new SeniorSessionService();

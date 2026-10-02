@@ -119,10 +119,23 @@ class SeniorSessionRepository {
     sessionId: string,
     booking: ISeniorSessionBooking
   ): Promise<SeniorSessionDocument | null> {
+    const matchCondition: any = { sessionId };
+    
+    // Prevent Mongo race condition by refusing to push if the exact slot is already taken
+    if (booking.slotTime) {
+      matchCondition['bookings'] = {
+        $not: {
+          $elemMatch: {
+             slotTime: booking.slotTime,
+             scheduledAt: booking.scheduledAt,
+             status: { $in: ['pending', 'upcoming', 'confirmed', 'in_progress'] }
+          }
+        }
+      };
+    }
+
     return await SeniorSession.findOneAndUpdate(
-      {
-        sessionId,
-      },
+      matchCondition,
       {
         $push: {
           bookings: booking,
