@@ -50,9 +50,8 @@ class PymkSuggestionCron {
       return;
     }
     this.initialized = true;
-
-    // Run weekly on Monday at 10:00 AM
-    cron.schedule('* * * * *', async () => {
+    // Run weekly on Monday at 10:00 AM IST
+    cron.schedule('0 10 * * 1', async () => {
       if (this.isRunning) {
         logger.warn('PYMK cron skipped — previous run still in progress');
         return;
@@ -82,10 +81,13 @@ class PymkSuggestionCron {
         clearTimeout(watchdog);
         this.isRunning = false;
       }
-    });
+    }, { timezone: 'Asia/Kolkata' });
   }
 
   private static async runBatch(stopSignal: StopSignal): Promise<void> {
+    // Lazy import once (breaks circular dependency with connections/routes/index.ts)
+    const { getSuggestionCards } = await import('@/connections/services/network.service');
+
     let lastId: Types.ObjectId | null = null;
     const batchSize = 100;
     let processedCount = 0;
@@ -122,9 +124,7 @@ class PymkSuggestionCron {
             }
           }
 
-          // Lazy import to break circular dependency with connections/routes/index.ts
-          const { getSuggestionCards } = await import('@/connections/services/network.service');
-
+        
           // Fetch top 10 suggestions
           const suggestions = await withTimeout(
             getSuggestionCards(user.userId, 10),
