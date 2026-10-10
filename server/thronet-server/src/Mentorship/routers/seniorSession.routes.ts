@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import SeniorSessionController from '../controllers/seniorSession.controller';
+import SeniorAnalyticsController from '../controllers/seniorAnalytics.controller';
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 
 import {
@@ -50,7 +51,17 @@ router.get(
 );
 
 /**
+ * Get analytics for the authenticated Senior Mentor
+ * GET /senior-sessions/analytics
+ */
+router.get(
+  '/analytics',
+  (req, res) => SeniorAnalyticsController.getDashboardStats(req as any, res)
+);
+
+/**
  * Get a single Senior Session
+
  * GET /senior-sessions/:sessionId
  */
 router.get(
@@ -67,6 +78,51 @@ router.post(
   '/:sessionId/book',
   seniorSessionIdValidator,
   SeniorSessionController.bookSession
+);
+
+/**
+ * Confirm a Booking
+ * POST /senior-sessions/:sessionId/bookings/:bookingId/confirm
+ */
+router.post(
+  '/:sessionId/bookings/:bookingId/confirm',
+  SeniorSessionController.confirmBooking
+);
+
+/**
+ * Cancel a Booking
+ * POST /senior-sessions/:sessionId/bookings/:bookingId/cancel
+ */
+router.post(
+  '/:sessionId/bookings/:bookingId/cancel',
+  SeniorSessionController.cancelBooking
+);
+
+/**
+ * Start a Booking
+ * POST /senior-sessions/:sessionId/bookings/:bookingId/start
+ */
+router.post(
+  '/:sessionId/bookings/:bookingId/start',
+  SeniorSessionController.startBooking
+);
+
+/**
+ * Reschedule a Booking
+ * POST /senior-sessions/:sessionId/bookings/:bookingId/reschedule
+ */
+router.post(
+  '/:sessionId/bookings/:bookingId/reschedule',
+  SeniorSessionController.rescheduleBooking
+);
+
+/**
+ * Complete a Booking
+ * POST /senior-sessions/:sessionId/bookings/:bookingId/complete
+ */
+router.post(
+  '/:sessionId/bookings/:bookingId/complete',
+  SeniorSessionController.completeBooking
 );
 
 /**

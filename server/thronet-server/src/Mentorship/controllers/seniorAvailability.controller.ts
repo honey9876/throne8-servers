@@ -45,6 +45,21 @@ class SeniorAvailabilityController {
     }
   }
 
+  async getMonthlyAvailability(req: AuthRequest, res: Response) {
+    try {
+      const mentorId = req.query.mentorId ? req.query.mentorId.toString() : req.user!.id;
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      const duration = parseInt(req.query.duration as string, 10) || 60; // Default 60 mins for simple day availability checks
+
+      const monthlySlots = await seniorAvailabilityService.getMonthlyAvailability(mentorId, startDate, endDate, duration);
+
+      return ResponseHandler.success(res, 'Monthly availability retrieved successfully', monthlySlots);
+    } catch (error: any) {
+      return ResponseHandler.error(res, error.message || 'Internal Server Error', error.statusCode || 500, error.stack);
+    }
+  }
+
   async addBlockedTime(req: AuthRequest, res: Response) {
     try {
       const mentorId = req.user!.id;

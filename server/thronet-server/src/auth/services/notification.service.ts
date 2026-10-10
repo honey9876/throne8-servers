@@ -259,12 +259,29 @@ class NotificationService {
         });
       }
 
-      // Verify connection
-      await this.emailTransporter.verify();
-      LoggerUtil.info('Email transporter initialized', {
+      // Verify connection asynchronously so it doesn't block server startup
+      this.emailTransporter.verify()
+        .then(() => {
+          LoggerUtil.info('Email transporter verified successfully', {
+            service: emailConfig.service,
+            host: emailConfig.host,
+            port: emailConfig.port,
+          });
+        })
+        .catch((error: any) => {
+          LoggerUtil.error('Email transporter async verification failed', {
+            error: error.message,
+            service: emailConfig.service,
+          });
+          if (error.message.includes('Invalid login') || error.code === 'EAUTH') {
+            LoggerUtil.error('GMAIL FIX: 1. App password exact (no spaces). 2. 2FA enabled. 3. Generate new app password.');
+          }
+          this.emailTransporter = null;
+        });
+
+      LoggerUtil.info('Email transporter initialization requested (verifying in background)', {
         service: emailConfig.service,
         host: emailConfig.host,
-        port: emailConfig.port,
       });
     } catch (error: unknown) {
       LoggerUtil.error('Email transporter initialization failed', {

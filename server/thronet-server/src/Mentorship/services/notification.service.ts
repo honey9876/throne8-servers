@@ -214,14 +214,48 @@ class NotificationService {
   /**
    * Send WhatsApp notification (placeholder)
    */
-  private async sendWhatsAppNotification(_user: any, _input: NotificationInput): Promise<boolean> {
+  private async sendWhatsAppNotification(user: any, input: NotificationInput): Promise<boolean> {
     try {
-      // TODO: Implement WhatsApp Business API
-      logger.info('📱 WhatsApp notification (not implemented yet)');
-      return false;
+      if (!user.phoneNumber) {
+        logger.warn('📱 WhatsApp notification skipped - no phone number');
+        return false;
+      }
+
+      // If we use Twilio Content templates, this would need a mechanism to pass the Template SID.
+      // For now, we will construct the text message mimicking the JUNIOR/SENIOR required formats if permitted by the account.
+      // (Account must have pre-approved session message templates enabled if outside 24h window)
+      const message = this.buildWhatsAppContent(input.type, input.data);
+      if (!message) return false;
+
+      return await smsService.sendWhatsApp({
+        to: user.phoneNumber,
+        message,
+        contentVariables: input.data.whatsappVars, // Dynamically forward variables for Twilio Sandbox templates
+        priority: input.priority === 'urgent' ? 'high' : 'normal',
+      });
     } catch (error: any) {
       logger.error('WhatsApp notification failed:', error);
       return false;
+    }
+  }
+
+  /**
+   * Build WhatsApp content based on notification type
+   */
+  private buildWhatsAppContent(type: NotificationType, data: Record<string, any>): string {
+    switch (type) {
+      case NotificationType.NEW_BOOKING_REQUEST:
+        // Checking if we are sending JUNIOR vs SENIOR perspective based on `targetRole` passed in data
+        if (data.targetRole === 'junior') {
+          return `Hi ${data.juniorName}, your session request for ${data.serviceName} with ${data.seniorMentorName} has been successfully submitted.\n\nDate: ${data.date}\nTime: ${data.time}\nStatus: Pending\n\nThe Senior Mentor will review your request shortly.\n\n— Throne8`;
+        } else {
+          return `Hi ${data.seniorMentorName}, you have received a new Senior Mentor session request.\n\nStudent: ${data.juniorName}\nService: ${data.serviceName}\nDate: ${data.date}\nTime: ${data.time}\nStatus: Pending\n\nPlease review the booking request from your Senior Mentor dashboard.\n\n— Throne8`;
+        }
+      case NotificationType.BOOKING_CONFIRMED:
+        return `✅ Booking Confirmed!\nMentor: ${data.seniorMentorName}\nService: ${data.serviceName}\nTime: ${data.date} at ${data.time}\n\n— Throne8`;
+      default:
+        // Use standard SMS content as fallback for other types
+        return this.buildSMSContent(type, data);
     }
   }
 

@@ -43,7 +43,7 @@ const SeniorSessionBookingSchema = new Schema<ISeniorSessionBooking>(
     status: {
       type: String,
       enum: Object.values(SeniorSessionStatus),
-      default: SeniorSessionStatus.UPCOMING,
+      default: SeniorSessionStatus.PENDING,
     },
 
     slotTime: {

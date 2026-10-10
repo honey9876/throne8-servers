@@ -5,6 +5,8 @@ interface SMSOptions {
   to: string;
   message: string;
   priority?: 'high' | 'normal';
+  contentSid?: string;
+  contentVariables?: Record<string, string>;
 }
 
 class SMSService {
@@ -107,6 +109,101 @@ class SMSService {
       return true;
     } catch(error : any) {
       logger.error('📱 Twilio SMS failed:', error);
+      return false;
+    }
+  }
+
+  async sendWhatsApp(options: SMSOptions): Promise<boolean> {
+    if (!this.isConfigured) {
+      logger.warn('🟢 WhatsApp not sent - SMS/Twilio service not configured');
+      return false;
+    }
+
+    try {
+      const validation = smsConfig.validatePhoneNumber(options.to);
+      if (!validation.valid) {
+        logger.error(`🟢 Invalid phone number for WhatsApp: ${validation.error}`);
+        return false;
+      }
+
+      const phoneNumber = validation.formatted!;
+      const provider = smsConfig.getProvider();
+
+      if (provider === 'twilio') {
+        if (!this.twilioClient) {
+          throw new Error('Twilio client not initialized');
+        }
+
+        // Must use WhatsApp-enabled sender number if provided, else fallback to SMS number
+        const rawFromNumber = process.env.TWILIO_WHATSAPP_NUMBER || smsConfig.getTwilioConfig().phoneNumber || '';
+        const fromNumber = rawFromNumber.replace(/^whatsapp:/, '');
+        const toWhatsApp = phoneNumber.replace(/^whatsapp:/, '');
+
+        // Gather credentials from env or fallback to passed args
+        const envContentSid = process.env.TWILIO_WHATSAPP_CONTENT_SID;
+        const finalContentSid = envContentSid || options.contentSid;
+
+        let finalContentVariables: string | undefined = undefined;
+
+        if (finalContentSid) {
+          // Resolve content variables prioritizing dynamic mapped ones from input over static env parsing
+          if (options.contentVariables) {
+             finalContentVariables = JSON.stringify(options.contentVariables);
+          } else if (process.env.TWILIO_WHATSAPP_CONTENT_VARIABLES) {
+             try {
+               // Strictly ensure it parses cleanly if provided via ENV
+               const envVars = JSON.parse(process.env.TWILIO_WHATSAPP_CONTENT_VARIABLES);
+               finalContentVariables = JSON.stringify(envVars);
+             } catch (err) {
+               logger.warn('Failed to parse TWILIO_WHATSAPP_CONTENT_VARIABLES as JSON. Ignoring env variables.');
+             }
+          }
+        }
+
+        // Safe Diagnostic Log
+        logger.info(`[WHATSAPP DEBUG]
+fromConfigured: ${!!rawFromNumber}
+toConfigured: true
+toCountryCode: ${phoneNumber.substring(0, 3)}
+sandboxMode: ${fromNumber.includes('14155238886')}
+contentSidConfigured: ${!!finalContentSid}
+contentVariablesConfigured: ${!!finalContentVariables}
+`);
+
+        const messagePayload: any = {
+          from: `whatsapp:${fromNumber}`,
+          to: `whatsapp:${toWhatsApp}`
+        };
+
+        if (finalContentSid) {
+          messagePayload.contentSid = finalContentSid;
+          if (finalContentVariables) {
+            messagePayload.contentVariables = finalContentVariables;
+          }
+          // Per Twilio requirements: Do NOT pass body when using Content API
+        } else {
+          // Development fallback matching previous default behaviour
+          messagePayload.body = options.message;
+        }
+
+        await this.twilioClient.messages.create(messagePayload);
+
+        logger.info(`🟢 WhatsApp message sent via Twilio to ${phoneNumber}`);
+        return true;
+      } else {
+        logger.warn(`🟢 WhatsApp sending is only supported via Twilio currently (configured: ${provider})`);
+        return false;
+      }
+    } catch(error : any) {
+      if (error && error.code === 572002) {
+        logger.warn('🟢 [TWILIO SANDBOX RESTRICTION] 572002 - No Twilio trial phone number is assigned for messaging to this destination number. Recipient is not verified for the Sandbox. Whatsapp delivery skipped, but underlying operation remains successful.');
+        return false;
+      }
+      if (error && error.code === 21654) {
+        logger.error('🟢 [WHATSAPP CONFIG ERROR] 21654 - ContentSid Required. TWILIO_WHATSAPP_CONTENT_SID is missing for a template-required Sandbox message.');
+        return false;
+      }
+      logger.error('🟢 Twilio WhatsApp failed:', error);
       return false;
     }
   }

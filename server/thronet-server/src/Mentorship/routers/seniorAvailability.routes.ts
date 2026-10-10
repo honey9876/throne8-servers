@@ -48,6 +48,15 @@ router.get(
 );
 
 /**
+ * Get monthly available slots (dynamic generation)
+ * GET /senior-availability/monthly-slots?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&duration=60
+ */
+router.get(
+  '/monthly-slots',
+  SeniorAvailabilityController.getMonthlyAvailability
+);
+
+/**
  * Block a specific time frame
  * POST /senior-availability/blocked
  */

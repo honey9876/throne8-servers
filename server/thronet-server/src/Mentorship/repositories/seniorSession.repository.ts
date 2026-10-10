@@ -64,7 +64,7 @@ class SeniorSessionRepository {
     return await SeniorSession.findOne({
       sessionId,
       mentorId,
-    }).lean<SeniorSessionDocument>();
+    });
   }
 
   /**
@@ -128,7 +128,7 @@ class SeniorSessionRepository {
           $elemMatch: {
              slotTime: booking.slotTime,
              scheduledAt: booking.scheduledAt,
-             status: { $in: ['pending', 'upcoming', 'confirmed', 'in_progress'] }
+             status: { $in: ['pending', 'confirmed', 'in_progress'] }
           }
         }
       };

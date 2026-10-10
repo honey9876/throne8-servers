@@ -53,8 +53,7 @@ class SMSConfiguration {
       };
       baseConfig.enabled = !!(
         config.TWILIO_ACCOUNT_SID &&
-        config.TWILIO_AUTH_TOKEN &&
-        config.TWILIO_PHONE_NUMBER
+        config.TWILIO_AUTH_TOKEN
       );
     }
 
@@ -142,7 +141,7 @@ class SMSConfiguration {
     return {
       accountSid: this.config.credentials.accountSid!,
       authToken: this.config.credentials.authToken!,
-      phoneNumber: this.config.credentials.phoneNumber!,
+      phoneNumber: this.config.credentials.phoneNumber,
     };
   }
 

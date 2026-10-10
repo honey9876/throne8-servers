@@ -15,7 +15,7 @@ export enum SeniorSessionStatus {
   ALL = 'all',
   DRAFT = 'draft',
   PENDING = 'pending',
-  UPCOMING = 'upcoming',
+  CONFIRMED = 'confirmed',
   IN_PROGRESS = 'in_progress',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
@@ -25,6 +25,7 @@ export enum SeniorSessionStatus {
  * Individual junior/mentee booking
  */
 export interface ISeniorSessionBooking {
+  _id?: string | any;
   menteeId: string;
 
   bookedBy?: string;
@@ -47,6 +48,20 @@ export interface ISeniorSessionBooking {
     platformFee: number;
     totalAmount: number;
     currency: string;
+  };
+
+  startedAt?: Date;
+  
+  completion?: {
+    completedAt: Date;
+    actualDuration: number;
+    wasSuccessful: boolean;
+    followUpRequired: boolean;
+  };
+  
+  reschedule?: {
+    count: number;
+    reason?: string;
   };
 }
 
