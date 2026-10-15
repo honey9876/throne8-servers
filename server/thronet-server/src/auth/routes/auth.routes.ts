@@ -21,6 +21,11 @@ import { csrfProtection } from '@/config/security/csrf.config';
 import { updateDateOfBirth } from '../controllers/dob.controller';
 import { googleVerifyController, googleRegisterController } from '../controllers/googleAuth.controller';
 import { DeviceRepository, SessionRepository } from '../repository/auth.repository';
+import {
+    normalizeEmail,
+    normalizePhone,
+    RegistrationField,
+} from '../utils/registrationIdentity';
 
 const router = express.Router();
 
@@ -50,6 +55,18 @@ const sanitizeInput = (req: Request, _res: Response, next: NextFunction) => {
     next();
 };
 
+const trimRegistrationInput = (req: Request, _res: Response, next: NextFunction) => {
+    if (req.body && typeof req.body === 'object') {
+        Object.keys(req.body).forEach((key) => {
+            if (SKIP_SANITIZE_FIELDS.has(key)) return;
+            if (typeof req.body[key] === 'string') {
+                req.body[key] = (req.body[key] as string).trim();
+            }
+        });
+    }
+    next();
+};
+
 /**
  * Controller errors ko next() tak pahunchata hai
  */
@@ -64,9 +81,34 @@ const handle =
 const getMonthsDifference = (startDate: string, endDate: string): number => {
     const start = new Date(startDate);
     const end = new Date(endDate);
-    return (end.getFullYear() - start.getFullYear()) * 12 +
-        (end.getMonth() - start.getMonth());
+    return (end.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+        (end.getUTCMonth() - start.getUTCMonth());
 };
+
+const SAFE_TEXT_PATTERN = /^[^\p{Cc}<>]+$/u;
+const NAME_PATTERN = /^[\p{L} .'-]+$/u;
+const LOCATION_PATTERN = /^[\p{L} ,.-]+$/u;
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const isValidDateOnly = (value: string): boolean => {
+    if (!DATE_ONLY_PATTERN.test(value)) return false;
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+const utcToday = (): string => new Date().toISOString().slice(0, 10);
+const earliestStartDate = (): string => {
+    const today = new Date();
+    return new Date(Date.UTC(
+        today.getUTCFullYear() - 50,
+        today.getUTCMonth(),
+        today.getUTCDate()
+    )).toISOString().slice(0, 10);
+};
+const REGISTRATION_FIELDS = new Set<RegistrationField>([
+    'email', 'password', 'confirmPassword', 'firstName', 'lastName',
+    'phoneNumber', 'location', 'userType', 'jobTitle', 'companyName',
+    'startDate', 'endDate', 'collegeName', 'degree', 'fieldOfStudy',
+    'graduationYear', 'highestEducation', 'preferredRole', 'cgpa',
+]);
 
 /**
  * OAuth (browser flow) ke baad tokens issue karta hai, hamesha session + device ke saath
@@ -131,8 +173,7 @@ const registerSchema = Joi.object({
     // Basic fields
     email: Joi.string()
         .email()
-        .lowercase()
-        .trim()
+        .custom((value) => normalizeEmail(value))
         .required()
         .messages({
             'string.email': 'Invalid email format',
@@ -143,7 +184,7 @@ const registerSchema = Joi.object({
     password: Joi.string()
         .min(Constants.PASSWORD_POLICY.MIN_LENGTH)
         .max(Constants.PASSWORD_POLICY.MAX_LENGTH)
-        .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
+        .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/)
         .required()
         .messages({
             'string.min': `Password must be at least ${Constants.PASSWORD_POLICY.MIN_LENGTH} characters`,
@@ -163,52 +204,59 @@ const registerSchema = Joi.object({
         }),
 
     firstName: Joi.string()
-        .min(Constants.USER_VALIDATION.FIRST_NAME.MIN_LENGTH)
-        .max(Constants.USER_VALIDATION.FIRST_NAME.MAX_LENGTH)
-        .pattern(Constants.USER_VALIDATION.FIRST_NAME.PATTERN)
+        .min(2)
+        .max(50)
+        .pattern(NAME_PATTERN)
         .trim()
         .required()
         .messages({
-            'string.min': `First name must be at least ${Constants.USER_VALIDATION.FIRST_NAME.MIN_LENGTH} characters`,
-            'string.max': `First name cannot exceed ${Constants.USER_VALIDATION.FIRST_NAME.MAX_LENGTH} characters`,
-            'string.pattern.base': 'First name can only contain letters, spaces, hyphens, and apostrophes',
+            'string.min': 'First name must be at least 2 characters',
+            'string.max': 'First name cannot exceed 50 characters',
+            'string.pattern.base': 'Name can only contain Unicode letters, spaces, hyphens, apostrophes, and periods',
             'string.empty': 'First name cannot be empty',
             'any.required': 'First name is required',
         }),
 
     lastName: Joi.string()
-        .min(Constants.USER_VALIDATION.LAST_NAME.MIN_LENGTH)
-        .max(Constants.USER_VALIDATION.LAST_NAME.MAX_LENGTH)
-        .pattern(Constants.USER_VALIDATION.LAST_NAME.PATTERN)
+        .min(2)
+        .max(50)
+        .pattern(NAME_PATTERN)
         .trim()
         .optional()
         .allow('')
         .messages({
-            'string.min': `Last name must be at least ${Constants.USER_VALIDATION.LAST_NAME.MIN_LENGTH} characters`,
-            'string.max': `Last name cannot exceed ${Constants.USER_VALIDATION.LAST_NAME.MAX_LENGTH} characters`,
-            'string.pattern.base': 'Last name can only contain letters, spaces, hyphens, and apostrophes',
+            'string.min': 'Last name must be at least 2 characters',
+            'string.max': 'Last name cannot exceed 50 characters',
+            'string.pattern.base': 'Name can only contain Unicode letters, spaces, hyphens, apostrophes, and periods',
         }),
 
     location: Joi.string()
-        .min(Constants.LOCATION_VALIDATION.MIN_LENGTH)
-        .max(Constants.LOCATION_VALIDATION.MAX_LENGTH)
-        .pattern(Constants.LOCATION_VALIDATION.PATTERN)
+        .min(2)
+        .max(100)
+        .pattern(LOCATION_PATTERN)
         .trim()
         .required()
         .messages({
-            'string.min': `Location must be at least ${Constants.LOCATION_VALIDATION.MIN_LENGTH} characters`,
-            'string.max': `Location cannot exceed ${Constants.LOCATION_VALIDATION.MAX_LENGTH} characters`,
-            'string.pattern.base': 'Location must start with a capital letter and contain only letters, spaces, and hyphens',
+            'string.min': 'Location must be at least 2 characters',
+            'string.max': 'Location cannot exceed 100 characters',
+            'string.pattern.base': 'Location can only contain Unicode letters, spaces, commas, periods, and hyphens',
             'string.empty': 'Location cannot be empty',
             'any.required': 'Location is required',
         }),
 
     phoneNumber: Joi.string()
-        .pattern(/^\+?[1-9]\d{1,14}$/)
-        .optional()
-        .allow('')
+        .custom((value, helpers) => {
+            try {
+                return normalizePhone(value);
+            } catch {
+                return helpers.error('any.invalid');
+            }
+        })
+        .required()
         .messages({
-            'string.pattern.base': 'Invalid phone number format (E.164 format required, e.g., +919876543210)',
+            'any.invalid': 'Enter a valid phone number: use + and country code, or a 10-digit Indian mobile number.',
+            'string.empty': 'Phone number is required',
+            'any.required': 'Phone number is required',
         }),
 
     // Onboarding
@@ -224,10 +272,15 @@ const registerSchema = Joi.object({
     jobTitle: Joi.when('userType', {
         is: 'working',
         then: Joi.string()
-            .valid(...Constants.ONBOARDING.WORKING.JOB_TITLES)
+            .trim()
+            .min(2)
+            .max(100)
+            .pattern(SAFE_TEXT_PATTERN)
             .required()
             .messages({
-                'any.only': 'Please select a valid job title',
+                'string.min': 'Job title must be at least 2 characters',
+                'string.max': 'Job title cannot exceed 100 characters',
+                'string.pattern.base': 'Enter a job title without HTML or control characters',
                 'any.required': 'Job title is required for working professionals',
             }),
         otherwise: Joi.forbidden()
@@ -239,10 +292,15 @@ const registerSchema = Joi.object({
     companyName: Joi.when('userType', {
         is: 'working',
         then: Joi.string()
-            .valid(...Constants.ONBOARDING.WORKING.COMPANIES)
+            .trim()
+            .min(2)
+            .max(100)
+            .pattern(SAFE_TEXT_PATTERN)
             .required()
             .messages({
-                'any.only': 'Please select a valid company',
+                'string.min': 'Company name must be at least 2 characters',
+                'string.max': 'Company name cannot exceed 100 characters',
+                'string.pattern.base': 'Enter a company name without HTML or control characters',
                 'any.required': 'Company name is required for working professionals',
             }),
         otherwise: Joi.forbidden()
@@ -253,14 +311,23 @@ const registerSchema = Joi.object({
 
     startDate: Joi.when('userType', {
         is: 'working',
-        then: Joi.date()
-            .iso()
-            .max('now')
+        then: Joi.string()
+            .trim()
+            .pattern(DATE_ONLY_PATTERN)
+            .custom((value, helpers) => {
+                if (!DATE_ONLY_PATTERN.test(value)) return value;
+                if (!isValidDateOnly(value)) return helpers.error('date.base');
+                if (value > utcToday()) return helpers.error('date.max');
+                if (value < earliestStartDate()) return helpers.error('date.min');
+                return value;
+            })
             .required()
             .messages({
                 'date.base': 'Start date must be a valid date',
                 'date.format': 'Start date must be in YYYY-MM-DD format',
+                'string.pattern.base': 'Start date must be in YYYY-MM-DD format',
                 'date.max': 'Start date cannot be in the future',
+                'date.min': 'Start date cannot be more than 50 years ago',
                 'any.required': 'Start date is required for working professionals',
             }),
         otherwise: Joi.forbidden()
@@ -271,18 +338,21 @@ const registerSchema = Joi.object({
 
     endDate: Joi.when('userType', {
         is: 'working',
-        then: Joi.date()
-            .iso()
-            .min(Joi.ref('startDate'))
-            .max('now')
+        then: Joi.string()
+            .trim()
+            .pattern(DATE_ONLY_PATTERN)
             .optional()
             .allow(null, '')
             .custom((value, helpers) => {
-                if (!value) return value;
+                if (value === null || value === '') return value;
+                if (!DATE_ONLY_PATTERN.test(value)) return value;
+                if (!isValidDateOnly(value)) return helpers.error('date.base');
+                if (value > utcToday()) return helpers.error('date.max');
 
                 const startDate = helpers.state.ancestors[0].startDate;
                 if (!startDate) return value;
 
+                if (value < startDate) return helpers.error('date.min');
                 const monthsDiff = getMonthsDifference(startDate, value);
 
                 if (monthsDiff < Constants.ONBOARDING.WORKING.MIN_JOB_DURATION_MONTHS) {
@@ -296,6 +366,7 @@ const registerSchema = Joi.object({
             .messages({
                 'date.base': 'End date must be a valid date',
                 'date.format': 'End date must be in YYYY-MM-DD format',
+                'string.pattern.base': 'End date must be in YYYY-MM-DD format',
                 'date.min': 'End date must be after start date',
                 'date.max': 'End date cannot be in the future',
                 'any.invalid': 'Minimum 1 month job duration is required',
@@ -310,13 +381,15 @@ const registerSchema = Joi.object({
     collegeName: Joi.when('userType', {
         is: 'student',
         then: Joi.string()
-            .min(Constants.ONBOARDING.STUDENT.MIN_COLLEGE_NAME_LENGTH)
-            .max(Constants.ONBOARDING.STUDENT.MAX_COLLEGE_NAME_LENGTH)
+            .min(3)
+            .max(100)
             .trim()
+            .pattern(SAFE_TEXT_PATTERN)
             .required()
             .messages({
-                'string.min': `College name must be at least ${Constants.ONBOARDING.STUDENT.MIN_COLLEGE_NAME_LENGTH} characters`,
-                'string.max': `College name cannot exceed ${Constants.ONBOARDING.STUDENT.MAX_COLLEGE_NAME_LENGTH} characters`,
+                'string.min': 'College name must be at least 3 characters',
+                'string.max': 'College name cannot exceed 100 characters',
+                'string.pattern.base': 'Enter a college name without HTML or control characters',
                 'string.empty': 'College name cannot be empty',
                 'any.required': 'College name is required for students',
             }),
@@ -329,10 +402,15 @@ const registerSchema = Joi.object({
     degree: Joi.when('userType', {
         is: 'student',
         then: Joi.string()
-            .valid(...Constants.ONBOARDING.STUDENT.VALID_DEGREES)
+            .trim()
+            .min(2)
+            .max(100)
+            .pattern(SAFE_TEXT_PATTERN)
             .required()
             .messages({
-                'any.only': 'Please select a valid degree',
+                'string.min': 'Degree must be at least 2 characters',
+                'string.max': 'Degree cannot exceed 100 characters',
+                'string.pattern.base': 'Enter a degree without HTML or control characters',
                 'any.required': 'Degree is required for students',
             }),
         otherwise: Joi.forbidden()
@@ -344,10 +422,15 @@ const registerSchema = Joi.object({
     fieldOfStudy: Joi.when('userType', {
         is: 'student',
         then: Joi.string()
-            .valid(...Constants.ONBOARDING.STUDENT.VALID_FIELDS)
+            .trim()
+            .min(2)
+            .max(100)
+            .pattern(SAFE_TEXT_PATTERN)
             .required()
             .messages({
-                'any.only': 'Please select a valid field of study',
+                'string.min': 'Field of study must be at least 2 characters',
+                'string.max': 'Field of study cannot exceed 100 characters',
+                'string.pattern.base': 'Enter a field of study without HTML or control characters',
                 'any.required': 'Field of study is required for students',
             }),
         otherwise: Joi.forbidden()
@@ -375,7 +458,7 @@ const registerSchema = Joi.object({
                 'string.pattern.base': 'Graduation year must be a 4-digit year (e.g., 2025)',
                 'string.empty': 'Graduation year cannot be empty',
                 'any.required': 'Graduation year is required for students',
-                'any.invalid': 'Invalid graduation year',
+                'any.invalid': `Graduation year must be between ${Constants.ONBOARDING.STUDENT.MIN_GRAD_YEAR} and ${Constants.ONBOARDING.STUDENT.MAX_GRAD_YEAR}`,
             }),
         otherwise: Joi.forbidden()
             .messages({
@@ -387,10 +470,15 @@ const registerSchema = Joi.object({
     highestEducation: Joi.when('userType', {
         is: 'fresher',
         then: Joi.string()
-            .valid(...Constants.ONBOARDING.FRESHER.VALID_EDUCATION_LEVELS)
+            .trim()
+            .min(2)
+            .max(100)
+            .pattern(SAFE_TEXT_PATTERN)
             .required()
             .messages({
-                'any.only': 'Please select a valid education level',
+                'string.min': 'Highest education must be at least 2 characters',
+                'string.max': 'Highest education cannot exceed 100 characters',
+                'string.pattern.base': 'Enter an education level without HTML or control characters',
                 'any.required': 'Highest education is required for freshers',
             }),
         otherwise: Joi.forbidden()
@@ -402,10 +490,15 @@ const registerSchema = Joi.object({
     preferredRole: Joi.when('userType', {
         is: 'fresher',
         then: Joi.string()
-            .valid(...Constants.ONBOARDING.FRESHER.VALID_JOB_ROLES)
+            .trim()
+            .min(2)
+            .max(100)
+            .pattern(SAFE_TEXT_PATTERN)
             .required()
             .messages({
-                'any.only': 'Please select a valid job role',
+                'string.min': 'Preferred role must be at least 2 characters',
+                'string.max': 'Preferred role cannot exceed 100 characters',
+                'string.pattern.base': 'Enter a preferred role without HTML or control characters',
                 'any.required': 'Preferred job role is required for freshers',
             }),
         otherwise: Joi.forbidden()
@@ -448,12 +541,22 @@ const validateRegistration = (req: Request, res: Response, next: NextFunction) =
 
         LoggerUtil.warn('Registration validation failed', {
             errors,
-            email: req.body?.email,
             userType: req.body?.userType,
             ipAddress: req.ip,
         });
 
-        return ResponseUtil.validationError(res, errors, 'Registration validation failed');
+        const fieldErrors = error.details.flatMap((detail) => {
+            const field = detail.path[0];
+            return typeof field === 'string' && REGISTRATION_FIELDS.has(field as RegistrationField)
+                ? [{ field: field as RegistrationField, message: detail.message }]
+                : [];
+        });
+        return ResponseUtil.validationError(
+            res,
+            errors,
+            'Registration validation failed',
+            fieldErrors
+        );
     }
 
     req.body = value;
@@ -700,10 +803,20 @@ router.get('/health', (_req: Request, res: Response) => {
  */
 router.post(
     '/register',
-    sanitizeInput,
+    trimRegistrationInput,
     rateLimitMiddleware(),
     validateRegistration,
     handle((req, res) => AuthController.register(req, res))
+);
+
+router.post(
+    '/availability',
+    rateLimitMiddleware({
+        maxRequests: 20,
+        windowMs: 60_000,
+        message: 'Too many availability checks. Try again shortly.',
+    }),
+    handle((req, res) => AuthController.checkAvailability(req, res))
 );
 
 /**

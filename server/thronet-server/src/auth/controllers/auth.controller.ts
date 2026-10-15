@@ -20,6 +20,13 @@ import { User, AuditLog, Session } from '@/shared/models/index.models';
 import { AuthService } from '@/shared/services/index.service';
 import { GetAllUsersParams } from '../interfaces/auth.interfaces';
 import { AuthCacheRepository } from '../repository/auth.repository';
+import {
+    duplicateKeyConflict,
+    normalizeEmail,
+    normalizePhone,
+    phoneLookupVariants,
+    RegistrationConflictError,
+} from '../utils/registrationIdentity';
 
 // ==================== CONSTANTS ====================
 
@@ -56,7 +63,7 @@ interface RegisterBody {
     firstName: string;
     lastName?: string;
     location: string;
-    phoneNumber?: string;
+    phoneNumber: string;
     currentPosition?: string;
     company?: string;
     education?: string;
@@ -131,37 +138,6 @@ interface DeleteBody {
     confirmation: string;
 }
 
-interface ValidationResult {
-    isValid: boolean;
-    data?: {
-        email: string;
-        password: string;
-        confirmPassword: string;
-        firstName: string;
-        lastName?: string;
-        location: string;
-        currentPosition?: string;
-        company?: string;
-        education?: string;
-        pronouns?: string;
-        phoneNumber?: string;
-        userType: 'working' | 'student' | 'fresher';
-        jobTitle?: string;
-        companyName?: string;
-        startDate?: string;
-        endDate?: string;
-        collegeName?: string;
-        degree?: string;
-        fieldOfStudy?: string;
-        graduationYear?: string;
-        highestEducation?: string;
-        preferredRole?: string;
-        cgpa?: string;
-        rememberMe?: boolean;
-    };
-    errors?: string[];
-}
-
 // ==================== HELPERS ====================
 
 /**
@@ -227,6 +203,59 @@ class AuthController {
 
     // ==================== USER REGISTRATION ====================
 
+    static async checkAvailability(req: Request, res: Response): Promise<void> {
+        const { field, value } = req.body || {};
+        if ((field !== 'email' && field !== 'phone') || typeof value !== 'string' || !value.trim()) {
+            ResponseUtil.badRequest(res, 'Availability field and value are required');
+            return;
+        }
+
+        try {
+            let existing;
+            if (field === 'email') {
+                const email = normalizeEmail(value);
+                if (!ValidatorUtil.validateEmail(email).isValid) {
+                    ResponseUtil.validationError(
+                        res,
+                        ['Enter a valid email address'],
+                        'Availability validation failed',
+                        [{ field: 'email', message: 'Enter a valid email address' }]
+                    );
+                    return;
+                }
+                existing = await User.findOne({ email })
+                    .collation({ locale: 'en', strength: 2 })
+                    .select('_id')
+                    .lean()
+                    .exec();
+            } else {
+                let phone: string;
+                try {
+                    phone = normalizePhone(value);
+                } catch {
+                    ResponseUtil.validationError(
+                        res,
+                        ['Enter a valid phone number'],
+                        'Availability validation failed',
+                        [{ field: 'phoneNumber', message: 'Enter a valid phone number' }]
+                    );
+                    return;
+                }
+                existing = await User.findOne({
+                    phoneNumber: { $in: phoneLookupVariants(phone) },
+                }).select('_id').lean().exec();
+            }
+
+            res.status(200).json({ available: !existing });
+        } catch (error: any) {
+            LoggerUtil.error('Registration availability check failed', {
+                error: error?.message,
+                field,
+            });
+            ResponseUtil.internalError(res, 'Availability check failed. Please try again.', error);
+        }
+    }
+
     /**
      * POST /api/v1/auth/register
      */
@@ -235,27 +264,9 @@ class AuthController {
         const correlationId = (req as any).correlationId || uuidv4();
 
         try {
-            const {
-                email,
-                password,
-                confirmPassword,
-                firstName,
-                lastName,
-                location,
-                phoneNumber,
-                userType,
-                jobTitle,
-                companyName,
-                startDate,
-                endDate,
-                collegeName,
-                degree,
-                fieldOfStudy,
-                graduationYear,
-                highestEducation,
-                preferredRole,
-                cgpa,
-            } = req.body;
+            const data = req.body;
+            const normalizedEmail = normalizeEmail(data.email);
+            const normalizedPhone = normalizePhone(data.phoneNumber);
 
             const ipAddress = req.ip || (req as any).connection?.remoteAddress || '0.0.0.0';
             const userAgent = (req.headers['user-agent'] as string) || 'Unknown';
@@ -269,79 +280,7 @@ class AuthController {
                 ipAddress,
             };
 
-            LoggerUtil.info('Registration attempt started', { email, ipAddress, correlationId });
-
-            // Step 1: Validate input
-            const validation: ValidationResult = await ValidatorUtil.validateUserRegistration(
-                {
-                    email,
-                    password,
-                    confirmPassword,
-                    firstName,
-                    lastName,
-                    location,
-                    phoneNumber,
-                    userType,
-                    jobTitle,
-                    companyName,
-                    startDate,
-                    endDate,
-                    collegeName,
-                    degree,
-                    fieldOfStudy,
-                    graduationYear,
-                    highestEducation,
-                    preferredRole,
-                    cgpa,
-                },
-                ipAddress
-            );
-
-            if (!validation.isValid) {
-                LoggerUtil.warn('Registration validation failed', {
-                    email,
-                    errors: validation.errors,
-                    ipAddress,
-                    correlationId,
-                });
-                ResponseUtil.validationError(res, validation.errors || [], 'Validation failed');
-                return;
-            }
-
-            const data = validation.data!;
-            const normalizedEmail = data.email.trim().toLowerCase();
-
-            // Step 2: Existing user check
-            const existingUser = await User.findOne({ email: normalizedEmail });
-            if (existingUser) {
-                LoggerUtil.warn('Registration failed - user already exists', {
-                    email: normalizedEmail,
-                    ipAddress,
-                    correlationId,
-                });
-
-                sendAudit({
-                    eventId: uuidv4(),
-                    userId: null,
-                    action: 'REGISTRATION_FAILED',
-                    ipAddress,
-                    status: 'FAILURE',
-                    severity: 'LOW',
-                    timestamp: new Date().toISOString(),
-                    metadata: {
-                        email: normalizedEmail,
-                        reason: 'user_already_exists',
-                        correlationId,
-                    },
-                });
-
-                ResponseUtil.conflict(
-                    res,
-                    'User already exists with this email',
-                    ['Email is already registered']
-                );
-                return;
-            }
+            LoggerUtil.info('Registration attempt started', { ipAddress, correlationId });
 
             // Step 3: Register via AuthService
             const result = await AuthService.register(
@@ -351,7 +290,7 @@ class AuthController {
                     firstName: data.firstName,
                     lastName: data.lastName,
                     location: data.location,
-                    phoneNumber: data.phoneNumber,
+                    phoneNumber: normalizedPhone,
                     userType: data.userType,
                     jobTitle: data.jobTitle,
                     companyName: data.companyName,
@@ -468,10 +407,22 @@ class AuthController {
         } catch (error: any) {
             const duration = Date.now() - startTime;
 
+            const conflict = error instanceof RegistrationConflictError
+                ? error
+                : duplicateKeyConflict(error);
+            if (conflict) {
+                ResponseUtil.conflict(
+                    res,
+                    'Registration conflicts with an existing account',
+                    conflict.fieldErrors.map((fieldError) => fieldError.message),
+                    conflict.fieldErrors
+                );
+                return;
+            }
+
             LoggerUtil.error('Registration failed', {
                 error: error.message,
                 stack: error.stack,
-                email: req.body?.email,
                 ipAddress: req.ip,
                 duration,
                 correlationId,
@@ -668,7 +619,6 @@ class AuthController {
 
             LoggerUtil.error('Login failed', {
                 error: error.message,
-                email: req.body?.email,
                 ipAddress: req.ip,
                 duration,
                 correlationId,

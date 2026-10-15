@@ -24,6 +24,7 @@
 
 import { Response, Request, NextFunction } from 'express';
 import { logger } from './logger.util';
+import type { RegistrationFieldError } from '@/auth/utils/registrationIdentity';
 // import environmentConfig from '../config/environment'; // Uncomment if needed
 
 // ==================== INTERFACES ====================
@@ -42,6 +43,7 @@ interface ErrorResponseInterface {
     statusCode: number;
     message: string;
     errors?: string[];
+    fieldErrors?: RegistrationFieldError[];
     metadata?: any;
     timestamp: string;
     code?: string;
@@ -201,7 +203,8 @@ class ResponseUtil {
         message: string = 'Internal Server Error',
         statusCode: number = 500,
         errors: string[] = [],
-        metadata: any = {}
+        metadata: any = {},
+        fieldErrors?: RegistrationFieldError[]
     ): Response {
         const response: ErrorResponseInterface = {
             status: 'error',
@@ -212,6 +215,9 @@ class ResponseUtil {
 
         if (errors.length > 0) {
             response.errors = errors;
+        }
+        if (fieldErrors?.length) {
+            response.fieldErrors = fieldErrors;
         }
 
         if (Object.keys(metadata).length > 0) {
@@ -244,8 +250,13 @@ class ResponseUtil {
     /**
      * Send validation error (400)
      */
-    static validationError(res: Response, errors: string[] = [], message: string = 'Validation failed'): Response {
-        return this.error(res, message, 400, errors);
+    static validationError(
+        res: Response,
+        errors: string[] = [],
+        message: string = 'Validation failed',
+        fieldErrors?: RegistrationFieldError[]
+    ): Response {
+        return this.error(res, message, 400, errors, {}, fieldErrors);
     }
 
     /**
@@ -305,8 +316,13 @@ class ResponseUtil {
     /**
      * Send conflict error (409)
      */
-    static conflict(res: Response, message: string = 'Resource conflict', errors: string[] = []): Response {
-        return this.error(res, message, 409, errors);
+    static conflict(
+        res: Response,
+        message: string = 'Resource conflict',
+        errors: string[] = [],
+        fieldErrors?: RegistrationFieldError[]
+    ): Response {
+        return this.error(res, message, 409, errors, {}, fieldErrors);
     }
 
     /**

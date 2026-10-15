@@ -1,6 +1,11 @@
 import { Request, Response } from 'express';
 import GoogleAuthService from '../services/googleAuth.service';
 import LoggerUtil from '@/shared/logger.util';
+import ResponseUtil from '@/shared/response.util';
+import {
+    duplicateKeyConflict,
+    RegistrationConflictError,
+} from '../utils/registrationIdentity';
 
 /**
  * Controller for Google ID Token verification (Mobile App Native Auth Flow)
@@ -54,6 +59,18 @@ export async function googleRegisterController(req: Request, res: Response): Pro
             data: result,
         });
     } catch (error: any) {
+        const conflict = error instanceof RegistrationConflictError
+            ? error
+            : duplicateKeyConflict(error);
+        if (conflict) {
+            ResponseUtil.conflict(
+                res,
+                'Registration conflicts with an existing account',
+                conflict.fieldErrors.map((fieldError) => fieldError.message),
+                conflict.fieldErrors
+            );
+            return;
+        }
         LoggerUtil.error('Google register controller failed', { error: error.message });
         res.status(400).json({
             success: false,

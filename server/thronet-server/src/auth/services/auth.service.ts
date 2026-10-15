@@ -55,6 +55,16 @@ import {
 } from '../interfaces/auth.interfaces';
 
 import { VerificationType } from '../types/auth.types';
+import {
+    duplicateEmailError,
+    duplicateKeyConflict,
+    duplicatePhoneError,
+    normalizeEmail,
+    normalizePhone,
+    phoneLookupVariants,
+    RegistrationConflictError,
+    RegistrationFieldError,
+} from '../utils/registrationIdentity';
 
 // ==================== CONSTANTS ====================
 
@@ -148,36 +158,33 @@ class AuthService {
         let createdUserId: string | null = null;
 
         try {
-            email = (email || '').trim().toLowerCase();
+            email = normalizeEmail(email || '');
+            const phoneNumber = profileData.phoneNumber
+                ? normalizePhone(profileData.phoneNumber)
+                : undefined;
 
-            if (!validator.isEmail(email)) throw new Error('Invalid email format');
-            if (!password || password.length < 6)
-                throw new Error('Password must be at least 6 characters');
-
-            const existingUser = await UserRepository.findByEmail(email);
-            if (existingUser) {
-                await AuditLogRepository.logAction({
-                    userId: existingUser.userId,
-                    userEmail: email,
-                    action: 'REGISTRATION_FAILED',
-                    ipAddress: deviceData.ipAddress || '0.0.0.0',
-                    status: 'FAILURE',
-                    severity: 'LOW',
-                    metadata: new Map([
-                        ['email', email],
-                        ['reason', 'user_already_exists'],
-                    ]),
-                });
-                throw new Error(
-                    'User already exists, please login instead or create account with a different email.'
-                );
-            }
+            const [existingEmail, existingPhone] = await Promise.all([
+                User.findOne({ email })
+                    .collation({ locale: 'en', strength: 2 })
+                    .select('userId')
+                    .lean()
+                    .exec(),
+                phoneNumber
+                    ? User.findOne({
+                        phoneNumber: { $in: phoneLookupVariants(phoneNumber) },
+                    }).select('userId').lean().exec()
+                    : Promise.resolve(null),
+            ]);
+            const fieldErrors: RegistrationFieldError[] = [];
+            if (existingEmail) fieldErrors.push(duplicateEmailError);
+            if (existingPhone) fieldErrors.push(duplicatePhoneError);
+            if (fieldErrors.length) throw new RegistrationConflictError(fieldErrors);
 
             // Build user document
             const user = new User({
                 email,
                 passwordHash: password,
-                phoneNumber: profileData.phoneNumber,
+                ...(phoneNumber ? { phoneNumber } : {}),
                 firstName: profileData.firstName,
                 lastName: profileData.lastName,
                 location: profileData.location,
@@ -223,7 +230,6 @@ class AuthService {
             });
 
             logger.info('Creating new user', {
-                email,
                 firstName: profileData.firstName,
                 location: profileData.location,
                 userType: profileData.userType,
@@ -329,10 +335,12 @@ class AuthService {
                 );
             }
 
-            logger.error('User registration failed', {
-                error: error.message,
-                email,
-            });
+            const conflict = error instanceof RegistrationConflictError
+                ? error
+                : duplicateKeyConflict(error);
+            if (conflict) throw conflict;
+
+            logger.error('User registration failed', { error: error.message });
             throw error;
         }
     }

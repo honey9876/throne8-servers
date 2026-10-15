@@ -5,6 +5,16 @@ import { User, UserProfile } from '@/auth/models';
 import userEmitter from '@/shared/events/emitters/user.emitter';
 import { LoggerUtil as logger } from '@/shared/logger.util';
 import { UserType } from '../types/auth.types';
+import {
+    duplicateEmailError,
+    duplicateKeyConflict,
+    duplicatePhoneError,
+    normalizeEmail,
+    normalizePhone,
+    phoneLookupVariants,
+    RegistrationConflictError,
+    RegistrationFieldError,
+} from '../utils/registrationIdentity';
 
 export interface GoogleTokenPayload {
     sub: string;
@@ -234,12 +244,23 @@ export class GoogleAuthService {
      */
     static async registerGoogleUser(registrationData: GoogleRegistrationData): Promise<GoogleVerifyResult> {
         const payload = await this.verifyIdToken(registrationData.idToken);
-        const email = payload.email.toLowerCase();
+        const email = normalizeEmail(payload.email);
+        const phoneNumber = registrationData.phoneNumber?.trim()
+            ? normalizePhone(registrationData.phoneNumber)
+            : undefined;
 
-        let existingUser = await User.findOne({ email });
-        if (existingUser) {
-            throw new Error('User already registered. Please log in.');
-        }
+        const [existingEmail, existingPhone] = await Promise.all([
+            User.findOne({ email }).collation({ locale: 'en', strength: 2 }).select('_id').lean().exec(),
+            phoneNumber
+                ? User.findOne({
+                    phoneNumber: { $in: phoneLookupVariants(phoneNumber) },
+                }).select('_id').lean().exec()
+                : Promise.resolve(null),
+        ]);
+        const fieldErrors: RegistrationFieldError[] = [];
+        if (existingEmail) fieldErrors.push(duplicateEmailError);
+        if (existingPhone) fieldErrors.push(duplicatePhoneError);
+        if (fieldErrors.length) throw new RegistrationConflictError(fieldErrors);
 
         const userId = uuidv4();
         const userType = registrationData.userType || 'fresher';
@@ -256,7 +277,7 @@ export class GoogleAuthService {
             emailVerifiedAt: new Date(),
             status: 'active',
             location: registrationData.location || 'India',
-            phoneNumber: registrationData.phoneNumber,
+            ...(phoneNumber ? { phoneNumber } : {}),
             oauthProviders: [
                 {
                     provider: 'google',
@@ -293,7 +314,13 @@ export class GoogleAuthService {
             },
         });
 
-        await user.save();
+        try {
+            await user.save();
+        } catch (error) {
+            const conflict = duplicateKeyConflict(error);
+            if (conflict) throw conflict;
+            throw error;
+        }
 
         // Create UserProfile document
         try {
