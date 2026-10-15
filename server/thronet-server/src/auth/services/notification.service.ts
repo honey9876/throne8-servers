@@ -20,6 +20,7 @@
 
 import nodemailer, { Transporter } from 'nodemailer';
 import sgMail from '@sendgrid/mail';
+import axios from 'axios';
 import twilio from 'twilio';
 import Handlebars from 'handlebars';
 import * as fs from 'fs';
@@ -44,29 +45,51 @@ interface EmailConfig {
     name: string;
     address: string;
   };
+  apiKey?: string;
   maxRetries: number;
   retryDelay: number;
 }
 
+const configuredService = (process.env.EMAIL_SERVICE || 'gmail').toLowerCase().trim();
+const rawApiKey = (process.env.BREVO_API_KEY || '').trim();
+const isSmtpKeyInApiField = rawApiKey.startsWith('xsmtpsib-');
+const hasSmtpCreds = !!(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
+
+// Determine service strategy
+const isExplicitBrevoSmtp = configuredService === 'brevo-smtp' || configuredService === 'brevo_smtp';
+const isExplicitBrevoApi = configuredService === 'brevo-api' || configuredService === 'brevo_api';
+const isBrevoSmart = configuredService === 'brevo';
+
+let activeService = configuredService;
+if (isExplicitBrevoSmtp) {
+  activeService = 'brevo-smtp';
+} else if (isExplicitBrevoApi) {
+  activeService = 'brevo-api';
+} else if (isBrevoSmart) {
+  // If user provided SMTP credentials or placed an xsmtpsib- key in BREVO_API_KEY, use Brevo SMTP
+  activeService = (hasSmtpCreds || isSmtpKeyInApiField) ? 'brevo-smtp' : 'brevo-api';
+}
+
 const emailConfig: EmailConfig = {
-  service: process.env.EMAIL_SERVICE || 'gmail', // 'gmail', 'smtp', 'sendgrid'
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
+  service: activeService,
+  host: process.env.SMTP_HOST || (activeService === 'brevo-smtp' ? 'smtp-relay.brevo.com' : 'smtp.gmail.com'),
+  port: parseInt(process.env.SMTP_PORT || '587', 10),
   secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
   auth: {
     user:
-      process.env.EMAIL_SERVICE === 'sendgrid'
+      activeService === 'sendgrid'
         ? 'apikey'
         : process.env.SMTP_USER || process.env.EMAIL_USER || '',
     pass:
-      process.env.EMAIL_SERVICE === 'sendgrid'
+      activeService === 'sendgrid'
         ? process.env.SENDGRID_API_KEY || ''
-        : process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD || '',
+        : process.env.SMTP_PASSWORD || (isBrevoSmart && isSmtpKeyInApiField ? rawApiKey : '') || process.env.EMAIL_PASSWORD || '',
   },
   from: {
-    name: process.env.EMAIL_FROM_NAME || 'Auth Service',
-    address: process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_FROM || process.env.SMTP_USER || '',
+    name: process.env.EMAIL_FROM_NAME || 'Throne8',
+    address: process.env.SMTP_FROM_ADDRESS || process.env.EMAIL_FROM || process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER || '',
   },
+  apiKey: activeService === 'brevo-api' ? rawApiKey : undefined,
   maxRetries: 3,
   retryDelay: 2000, // ms
 };
@@ -76,15 +99,26 @@ if (emailConfig.service === 'sendgrid' && process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 }
 
-// ADD THIS DEBUG LOG
-console.log('EMAIL CONFIG LOADED:', {
-  service: emailConfig.service,
-  host: emailConfig.host,
-  port: emailConfig.port,
-  user: emailConfig.auth.user ? `${emailConfig.auth.user.substring(0, 5)}***` : 'MISSING',
-  pass: emailConfig.auth.pass ? `***${emailConfig.auth.pass.slice(-4)}` : 'MISSING',
-  hasUser: !!emailConfig.auth.user,
-  hasPass: !!emailConfig.auth.pass,
+// SAFE STARTUP DIAGNOSTICS (No secrets logged)
+const isApiKeyAnSmtpKey = rawApiKey.startsWith('xsmtpsib-');
+const isApiKeyARestKey = rawApiKey.startsWith('xkeysib-');
+console.log('📧 [EMAIL CONFIG LOADED]:', {
+  configuredService,
+  activeService: emailConfig.service,
+  deliveryMethod:
+    emailConfig.service === 'brevo-api'
+      ? 'Brevo REST API (HTTPS)'
+      : emailConfig.service === 'sendgrid'
+      ? 'SendGrid Web API (HTTPS)'
+      : `Nodemailer SMTP (${emailConfig.host}:${emailConfig.port})`,
+  host: emailConfig.service === 'brevo-api' || emailConfig.service === 'sendgrid' ? 'N/A' : emailConfig.host,
+  port: emailConfig.service === 'brevo-api' || emailConfig.service === 'sendgrid' ? 'N/A' : emailConfig.port,
+  from: `${emailConfig.from.name} <${emailConfig.from.address || 'MISSING'}>`,
+  hasSmtpUser: !!emailConfig.auth.user,
+  hasSmtpPass: !!emailConfig.auth.pass,
+  hasBrevoApiKey: !!rawApiKey,
+  brevoApiKeyType: isApiKeyAnSmtpKey ? 'SMTP key (xsmtpsib-...)' : isApiKeyARestKey ? 'REST API key (xkeysib-...)' : rawApiKey ? 'custom/other' : 'none',
+  hasSendGridApiKey: !!process.env.SENDGRID_API_KEY,
 });
 
 interface SMSConfig {
@@ -221,17 +255,26 @@ class NotificationService {
         emailConfig_pass: emailConfig.auth.pass ? 'Set' : 'Missing',
       });
 
-      if (!emailConfig.auth.user || !emailConfig.auth.pass) {
-        LoggerUtil.error('Email credentials not configured', {
-          user: emailConfig.auth.user,
-          passLength: emailConfig.auth.pass?.length || 0,
+      // 1. Brevo REST API (HTTP 443)
+      if (emailConfig.service === 'brevo-api') {
+        const apiKey = emailConfig.apiKey;
+        if (!apiKey) {
+          LoggerUtil.error('BREVO_API_KEY not configured');
+          throw new Error('BREVO_API_KEY missing - Check BREVO_API_KEY in .env');
+        }
+        if (apiKey.startsWith('xsmtpsib-')) {
+          LoggerUtil.error('BREVO_API_KEY contains an SMTP key (xsmtpsib-...), which Brevo REST API rejects with 401 "Key not found". Use EMAIL_SERVICE=brevo-smtp for Brevo SMTP.');
+          throw new Error('BREVO_API_KEY is an SMTP key, not a REST API key');
+        }
+        this.emailTransporter = null;
+        LoggerUtil.info('Brevo HTTP API mode enabled — skipping SMTP transporter/verify', {
+          hasApiKey: true,
+          from: emailConfig.from.address,
         });
-
-        // THROW ERROR instead of silent return
-        throw new Error('Email credentials missing - Check SMTP_USER and SMTP_PASSWORD in .env');
+        return;
       }
 
-      // SendGrid uses the HTTP API (port 443), not SMTP — Railway blocks outbound SMTP ports
+      // 2. SendGrid HTTP API (HTTP 443)
       if (emailConfig.service === 'sendgrid') {
         this.emailTransporter = null; // not used for sendgrid, sgMail handles sending
         LoggerUtil.info('SendGrid HTTP API mode enabled — skipping SMTP transporter/verify', {
@@ -241,7 +284,24 @@ class NotificationService {
         return;
       }
 
-      LoggerUtil.info('Email credentials found, creating transporter...');
+      // 3. SMTP providers (Brevo SMTP, Gmail, Custom SMTP)
+      if (!emailConfig.auth.user || !emailConfig.auth.pass) {
+        LoggerUtil.error('Email credentials not configured', {
+          service: emailConfig.service,
+          hasUser: !!emailConfig.auth.user,
+          hasPass: !!emailConfig.auth.pass,
+        });
+
+        // THROW ERROR instead of silent return
+        throw new Error(`Email credentials missing for ${emailConfig.service} - Check SMTP_USER and SMTP_PASSWORD in .env`);
+      }
+
+      LoggerUtil.info(`Creating email transporter for ${emailConfig.service}...`, {
+        host: emailConfig.host,
+        port: emailConfig.port,
+        secure: emailConfig.secure,
+        from: emailConfig.from.address,
+      });
 
       // Create transporter based on service
       if (emailConfig.service === 'gmail') {
@@ -250,18 +310,21 @@ class NotificationService {
           auth: emailConfig.auth,
         });
       } else {
-        // Generic SMTP
+        // Brevo SMTP or generic SMTP
         this.emailTransporter = nodemailer.createTransport({
           host: emailConfig.host,
           port: emailConfig.port,
           secure: emailConfig.secure,
           auth: emailConfig.auth,
+          connectionTimeout: 10000,
+          greetingTimeout: 10000,
+          socketTimeout: 10000,
         });
       }
 
       // Verify connection
       await this.emailTransporter.verify();
-      LoggerUtil.info('Email transporter initialized', {
+      LoggerUtil.info('✅ Email transporter verified and ready', {
         service: emailConfig.service,
         host: emailConfig.host,
         port: emailConfig.port,
@@ -1282,6 +1345,93 @@ class NotificationService {
         await this.initialize();
       }
 
+      // ==================== BREVO VIA HTTP API ====================
+      if (emailConfig.service === 'brevo-api') {
+        try {
+          const apiKey = emailConfig.apiKey || process.env.BREVO_API_KEY;
+          if (!apiKey) {
+            throw new Error('BREVO_API_KEY not configured');
+          }
+
+          // Check rate limit
+          const rateLimitKey = `email_rate:${options.to}`;
+          const sent = (await CacheUtil.get(rateLimitKey)) || 0;
+          if (sent >= 10) {
+            LoggerUtil.warn('Email rate limit exceeded', { to: options.to });
+            throw new Error('Email rate limit exceeded');
+          }
+
+          let html = options.html;
+          if (options.template && this.emailTemplates.has(options.template)) {
+            const template = this.emailTemplates.get(options.template);
+            if (template) {
+              html = template(options.data || {});
+            }
+          } else if (options.template) {
+            LoggerUtil.warn('Template not found, using raw HTML', {
+              template: options.template,
+            });
+          }
+
+          const brevoPayload: Record<string, any> = {
+            sender: {
+              name: emailConfig.from.name || 'Thronet',
+              email: emailConfig.from.address,
+            },
+            to: [{ email: options.to }],
+            subject: options.subject,
+            htmlContent: html || options.text || '',
+          };
+
+          if (options.text) {
+            brevoPayload.textContent = options.text;
+          }
+
+          const response = await axios.post(
+            'https://api.brevo.com/v3/smtp/email',
+            brevoPayload,
+            {
+              headers: {
+                'api-key': apiKey,
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+              },
+              timeout: 10000,
+            }
+          );
+
+          await CacheUtil.set(rateLimitKey, (sent as number) + 1, 3600); // 1 hour
+
+          const duration = Date.now() - startTime;
+          const messageId = (response.data?.messageId as string) || 'brevo-sent';
+          LoggerUtil.info('Email sent successfully via Brevo API', {
+            to: options.to,
+            subject: options.subject,
+            template: options.template,
+            messageId,
+            duration,
+          });
+
+          return {
+            success: true,
+            messageId,
+            to: options.to,
+            duration,
+          };
+        } catch (error: any) {
+          const duration = Date.now() - startTime;
+          LoggerUtil.error('Brevo API send failed', {
+            error: error.message,
+            response: error.response?.data,
+            to: options.to,
+            subject: options.subject,
+            duration,
+          });
+          throw error;
+        }
+      }
+      // ==================== END BREVO BLOCK ====================
+
       // ==================== SENDGRID VIA HTTP API ====================
       // Railway blocks outbound SMTP ports, so SendGrid is sent over HTTPS (443) instead.
       if (emailConfig.service === 'sendgrid') {
@@ -1357,13 +1507,14 @@ class NotificationService {
         throw new Error('Email service not configured');
       }
 
-      // Check rate limit
-      const rateLimitKey = `email_rate:${options.to}`;
-      const sent = (await CacheUtil.get(rateLimitKey)) || 0;
+      // Check rate limit: max 10 emails per recipient per hour
+      const normalizedRecipient = options.to.toLowerCase().trim();
+      const rateLimitKey = `email_rate:${normalizedRecipient}`;
+      const sent = await CacheUtil.get(rateLimitKey);
 
-      if (sent >= 10) {
+      if (sent && Number(sent) >= 10) {
         LoggerUtil.warn('Email rate limit exceeded', { to: options.to });
-        throw new Error('Email rate limit exceeded');
+        throw new Error('Email rate limit exceeded. Please try again later.');
       }
 
       // Prepare email content
@@ -1398,8 +1549,8 @@ class NotificationService {
             text,
           });
 
-          // Increment rate limit counter
-          await CacheUtil.set(rateLimitKey, (sent as number) + 1, 3600); // 1 hour
+          // Increment rate limit counter atomically without resetting the 1-hour expiration
+          await CacheUtil.incr(rateLimitKey, 3600);
 
           const duration = Date.now() - startTime;
           LoggerUtil.info('Email sent successfully', {
@@ -1686,7 +1837,12 @@ class NotificationService {
     return {
       initialized: this.initialized,
       email: {
-        available: emailConfig.service === 'sendgrid' ? !!process.env.SENDGRID_API_KEY : !!this.emailTransporter,
+        available:
+          emailConfig.service === 'brevo-api'
+            ? !!process.env.BREVO_API_KEY && !process.env.BREVO_API_KEY.startsWith('xsmtpsib-')
+            : emailConfig.service === 'sendgrid'
+              ? !!process.env.SENDGRID_API_KEY
+              : !!this.emailTransporter,
         service: emailConfig.service,
         from: emailConfig.from.address,
       },
@@ -1716,7 +1872,9 @@ class NotificationService {
       };
 
       // Check email
-      if (emailConfig.service === 'sendgrid') {
+      if (emailConfig.service === 'brevo-api') {
+        status.email = !!process.env.BREVO_API_KEY && !process.env.BREVO_API_KEY.startsWith('xsmtpsib-');
+      } else if (emailConfig.service === 'sendgrid') {
         status.email = !!process.env.SENDGRID_API_KEY;
       } else if (this.emailTransporter) {
         try {

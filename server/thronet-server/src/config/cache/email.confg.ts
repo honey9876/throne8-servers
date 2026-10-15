@@ -11,6 +11,7 @@ interface EmailConfig {
     user: string;
     pass: string;
   };
+  apiKey?: string;
   from: {
     name: string;
     email: string;
@@ -34,10 +35,111 @@ class EmailConfiguration {
   }
 
   private initializeConfig(): EmailConfig {
-    const emailService = config.EMAIL_SERVICE || 'gmail';
+    const rawService = (config.EMAIL_SERVICE || 'gmail').toLowerCase().trim();
+    const fromName = config.EMAIL_FROM_NAME || 'Throne8';
+    const fromEmail = config.SMTP_FROM_ADDRESS || config.EMAIL_FROM || '';
 
-    // Gmail Configuration
-    if (emailService === 'gmail') {
+    // ── 1. Explicit Brevo SMTP ──────────────────────────────────────────
+    if (rawService === 'brevo-smtp' || rawService === 'brevo_smtp') {
+      return {
+        service: 'brevo-smtp',
+        host: config.SMTP_HOST || 'smtp-relay.brevo.com',
+        port: parseInt(config.SMTP_PORT || '587', 10),
+        secure: config.SMTP_SECURE === 'true',
+        auth: {
+          user: config.SMTP_USER || '',
+          pass: config.SMTP_PASSWORD || '',
+        },
+        apiKey: undefined,
+        from: {
+          name: fromName,
+          email: fromEmail,
+        },
+        templates: {
+          enabled: true,
+          path: './src/utils/emailTemplates',
+        },
+      };
+    }
+
+    // ── 2. Explicit Brevo REST API ──────────────────────────────────────
+    if (rawService === 'brevo-api' || rawService === 'brevo_api') {
+      return {
+        service: 'brevo-api',
+        host: '',
+        port: 0,
+        secure: true,
+        auth: {
+          user: '',
+          pass: '',
+        },
+        apiKey: config.BREVO_API_KEY || process.env.BREVO_API_KEY || '',
+        from: {
+          name: fromName,
+          email: fromEmail,
+        },
+        templates: {
+          enabled: true,
+          path: './src/utils/emailTemplates',
+        },
+      };
+    }
+
+    // ── 3. EMAIL_SERVICE=brevo (smart detection) ────────────────────────
+    // If SMTP credentials are provided, or if the BREVO_API_KEY starts with
+    // 'xsmtpsib-' (which is Brevo's SMTP key prefix, NOT a REST API key),
+    // automatically select Brevo SMTP over Nodemailer.
+    if (rawService === 'brevo') {
+      const rawApiKey = config.BREVO_API_KEY || process.env.BREVO_API_KEY || '';
+      const isSmtpKeyInApiField = rawApiKey.startsWith('xsmtpsib-');
+      const hasSmtpCreds = !!(config.SMTP_USER && config.SMTP_PASSWORD);
+
+      if (hasSmtpCreds || isSmtpKeyInApiField) {
+        return {
+          service: 'brevo-smtp',
+          host: config.SMTP_HOST || 'smtp-relay.brevo.com',
+          port: parseInt(config.SMTP_PORT || '587', 10),
+          secure: config.SMTP_SECURE === 'true',
+          auth: {
+            user: config.SMTP_USER || '',
+            pass: config.SMTP_PASSWORD || (isSmtpKeyInApiField ? rawApiKey : ''),
+          },
+          apiKey: undefined,
+          from: {
+            name: fromName,
+            email: fromEmail,
+          },
+          templates: {
+            enabled: true,
+            path: './src/utils/emailTemplates',
+          },
+        };
+      }
+
+      // Default to Brevo REST API when genuine API key (xkeysib-...) is present
+      return {
+        service: 'brevo-api',
+        host: '',
+        port: 0,
+        secure: true,
+        auth: {
+          user: '',
+          pass: '',
+        },
+        apiKey: rawApiKey,
+        from: {
+          name: fromName,
+          email: fromEmail,
+        },
+        templates: {
+          enabled: true,
+          path: './src/utils/emailTemplates',
+        },
+      };
+    }
+
+    // ── 4. Gmail Configuration ──────────────────────────────────────────
+    if (rawService === 'gmail') {
       return {
         service: 'gmail',
         host: 'smtp.gmail.com',
@@ -48,7 +150,7 @@ class EmailConfiguration {
           pass: config.EMAIL_PASSWORD || '',
         },
         from: {
-          name: config.EMAIL_FROM_NAME || 'Mentorship Platform',
+          name: fromName,
           email: config.EMAIL_FROM || config.EMAIL_USER || '',
         },
         templates: {
@@ -58,8 +160,8 @@ class EmailConfiguration {
       };
     }
 
-    // SendGrid Configuration
-    if (emailService === 'sendgrid') {
+    // ── 5. SendGrid Configuration ───────────────────────────────────────
+    if (rawService === 'sendgrid') {
       return {
         service: 'sendgrid',
         host: 'smtp.sendgrid.net',
@@ -70,8 +172,8 @@ class EmailConfiguration {
           pass: config.SENDGRID_API_KEY || '',
         },
         from: {
-          name: config.EMAIL_FROM_NAME || 'Mentorship Platform',
-          email: config.EMAIL_FROM || '',
+          name: fromName,
+          email: fromEmail,
         },
         templates: {
           enabled: true,
@@ -80,8 +182,8 @@ class EmailConfiguration {
       };
     }
 
-    // AWS SES Configuration
-    if (emailService === 'ses') {
+    // ── 6. AWS SES Configuration ────────────────────────────────────────
+    if (rawService === 'ses') {
       return {
         service: 'ses',
         host: `email-smtp.${config.AWS_REGION || 'us-east-1'}.amazonaws.com`,
@@ -92,8 +194,8 @@ class EmailConfiguration {
           pass: config.SES_SMTP_PASSWORD || '',
         },
         from: {
-          name: config.EMAIL_FROM_NAME || 'Mentorship Platform',
-          email: config.EMAIL_FROM || '',
+          name: fromName,
+          email: fromEmail,
         },
         templates: {
           enabled: true,
@@ -102,7 +204,7 @@ class EmailConfiguration {
       };
     }
 
-    // Custom SMTP Configuration
+    // ── 7. Custom SMTP Configuration (default) ──────────────────────────
     return {
       service: 'custom',
       host: config.SMTP_HOST || 'smtp.example.com',
@@ -113,8 +215,8 @@ class EmailConfiguration {
         pass: config.SMTP_PASSWORD || '',
       },
       from: {
-        name: config.EMAIL_FROM_NAME || 'Mentorship Platform',
-        email: config.EMAIL_FROM || '',
+        name: fromName,
+        email: fromEmail,
       },
       templates: {
         enabled: true,
@@ -124,10 +226,16 @@ class EmailConfiguration {
   }
 
   private validateConfig(): void {
-    const { auth, from } = this.config;
+    const { auth, from, service, apiKey } = this.config;
 
-    if (!auth.user || !auth.pass) {
-      logger.warn('⚠️  Email credentials not configured. Email service will be disabled.');
+    if (service === 'brevo-api') {
+      if (!apiKey) {
+        logger.warn('⚠️  Brevo API key not configured. Email service will be disabled.');
+      } else if (apiKey.startsWith('xsmtpsib-')) {
+        logger.warn('⚠️  BREVO_API_KEY contains an SMTP key ("xsmtpsib-..."). For SMTP, use EMAIL_SERVICE=brevo-smtp with SMTP_USER and SMTP_PASSWORD.');
+      }
+    } else if (!auth.user || !auth.pass) {
+      logger.warn(`⚠️  Email credentials not configured for ${service}. Email service will be disabled.`);
     }
 
     if (!from.email) {
@@ -149,6 +257,9 @@ class EmailConfiguration {
    * Check if email service is enabled
    */
   isEnabled(): boolean {
+    if (this.config.service === 'brevo-api') {
+      return !!this.config.apiKey && !this.config.apiKey.startsWith('xsmtpsib-');
+    }
     return !!(this.config.auth.user && this.config.auth.pass);
   }
 

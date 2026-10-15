@@ -1,4 +1,5 @@
 import nodemailer, { Transporter } from 'nodemailer';
+import axios from 'axios';
 import emailConfig from '@/config/cache/email.confg';
 import { logger } from '@/shared/logger.util';
 
@@ -65,6 +66,12 @@ class EmailService {
         return;
       }
 
+      if (emailConfig.getConfig().service === 'brevo-api') {
+        logger.info('✅ Email service ready (Brevo REST API)');
+        this.isConfigured = true;
+        return;
+      }
+
       this.transporter = nodemailer.createTransport(emailConfig.getTransporterOptions());
 
       this.transporter.verify((error) => {
@@ -83,13 +90,56 @@ class EmailService {
   }
 
   async sendEmail(options: EmailOptions): Promise<boolean> {
-    if (!this.isConfigured || !this.transporter) {
+    if (!this.isConfigured) {
       logger.warn('📧 Email not sent - service not configured');
       return false;
     }
 
     try {
       const fromAddress = emailConfig.getFromAddress();
+      const currentConfig = emailConfig.getConfig();
+
+      // ==================== BREVO API ====================
+      if (currentConfig.service === 'brevo-api') {
+        const toList = Array.isArray(options.to)
+          ? options.to.map((addr) => ({ email: addr }))
+          : [{ email: options.to }];
+
+        const brevoPayload: Record<string, any> = {
+          sender: { name: fromAddress.name, email: fromAddress.address },
+          to: toList,
+          subject: options.subject,
+          htmlContent: options.html || options.text || '',
+        };
+
+        if (options.text) {
+          brevoPayload.textContent = options.text;
+        }
+
+        const apiKey = currentConfig.apiKey || process.env.BREVO_API_KEY;
+        const res = await axios.post(
+          'https://api.brevo.com/v3/smtp/email',
+          brevoPayload,
+          {
+            headers: {
+              'api-key': apiKey,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            timeout: 10000,
+          }
+        );
+
+        logger.info(`📧 Email sent successfully via Brevo to ${options.to}`);
+        logger.debug(`Message ID: ${res.data?.messageId}`);
+        return true;
+      }
+
+      // ==================== NODEMAILER ====================
+      if (!this.transporter) {
+        logger.warn('📧 Email not sent - transporter not available');
+        return false;
+      }
 
       const mailOptions = {
         from: `"${fromAddress.name}" <${fromAddress.address}>`,

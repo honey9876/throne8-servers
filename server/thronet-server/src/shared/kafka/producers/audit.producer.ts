@@ -72,15 +72,15 @@ class AuditProducer {
    */
   static async sendAuditEvent(event: AuditEvent): Promise<void> {
     try {
-      // Redis Streams require flat string key-value fields
+      // Redis Streams require flat string key-value fields. Ensure no undefined/null values
       const fields: Record<string, string> = {
-        eventId: event.eventId,
-        userId: event.userId ?? 'anonymous',
-        action: event.action,
-        ipAddress: event.ipAddress,
-        status: event.status,
-        severity: event.severity,
-        timestamp: event.timestamp,
+        eventId: String(event.eventId || ''),
+        userId: String(event.userId ?? 'anonymous'),
+        action: String(event.action || 'unknown'),
+        ipAddress: String(event.ipAddress || 'unknown'),
+        status: String(event.status || 'SUCCESS'),
+        severity: String(event.severity || 'LOW'),
+        timestamp: String(event.timestamp || new Date().toISOString()),
         metadata: event.metadata ? JSON.stringify(event.metadata) : '{}',
       };
 
@@ -120,12 +120,13 @@ class AuditProducer {
       // Last resort: try fallback list
       try {
         await this._fallbackWrite({
-          eventId: event.eventId,
-          userId: event.userId ?? 'anonymous',
-          action: event.action,
-          status: event.status,
-          severity: event.severity,
-          timestamp: event.timestamp,
+          eventId: String(event.eventId || ''),
+          userId: String(event.userId ?? 'anonymous'),
+          action: String(event.action || 'unknown'),
+          ipAddress: String(event.ipAddress || 'unknown'),
+          status: String(event.status || 'SUCCESS'),
+          severity: String(event.severity || 'LOW'),
+          timestamp: String(event.timestamp || new Date().toISOString()),
           metadata: event.metadata ? JSON.stringify(event.metadata) : '{}',
         });
       } catch (fallbackError: any) {

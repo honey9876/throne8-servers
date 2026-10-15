@@ -13,6 +13,8 @@ import { BadRequestError, ConflictError, NotFoundError, ForbiddenError } from '@
 import seniorNotificationService from './seniorNotification.service';
 import SeniorMentorApplication from '../models/SeniorMentorApplication';
 import SeniorSession from '../models/SeniorSession';
+import cloudinary from '@/config/images/store/cloudinary/cloudinary.config';
+
 
 export interface PublicSeniorMentor {
   id: string;
@@ -54,7 +56,35 @@ export function isApprovedActiveSeniorMentorApplication(application: {
  * the resource name here (e.g. "Application" -> "Application not found").
  */
 class SeniorMentorApplicationService {
+  private async uploadPhotoToCloudinary(
+    file: Express.Multer.File
+  ): Promise<{ url: string; key: string }> {
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png'];
+    if (!file || !allowed.includes(file.mimetype)) {
+      throw new BadRequestError('Profile photo must be a JPG or PNG image');
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      throw new BadRequestError('Profile photo must be 5MB or smaller');
+    }
+
+    return new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'senior-mentor-applications/photos',
+          resource_type: 'image',
+          transformation: [{ width: 800, height: 800, crop: 'limit' }, { quality: 'auto:good' }],
+        },
+        (error, result) => {
+          if (error || !result) return reject(error ?? new Error('Cloudinary upload failed'));
+          resolve({ url: result.secure_url, key: result.public_id });
+        }
+      );
+      stream.end(file.buffer);
+    });
+  }
+
   private async getPublicSessionMetadata(userIds: string[]): Promise<{
+
     countsByUserId: Map<string, number>;
     sessionIdByUserId: Map<string, string>;
   }> {
@@ -223,12 +253,7 @@ class SeniorMentorApplicationService {
       }
 
       const [profilePhoto, resume, proofDocument] = await Promise.all([
-        fileHelper.uploadFile(input.profilePhotoFile, {
-          folder: 'senior-mentor-applications/photos',
-          allowedTypes: ['image/jpeg', 'image/jpg', 'image/png'],
-          maxSize: 5 * 1024 * 1024,
-          generateUniqueName: true,
-        }),
+        this.uploadPhotoToCloudinary(input.profilePhotoFile),
         fileHelper.uploadFile(input.resumeFile, {
           folder: 'senior-mentor-applications/resumes',
           allowedTypes: [

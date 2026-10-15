@@ -6,6 +6,7 @@
  */
 import { Router, Request, Response } from 'express';
 import authRoutes from '@/auth/routes/auth.routes';
+import verifyRoutes from '@/auth/routes/index';
 import profileRoutes from '@/Profile/routers/index';
 import mentorshipRoutes from '@/Mentorship/routers/index';
 import notificationRoutes from '@/notifications/routes/notification.routes';
@@ -91,6 +92,7 @@ router.get('/health', async (_req: Request, res: Response) => {
 // ==================== CORE (always on) ====================
 
 router.use('/auth', authRoutes);
+router.use('/verify', verifyRoutes);
 router.use('/profile', profileRoutes);
 router.use('/mentorship', mentorshipRoutes);
 router.use('/notifications', notificationRoutes);

@@ -14,10 +14,15 @@
  *   can stub process.env before validation runs
  */
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-require('dotenv').config({
-    path: require('path').join(__dirname, '../../../../../.env'),
-});
+const fs = require('fs');
+const pathModule = require('path');
+const candidateProdPath = pathModule.join(__dirname, '../../../../.env.production');
+const candidateDevPath = pathModule.join(__dirname, '../../../../.env');
+const chosenEnvPath = (process.env['NODE_ENV'] === 'production' && fs.existsSync(candidateProdPath))
+    ? candidateProdPath
+    : candidateDevPath;
+
+require('dotenv').config({ path: chosenEnvPath });
 
 interface EnvConfig {
     // ── Core ──────────────────────────────────────────────────────────────
@@ -74,6 +79,7 @@ interface EnvConfig {
 
     // ── Email ─────────────────────────────────────────────────────────────
     EMAIL_SERVICE?:      string;
+    BREVO_API_KEY?:      string;
     EMAIL_USER?:         string;
     EMAIL_PASSWORD?:     string;
     EMAIL_FROM?:         string;
@@ -86,6 +92,7 @@ interface EnvConfig {
     SMTP_SECURE?:        string;
     SMTP_USER?:          string;
     SMTP_PASSWORD?:      string;
+    SMTP_FROM_ADDRESS?:  string;
 
     // ── SMS ───────────────────────────────────────────────────────────────
     SMS_PROVIDER?:          string;
@@ -213,10 +220,11 @@ const config: EnvConfig = {
 
     // Email
     EMAIL_SERVICE:     process.env['EMAIL_SERVICE'] ?? 'gmail',
+    BREVO_API_KEY:     process.env['BREVO_API_KEY'],
     EMAIL_USER:        process.env['EMAIL_USER'],
     EMAIL_PASSWORD:    process.env['EMAIL_PASSWORD'],
-    EMAIL_FROM:        process.env['EMAIL_FROM'],
-    EMAIL_FROM_NAME:   process.env['EMAIL_FROM_NAME'] ?? 'Thronet',
+    EMAIL_FROM:        process.env['EMAIL_FROM'] || process.env['SMTP_FROM_ADDRESS'],
+    EMAIL_FROM_NAME:   process.env['EMAIL_FROM_NAME'] ?? 'Throne8',
     SENDGRID_API_KEY:  process.env['SENDGRID_API_KEY'],
     SES_SMTP_USERNAME: process.env['SES_SMTP_USERNAME'],
     SES_SMTP_PASSWORD: process.env['SES_SMTP_PASSWORD'],
@@ -225,6 +233,7 @@ const config: EnvConfig = {
     SMTP_SECURE:       process.env['SMTP_SECURE'],
     SMTP_USER:         process.env['SMTP_USER'],
     SMTP_PASSWORD:     process.env['SMTP_PASSWORD'],
+    SMTP_FROM_ADDRESS: process.env['SMTP_FROM_ADDRESS'],
 
     // SMS
     SMS_PROVIDER:          process.env['SMS_PROVIDER']          ?? 'twilio',

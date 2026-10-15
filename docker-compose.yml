@@ -22,6 +22,7 @@ services:
       --loglevel notice
       --save ""
       --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
     volumes:
       - redis-1-data:/data
     healthcheck:
@@ -74,6 +75,7 @@ services:
       --loglevel notice
       --save ""
       --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
     volumes:
       - redis-2-data:/data
     healthcheck:
@@ -126,6 +128,7 @@ services:
       --loglevel notice
       --save ""
       --requirepass ${REDIS_PASSWORD}
+      --masterauth ${REDIS_PASSWORD}
     volumes:
       - redis-3-data:/data
     healthcheck:

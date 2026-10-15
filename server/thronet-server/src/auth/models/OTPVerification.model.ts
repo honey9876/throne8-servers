@@ -1,4 +1,4 @@
-﻿import mongoose, { Document, Model, Schema } from 'mongoose';
+import mongoose, { Document, Model, Schema } from 'mongoose';
 import crypto from 'crypto';
 import userEmitter from '@/shared/events/emitters/user.emitter';
 
@@ -185,8 +185,13 @@ OTPVerificationSchema.statics.createOTP = async function (data: any) {
     if (!userId || !otpType) throw new Error('userId and otpType are required');
 
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const recentOTPs = await this.countDocuments({ userId, otpType, createdAt: { $gte: oneHourAgo } });
-    if (recentOTPs >= 3) throw new Error('Too many OTP requests. Please try again later.');
+    const recentOTPs = await this.countDocuments({
+        userId,
+        otpType,
+        status: { $ne: 'verified' },
+        createdAt: { $gte: oneHourAgo }
+    });
+    if (recentOTPs >= 5) throw new Error('Too many OTP requests. Please try again later.');
 
     await this.updateMany({ userId, otpType, status: 'pending' }, { $set: { status: 'revoked' } });
 

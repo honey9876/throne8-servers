@@ -13,7 +13,7 @@ import { Router, Request, Response } from 'express';
 import emailVerificationRoutes from './emailVerification.routes';
 // import phoneRoutes from './phone.routes';
 // import identityVerificationRoutes from './identity.routes';
-// import passwordRoutes from './password.routes';
+import passwordRoutes from './password.routes';
 // import coverRoutes from './profile/cover.routes';
 
 
@@ -93,8 +93,8 @@ console.log("email route mouted............")
 // router.use('/identity', identityVerificationRoutes);
 // console.log("identity route mouted............")
 
-// router.use('/password', passwordRoutes);
-// console.log("password route mouted............")
+router.use('/password', passwordRoutes);
+console.log("password route mouted............")
 
 // ==================== 404 HANDLER ====================
 

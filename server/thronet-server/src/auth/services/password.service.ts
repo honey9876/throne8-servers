@@ -38,15 +38,30 @@ async function sendEmail(emailData: EmailJobData): Promise<void> {
     await NotificationService.sendEmail(emailData);
 }
 
+function isLocalOrInternalIp(ip: string): boolean {
+    if (!ip) return true;
+    const clean = ip.replace(/^::ffff:/, '').trim();
+    return (
+        clean === '127.0.0.1' ||
+        clean === '::1' ||
+        clean === 'localhost' ||
+        clean === '0.0.0.0' ||
+        clean.startsWith('172.30.') ||
+        clean.startsWith('172.17.') ||
+        clean.startsWith('10.') ||
+        clean.startsWith('192.168.')
+    );
+}
+
 class PasswordService {
 
     static async sendPasswordChangeOTP(userId: string, email: string, currentPassword: string, ipAddress: string) {
         const correlationId = uuidv4();
         try {
-            // Rate limit check
+            // Rate limit check: max 5 requests per 15 minutes
             const rateLimitKey = `password_change_rate:${userId}`;
-            const requests = await CacheUtil.get(rateLimitKey) as string | null;
-            if (requests && parseInt(requests) >= 3) throw new Error('Too many password change requests. Please try again later.');
+            const requests = await CacheUtil.get(rateLimitKey);
+            if (requests && parseInt(String(requests), 10) >= 5) throw new Error('Too many password change requests. Please try again later.');
 
             // Fetch user with password
             const user = await User.findOne({ userId }).select('+passwordHash email firstName').lean().exec();
@@ -70,16 +85,22 @@ class PasswordService {
             });
 
             // Send email
-            await sendEmail({
-                to: (user as any).email,
-                subject: 'Password Change Verification Code',
-                template: 'password-change-otp',
-                data: { otp, expiryMinutes: 10, userName: (user as any).firstName || (user as any).email, ipAddress, timestamp: new Date().toLocaleString() },
-            });
+            try {
+                await sendEmail({
+                    to: (user as any).email,
+                    subject: 'Password Change Verification Code',
+                    template: 'password-change-otp',
+                    data: { otp, expiryMinutes: 10, userName: (user as any).firstName || (user as any).email, ipAddress, timestamp: new Date().toLocaleString() },
+                });
+            } catch (emailError: unknown) {
+                if ((otpRecord as any)?._id) {
+                    await OTPVerification.deleteOne({ _id: (otpRecord as any)._id }).catch(() => {});
+                }
+                throw emailError;
+            }
 
-            // Increment rate limit
-            const newRequests = requests ? parseInt(requests) + 1 : 1;
-            await CacheUtil.set(rateLimitKey, newRequests.toString(), 900);
+            // Increment rate limit atomically (15-minute window)
+            await CacheUtil.incr(rateLimitKey, 900);
 
             await AuditProducer.sendAuditEvent({
                 eventId: uuidv4(), userId, action: Constants.AUDIT_ACTIONS.PASSWORD_CHANGE_OTP_SENT, ipAddress,
@@ -112,19 +133,20 @@ class PasswordService {
                 throw new Error(feedbackMsg || 'Password is too weak. Please choose a stronger password.');
             }
 
-            // Step 3: Password history
-            if ((user as any).passwordHash) {
-                const isRecentPassword = await PasswordHistory.isPasswordRecentlyUsed((user as any).userId, newPassword);
-                if (isRecentPassword) throw new Error('Cannot reuse any of your last 5 passwords');
-            }
-            // Step 4: Fetch user
+            // Step 3: Fetch user
             const user = await User.findOne({ userId }).select('+passwordHash email firstName').lean().exec();
             if (!user) throw new Error('User not found');
 
+            // Step 4: Password history
+            const isRecentPassword = await PasswordHistory.isPasswordRecentlyUsed(userId, newPassword);
+            if (isRecentPassword) throw new Error('Cannot reuse any of your last 5 passwords');
+
             // Step 5: Save to history
-            await PasswordHistory.addPasswordToHistory(userId, (user as any).passwordHash, {
-                changedBy: 'user', ipAddress, userAgent, reason: 'password_change',
-            });
+            if ((user as any).passwordHash) {
+                await PasswordHistory.addPasswordToHistory(userId, (user as any).passwordHash, {
+                    changedBy: 'user', ipAddress, userAgent, reason: 'password_change',
+                });
+            }
 
             // Step 6: Hash new password
             const salt = await bcrypt.genSalt(12);
@@ -164,13 +186,17 @@ class PasswordService {
                 LoggerUtil.error('Failed to send password changed email (non-critical)', { error: (emailError as Error).message, userId, correlationId });
             }
 
-            // Step 10: Audit
-            await AuditProducer.sendAuditEvent({
-                eventId: uuidv4(), userId, action: Constants.AUDIT_ACTIONS.PASSWORD_CHANGED, ipAddress,
-                status: Constants.AUDIT_STATUS.SUCCESS as 'SUCCESS', severity: Constants.AUDIT_SEVERITIES.HIGH as 'HIGH',
-                timestamp: new Date().toISOString(),
-                metadata: { email: (updatedUser as any).email, passwordStrength: passwordStrength.score, sessionsRevoked, tokensRevoked, correlationId },
-            });
+            // Step 10: Audit (non-critical)
+            try {
+                await AuditProducer.sendAuditEvent({
+                    eventId: uuidv4(), userId, action: Constants.AUDIT_ACTIONS.PASSWORD_CHANGED, ipAddress,
+                    status: Constants.AUDIT_STATUS.SUCCESS as 'SUCCESS', severity: Constants.AUDIT_SEVERITIES.HIGH as 'HIGH',
+                    timestamp: new Date().toISOString(),
+                    metadata: { email: (updatedUser as any).email, passwordStrength: passwordStrength.score, sessionsRevoked, tokensRevoked, correlationId },
+                });
+            } catch (auditError: unknown) {
+                LoggerUtil.error('Failed to send password changed audit event (non-critical)', { error: (auditError as Error).message, userId, correlationId });
+            }
 
             return {
                 success: true, message: 'Password changed successfully. Please login again.',
@@ -186,17 +212,32 @@ class PasswordService {
     static async requestPasswordReset(email: string, ipAddress: string) {
         const correlationId = uuidv4();
         try {
-            // Rate limit (IP-based)
-            const rateLimitKey = `password_reset_rate:${ipAddress}`;
-            const requests = await CacheUtil.get(rateLimitKey) as string | null;
-            if (requests && parseInt(requests) >= 5) throw new Error('Too many password reset requests. Please try again later.');
+            const normalizedEmail = email.toLowerCase().trim();
 
-            const user = await User.findOne({ email }).select('userId email firstName').lean().exec();
+            // 1. Per-Email rate limit: max 5 requests per email per 15 minutes (900 seconds)
+            const emailRateKey = `password_reset_email:${normalizedEmail}`;
+            const emailRequests = await CacheUtil.get(emailRateKey);
+            if (emailRequests && parseInt(String(emailRequests), 10) >= 5) {
+                throw new Error('Too many password reset requests for this email. Please try again later.');
+            }
+
+            // 2. Per-IP rate limit:
+            // Local/internal/docker gateway IPs are allowed up to 100 requests per 15m.
+            // External public IPs are capped at 20 requests per 15m to block brute-force/DoS.
+            const isLocal = isLocalOrInternalIp(ipAddress);
+            const ipLimit = isLocal ? 100 : 20;
+            const ipRateKey = `password_reset_ip:${ipAddress}`;
+            const ipRequests = await CacheUtil.get(ipRateKey);
+            if (ipRequests && parseInt(String(ipRequests), 10) >= ipLimit) {
+                throw new Error('Too many password reset requests from this network. Please try again later.');
+            }
+
+            const user = await User.findOne({ email: normalizedEmail }).select('userId email firstName').lean().exec();
 
             if (!user) {
-                // Security: Don't reveal user doesn't exist
-                const newRequests = requests ? parseInt(requests) + 1 : 1;
-                await CacheUtil.set(rateLimitKey, newRequests.toString(), 3600);
+                // Security: Don't reveal user doesn't exist, count attempt against IP and email
+                await CacheUtil.incr(emailRateKey, 900);
+                await CacheUtil.incr(ipRateKey, 900);
                 return { success: true, message: 'If an account exists with this email, a reset code has been sent' };
             }
 
@@ -205,14 +246,23 @@ class PasswordService {
                 expiryMinutes: 15, maxAttempts: 5, metadata: { ipAddress },
             });
 
-            await sendEmail({
-                to: (user as any).email, subject: 'Password Reset Code',
-                template: 'password-reset',
-                data: { resetCode: otp, expiryMinutes: 15, userName: (user as any).firstName || (user as any).email, ipAddress },
-            });
+            try {
+                await sendEmail({
+                    to: (user as any).email, subject: 'Password Reset Code',
+                    template: 'password-reset',
+                    data: { resetCode: otp, expiryMinutes: 15, userName: (user as any).firstName || (user as any).email, ipAddress },
+                });
+            } catch (emailError: unknown) {
+                // If email infrastructure fails, remove the unused OTP record so delivery errors don't exhaust the user's limit
+                if ((otpRecord as any)?._id) {
+                    await OTPVerification.deleteOne({ _id: (otpRecord as any)._id }).catch(() => {});
+                }
+                throw emailError;
+            }
 
-            const newRequests = requests ? parseInt(requests) + 1 : 1;
-            await CacheUtil.set(rateLimitKey, newRequests.toString(), 3600);
+            // Increment rate limits atomically with fixed 15-minute window (does NOT push TTL forward)
+            await CacheUtil.incr(emailRateKey, 900);
+            await CacheUtil.incr(ipRateKey, 900);
 
             await AuditProducer.sendAuditEvent({
                 eventId: uuidv4(), userId: (user as any).userId, action: Constants.AUDIT_ACTIONS.PASSWORD_RESET_REQUESTED, ipAddress,
@@ -233,8 +283,9 @@ class PasswordService {
     static async verifyPasswordReset(email: string, resetCode: string, newPassword: string, ipAddress: string, userAgent: string) {
         const correlationId = uuidv4();
         try {
+            const normalizedEmail = email.toLowerCase().trim();
             // Step 1: Find user
-            const user = await User.findOne({ email }).select('+passwordHash userId email firstName').lean().exec();
+            const user = await User.findOne({ email: normalizedEmail }).select('+passwordHash userId email firstName').lean().exec();
             if (!user) throw new Error('Invalid or expired reset code');
 
             // Step 2: Verify reset code
@@ -242,7 +293,7 @@ class PasswordService {
             if (!(otpVerification as any).success) throw new Error('Invalid or expired reset code');
 
             // Step 3: Password strength
-            const passwordStrength = zxcvbn(newPassword, [email, (user as any).userId]);
+            const passwordStrength = zxcvbn(newPassword, [normalizedEmail, (user as any).userId]);
             if (passwordStrength.score < 3) {
                 const feedbackMsg = [passwordStrength.feedback.warning, ...passwordStrength.feedback.suggestions]
                     .filter(Boolean).join(' ').trim();
@@ -298,13 +349,17 @@ class PasswordService {
                 LoggerUtil.error('Failed to send password reset success email (non-critical)', { error: (emailError as Error).message, correlationId });
             }
 
-            // Step 10: Audit
-            await AuditProducer.sendAuditEvent({
-                eventId: uuidv4(), userId: (user as any).userId, action: Constants.AUDIT_ACTIONS.PASSWORD_RESET_COMPLETED, ipAddress,
-                status: Constants.AUDIT_STATUS.SUCCESS as 'SUCCESS', severity: Constants.AUDIT_SEVERITIES.HIGH as 'HIGH',
-                timestamp: new Date().toISOString(),
-                metadata: { email: (updatedUser as any).email, passwordStrength: passwordStrength.score, sessionsRevoked, tokensRevoked, correlationId },
-            });
+            // Step 10: Audit (non-critical)
+            try {
+                await AuditProducer.sendAuditEvent({
+                    eventId: uuidv4(), userId: (user as any).userId, action: Constants.AUDIT_ACTIONS.PASSWORD_RESET_COMPLETED, ipAddress,
+                    status: Constants.AUDIT_STATUS.SUCCESS as 'SUCCESS', severity: Constants.AUDIT_SEVERITIES.HIGH as 'HIGH',
+                    timestamp: new Date().toISOString(),
+                    metadata: { email: (updatedUser as any).email, passwordStrength: passwordStrength.score, sessionsRevoked, tokensRevoked, correlationId },
+                });
+            } catch (auditError: unknown) {
+                LoggerUtil.error('Failed to send password reset audit event (non-critical)', { error: (auditError as Error).message, correlationId });
+            }
 
             return {
                 success: true, message: 'Password reset successfully. You can now login with your new password.',

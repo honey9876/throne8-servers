@@ -43,7 +43,10 @@ const redisConfig: RedisConfig = {
     host: process.env['REDIS_HOST'] || 'redis',
     port: parseInt(process.env['REDIS_PORT'] || '6379'),
     password: process.env['REDIS_PASSWORD'] || undefined,
-    keyPrefix: process.env['REDIS_KEY_PREFIX'] || 'auth:',
+    keyPrefix: (() => {
+        const p = process.env['REDIS_KEY_PREFIX'] || 'auth:';
+        return p.endsWith(':') ? p : `${p}:`;
+    })(),
     connectionTimeout: 15000,
     clusterMode: process.env['REDIS_CLUSTER_MODE'] === 'true',
     clusterNodes: process.env['REDIS_CLUSTER_NODES'] 
@@ -198,10 +201,14 @@ class CacheUtil {
                         rootNodes: redisConfig.clusterNodes.map(node => {
                             const [host, port] = node.split(':');
                             return {
-                                url: `redis://${redisConfig.password ? `:${redisConfig.password}@` : ''}${host}:${port}`
+                                url: redisConfig.password
+                                    ? `redis://:${encodeURIComponent(redisConfig.password)}@${host}:${port}`
+                                    : `redis://${host}:${port}`,
+                                password: redisConfig.password,
                             };
                         }),
                         defaults: {
+                            password: redisConfig.password,
                             socket: {
                                 connectTimeout: redisConfig.connectionTimeout,
                                 keepAlive: 5000 as any,
