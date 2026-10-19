@@ -1,102 +1,92 @@
-// // ============================================
-// // Notification Queue Definition
-// // ============================================
+/**
+ * notification.queue.ts
+ * BullMQ Notification Queue Implementation
+ */
 
-// import Queue from 'bull';
-// import { queueConfig } from '@/config/cache/queue';
-// import { NotificationJobData, NotificationJobResult } from '@/company/interfaces';
-// import logger from '@/shared/logger.util';
+import { Queue, JobsOptions } from 'bullmq';
+import crypto from 'crypto';
+import { LoggerUtil } from '@/shared/logger.util';
+import { getQueueConnectionConfig } from './queueConnection';
 
-// // Create Notification Queue
-// export const notificationQueue = new Queue<NotificationJobData>(
-//   queueConfig.bull.queues.notification.name,
-//   {
-//     redis: queueConfig.bull.redis,
-//     defaultJobOptions: queueConfig.bull.defaultJobOptions,
-//     limiter: queueConfig.bull.queues.notification.limiter,
-//   }
-// );
+export interface NotificationJobPayload {
+  userId: string;
+  title: string;
+  message: string;
+  type?: string;
+  channels?: string[];
+  data?: Record<string, any>;
+  jobId?: string;
+  idempotencyKey?: string;
+  [key: string]: any;
+}
 
-// // =====================================================
-// // Queue Event Handlers
-// // =====================================================
+export interface QueueNotificationResult {
+  success: boolean;
+  jobId?: string;
+  queuedAt: string;
+}
 
-// notificationQueue.on('error', (error) => {
-//   logger.error('Notification Queue Error:', error.message);
-// });
+const QUEUE_NAME = 'notification-queue';
 
-// notificationQueue.on('active', (job) => {
-//   logger.info(`Processing notification job ${job.id}`, {
-//     type: job.data.type,
-//     userId: job.data.userId,
-//   });
-// });
+const defaultJobOptions: JobsOptions = {
+  attempts: 3,
+  backoff: {
+    type: 'exponential',
+    delay: 1000,
+  },
+  removeOnComplete: {
+    age: 86400,
+    count: 10000,
+  },
+  removeOnFail: {
+    age: 7 * 86400,
+  },
+};
 
-// notificationQueue.on('completed', (job, result: NotificationJobResult) => {
-//   logger.info(`Notification job ${job.id} completed`, {
-//     type: job.data.type,
-//     success: result.success,
-//     channels: result.channels,
-//   });
-// });
+let notificationQueueInstance: Queue<NotificationJobPayload> | null = null;
 
-// notificationQueue.on('failed', (job, error) => {
-//   logger.error(`Notification job ${job?.id} failed`, {
-//     type: job?.data?.type,
-//     error: error.message,
-//   });
-// });
+export function getNotificationQueue(): Queue<NotificationJobPayload> {
+  if (!notificationQueueInstance) {
+    const connection = getQueueConnectionConfig();
+    notificationQueueInstance = new Queue<NotificationJobPayload>(QUEUE_NAME, {
+      connection,
+      defaultJobOptions,
+    });
+  }
+  return notificationQueueInstance;
+}
 
-// // =====================================================
-// // Helper Functions
-// // =====================================================
+export async function enqueueNotification(data: NotificationJobPayload): Promise<QueueNotificationResult> {
+  const queue = getNotificationQueue();
+  const computedJobId = data.jobId || data.idempotencyKey || `notif_${data.userId}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
-// /**
-//  * Add notification job to queue
-//  */
-// export async function addNotificationJob(
-//   data: NotificationJobData,
-//   options?: {
-//     priority?: number;
-//     delay?: number;
-//   }
-// ): Promise<void> {
-//   try {
-//     await notificationQueue.add(data, {
-//       priority: options?.priority || queueConfig.priorities.normal,
-//       delay: options?.delay,
-//     });
+  const job = await queue.add('send-notification', data, {
+    jobId: computedJobId,
+  });
 
-//     logger.info('Notification job added', {
-//       type: data.type,
-//       userId: data.userId,
-//     });
-//   } catch (error : any) {
-//     logger.error('Failed to add notification job', error);
-//     throw error;
-//   }
-// }
+  return {
+    success: true,
+    jobId: job.id,
+    queuedAt: new Date().toISOString(),
+  };
+}
 
-// /**
-//  * Get queue stats
-//  */
-// export async function getNotificationQueueStats() {
-//   const [waiting, active, completed, failed, delayed] = await Promise.all([
-//     notificationQueue.getWaitingCount(),
-//     notificationQueue.getActiveCount(),
-//     notificationQueue.getCompletedCount(),
-//     notificationQueue.getFailedCount(),
-//     notificationQueue.getDelayedCount(),
-//   ]);
+export async function closeNotificationQueue(): Promise<void> {
+  if (notificationQueueInstance) {
+    await notificationQueueInstance.close();
+    notificationQueueInstance = null;
+  }
+}
 
-//   return {
-//     waiting,
-//     active,
-//     completed,
-//     failed,
-//     delayed,
-//     paused: await notificationQueue.isPaused(),
-//   };
-// }
+export const notificationQueue = {
+  add: async (nameOrData: any, maybeData?: any) => {
+    const payload = maybeData || nameOrData;
+    return enqueueNotification(payload);
+  },
+  process: (_concurrencyOrHandler: any, _maybeHandler?: any) => {
+    // BullMQ processing is handled in worker.ts
+  },
+  close: closeNotificationQueue,
+};
 
-// export default notificationQueue;
+export default notificationQueue;

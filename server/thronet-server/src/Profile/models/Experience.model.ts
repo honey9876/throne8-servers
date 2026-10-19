@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { LoggerUtil } from '@/shared/logger.util';
 import CacheUtil from '@/shared/cache.util';
@@ -199,6 +199,10 @@ ExperienceSchema.statics.restoreExperience = async function (
         throw error;
     }
 };
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(ExperienceSchema, 'userId');
 
 const Experience = mongoose.model<IExperience, IExperienceModel>('Experience', ExperienceSchema);
 export default Experience;

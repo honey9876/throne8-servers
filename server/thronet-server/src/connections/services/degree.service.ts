@@ -6,7 +6,11 @@ import { ErrorResponse, HttpStatus } from '@/shared/response.util';
 import { ConnectionRelation, PersonNode } from '../models/neo4j/index';
 import { UserId } from '../types/network.types';
 import { getNeo4jDriver } from '@/config/neo4j/neo4j';
-import cacheService from './shared/cacheService';
+import CacheUtil from '@/shared/cache.util';
+const cacheService = {
+  get: (key: string) => CacheUtil.get(key),
+  set: (key: string, value: string, ttl?: number) => CacheUtil.set(key, value, ttl),
+};
 import constants from '@/shared/constants.util';
 
 const ERROR_CODES = constants.ERROR_CODES;
@@ -181,11 +185,19 @@ interface NetworkMetricsData {
   };
 }
 
+// Neo4j sirf tab use hota hai jab ENABLE_NEO4J=true ho. Default: off.
+// Off hone par driver banta hi nahi, aur boot pe koi error log nahi aata.
+const NEO4J_ENABLED = process.env['ENABLE_NEO4J'] === 'true';
+
 class DegreeService {
   private driver: Driver | null = null;
 
   constructor() {
-    this.initializeDriver();
+    if (NEO4J_ENABLED) {
+      void this.initializeDriver();
+    } else {
+      logger.debug('Neo4j disabled (ENABLE_NEO4J is not true), skipping degree service driver init');
+    }
   }
 
   private async initializeDriver() {
@@ -201,6 +213,9 @@ class DegreeService {
   }
 
   private async getDriver(): Promise<Driver> {
+    if (!NEO4J_ENABLED) {
+      throw new Error('Neo4j is disabled (set ENABLE_NEO4J=true to enable)');
+    }
     if (!this.driver) {
       this.driver = await getNeo4jDriver();
     }
@@ -211,6 +226,15 @@ class DegreeService {
   }
 
   private async runQuery(cypher: string, params: Record<string, any> = {}): Promise<QueryResult> {
+    // Neo4j off hai to query chalane ki koshish hi mat karo (error log spam nahi hoga)
+    if (!NEO4J_ENABLED) {
+      throw new ErrorResponse(
+        'Graph features are currently unavailable',
+        (HttpStatus as any).SERVICE_UNAVAILABLE ?? 503,
+        ERROR_CODES.DATABASE_ERROR
+      );
+    }
+
     let session: Session | null = null;
     try {
       const driver = await this.getDriver();
@@ -229,7 +253,6 @@ class DegreeService {
       if (session) await session.close();
     }
   }
-
   // FIXED: Match mock service response format
   async calculateConnectionDegrees(userId: UserId, maxDepth: number = 3): Promise<DegreeData> {
     try {

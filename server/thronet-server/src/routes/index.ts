@@ -106,6 +106,9 @@ mountOptional('/messaging', 'messaging', () => require('../message/routes/messag
 mountOptional('/study-group', 'studyGroup', () => require('../StudyGroup/routers'));
 mountOptional('/job-service', 'jobService', () => require('../Job-Service/routers'));
 
+// ── Resume Builder (from resume12) ──
+mountOptional('/resume-builder', 'resumeBuilder', () => require('../resume/routes/index'));
+
 /* eslint-enable @typescript-eslint/no-var-requires */
 
 LoggerUtil.info('API routes ready', { enabledFeatures: enabledFeatures() });

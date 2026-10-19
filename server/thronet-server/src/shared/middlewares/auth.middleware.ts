@@ -11,9 +11,11 @@
 
 import { Request, Response, NextFunction } from 'express';
 import CacheUtil from '@/shared/cache.util';
+import TokenBlacklistUtil from '@/shared/utils/tokenBlacklist.util';
 import { User, Session } from '@/shared/models/index.models';
 import logger from '@/shared/logger.util';
 import ResponseUtil from '@/shared/response.util';
+import { getCachedAuthUser, setCachedAuthUser } from '@/shared/cache/authCache';
 
 const BLACKLIST_PREFIX = 'blacklist:access:';
 
@@ -95,7 +97,8 @@ class AuthMiddleware {
         }
 
         // Step 2: Blacklist (logout ke baad turant)
-        const isBlacklisted = await CacheUtil.exists(`${BLACKLIST_PREFIX}${token}`);
+        // Uses sha256(token) and honors BLACKLIST_LEGACY_RAW_KEYS_ENABLED migration flag
+        const isBlacklisted = await TokenBlacklistUtil.isAccessTokenBlacklisted(token);
         if (isBlacklisted) {
             return fail(401, 'Token has been invalidated. Please login again.');
         }
@@ -120,12 +123,23 @@ class AuthMiddleware {
         const sessionId = decoded.sessionId || (req.headers['x-session-id'] as string | undefined);
         const now = new Date();
 
-        // Step 4: User fetch + session check (parallel)
-        const [user, sessionResult]: [any, any] = await Promise.all([
-            User.findOne({ userId: decoded.userId })
+        // Step 4: User fetch (Redis cache with DB fallback) + session check (parallel)
+        let user: any = await getCachedAuthUser(decoded.userId);
+        const userPromise: Promise<any> = user
+            ? Promise.resolve(user)
+            : User.findOne({ userId: decoded.userId })
                 .select('userId email role status accountStatus lockUntil accountLockedReason flags region')
                 .lean()
-                .exec(),
+                .exec()
+                .then(async (dbUser) => {
+                    if (dbUser) {
+                        await setCachedAuthUser(decoded.userId, dbUser as any);
+                    }
+                    return dbUser;
+                });
+
+        const [resolvedUser, sessionResult]: [any, any] = await Promise.all([
+            userPromise,
             sessionId
                 ? Session.updateOne(
                     {
@@ -138,6 +152,7 @@ class AuthMiddleware {
                 )
                 : Promise.resolve(null),
         ]);
+        user = resolvedUser;
 
         if (!user) {
             return fail(401, 'User not found. Please login again.');
@@ -150,11 +165,11 @@ class AuthMiddleware {
 
         // Step 5: Account state
         if (user.flags?.isDeleted || user.status !== 'active') {
-            return fail(403, 'Account is not active. Please contact support.');
+            return fail(401, 'Account is not active. Please contact support.');
         }
 
         if (user.accountStatus && user.accountStatus !== 'active') {
-            return fail(403, 'Account is not active. Please contact support.');
+            return fail(401, 'Account is not active. Please contact support.');
         }
 
         if (
@@ -162,7 +177,7 @@ class AuthMiddleware {
             new Date(user.lockUntil) > now &&
             HARD_LOCK_REASONS.includes(user.accountLockedReason)
         ) {
-            return fail(403, 'Account is locked. Please contact support.');
+            return fail(401, 'Account is locked. Please contact support.');
         }
 
         // Step 6: Result

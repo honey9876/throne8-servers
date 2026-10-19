@@ -1,3 +1,5 @@
+import mongoose, { FilterQuery } from 'mongoose';
+import { AvailabilityDocument } from '../models/Availability';
 import { DateTime } from 'luxon';
 import { Availability, Mentor } from '../models';
 import SlotGenerator from '@/Mentorship/utils/slotGenerator';
@@ -7,6 +9,16 @@ import { NotFoundError, BadRequestError, ConflictError } from '@/shared/errors/a
 import mentorRepository from '../repositories/mentor.repository';
 import availabilityRepository from '../repositories/availability.repository';
 import { bookRangeInSlots, releaseRangeInSlots, subtractBusyRanges } from '@/Mentorship/utils/slotSplitter';
+import {
+  getCachedAvailableSlots,
+  setCachedAvailableSlots,
+  getCachedMentorAvailability,
+  setCachedMentorAvailability,
+  invalidateMentorAvailabilityCache,
+} from '@/shared/cache/mentorshipCache';
+
+import { BookingConcurrencyConflictError } from '../repositories/availability.repository';
+export { BookingConcurrencyConflictError };
 
 
 
@@ -84,6 +96,7 @@ class AvailabilityService {
       });
 
       logger.info(`Availability created: ${availability.availabilityId}`);
+      await invalidateMentorAvailabilityCache(input.mentorId);
       return availability;
     } catch (error: any) {
       // ✅ FIX: the pre-check above can lose a race (two rapid requests, or
@@ -219,6 +232,7 @@ class AvailabilityService {
       logger.info(
         `Bulk create complete: ${results.created} created, ${results.failed} failed`
       );
+      await invalidateMentorAvailabilityCache(input.mentorId);
       return results;
     } catch (error: any) {
       logger.error(`Bulk create availability failed: ${error.message}`);
@@ -251,6 +265,12 @@ class AvailabilityService {
     try {
       logger.info(`Fetching availability for mentor: ${mentorId}`);
 
+      // Check cache first
+      const cached = await getCachedMentorAvailability(mentorId, filters);
+      if (cached) {
+        return cached;
+      }
+
       // ✅ FIX: Push status filter into DB query — don't fetch everything then filter in JS
       const query: any = { mentorId };
 
@@ -271,6 +291,10 @@ class AvailabilityService {
       const availabilities = await availabilityRepository.findByMentorId(mentorId, query);
 
       logger.info(`Found ${availabilities.length} availability records`);
+
+      // Store in cache
+      await setCachedMentorAvailability(mentorId, filters, availabilities);
+
       return availabilities;
     } catch (error: any) {
       logger.error(`Failed to fetch availability: ${error.message}`);
@@ -286,6 +310,15 @@ class AvailabilityService {
     try {
       logger.info(`Fetching available slots for mentor: ${mentorId} on ${date}`);
 
+      const dateStr = DateTime.fromJSDate(date).toISODate() || date.toISOString().slice(0, 10);
+      const tz = timezone || 'UTC';
+
+      // Check cache first
+      const cachedSlots = await getCachedAvailableSlots(mentorId, dateStr, tz);
+      if (cachedSlots) {
+        return cachedSlots;
+      }
+
       const availability = await availabilityRepository.findByMentorAndDate(
         mentorId,
         DateTime.fromJSDate(date).startOf('day').toJSDate(),
@@ -296,8 +329,10 @@ class AvailabilityService {
 
       const availableSlots = (availability as any).getAvailableSlots();
 
+      let resultSlots: Array<{ startTime: string; endTime: string; duration: number }>;
+
       if (timezone && timezone !== availability.timezone) {
-        return availableSlots.map((slot: any) => {
+        resultSlots = availableSlots.map((slot: any) => {
           const startTimeConverted = TimezoneUtils.convertTimeString(
             slot.startTime,
             date,
@@ -316,12 +351,17 @@ class AvailabilityService {
             duration: TimezoneUtils.getDurationInMinutes(startTimeConverted, endTimeConverted),
           };
         });
+      } else {
+        resultSlots = availableSlots.map((slot: any) => ({
+          ...slot,
+          duration: TimezoneUtils.getDurationInMinutes(slot.startTime, slot.endTime),
+        }));
       }
 
-      return availableSlots.map((slot: any) => ({
-        ...slot,
-        duration: TimezoneUtils.getDurationInMinutes(slot.startTime, slot.endTime),
-      }));
+      // Store in cache
+      await setCachedAvailableSlots(mentorId, dateStr, tz, resultSlots);
+
+      return resultSlots;
     } catch (error: any) {
       logger.error(`Failed to fetch available slots: ${error.message}`);
       throw error;
@@ -376,6 +416,9 @@ class AvailabilityService {
       }
 
       logger.info(`Availability updated: ${availabilityId}`);
+      if (availability?.mentorId) {
+        await invalidateMentorAvailabilityCache(availability.mentorId);
+      }
       return availability;
     } catch (error: any) {
       logger.error(`Failed to update availability: ${error.message}`);
@@ -385,8 +428,10 @@ class AvailabilityService {
 
 
     /**
-   * ✅ NEW: [startTime, endTime) range ko atomically book karta hai.
-   * Stored slot bada ho to use todta hai. __v optimistic lock + 3 retries.
+   * [startTime, endTime) range ko atomically book karta hai.
+   * Atomic conditional update on MongoDB (findOneAndUpdate with isBooked: false).
+   * Exact match uses positional operator $set: { 'slots.$.isBooked': true };
+   * Split match atomically ensures encompassing slot is still unbooked.
    * Return: booked range, ya null agar slot available nahi.
    */
     async bookRange(
@@ -396,35 +441,111 @@ class AvailabilityService {
       endTime: string,
       sessionId: string
     ): Promise<{ startTime: string; endTime: string } | null> {
-      const MAX_RETRIES = 3;
-  
+      const MAX_RETRIES = 25;
+
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        const doc: any = await Availability.findOne({ availabilityId, mentorId, isDeleted: false }).lean();
-        if (!doc) return null;
-  
-        const newSlots = bookRangeInSlots(doc.slots, startTime, endTime, sessionId);
-        if (!newSlots) return null;
-  
-        const updated = await Availability.findOneAndUpdate(
-          { availabilityId, isDeleted: false, __v: doc.__v ?? null } as any,
-          { $set: { slots: newSlots }, $inc: { __v: 1 } } as any,
+        // 1. Direct atomic conditional update: exact matching unbooked slot
+        const directUpdate = await Availability.findOneAndUpdate(
+          {
+            availabilityId,
+            mentorId,
+            isDeleted: false,
+            slots: {
+              $elemMatch: {
+                startTime,
+                endTime,
+                isBooked: false,
+                isBlocked: false,
+              },
+            },
+          },
+          {
+            $set: {
+              'slots.$.isBooked': true,
+              'slots.$.sessionId': sessionId,
+            },
+            $inc: { __v: 1 },
+          },
           { new: true }
         );
-  
-        if (updated) return { startTime, endTime };
+
+        if (directUpdate) {
+          await invalidateMentorAvailabilityCache(mentorId);
+          return { startTime, endTime };
+        }
+
+        // 2. Sub-range booking within a larger slot with CAS on __v
+        const doc = await Availability.findOne({
+          availabilityId,
+          mentorId,
+          isDeleted: false,
+          slots: {
+            $elemMatch: {
+              startTime: { $lte: startTime },
+              endTime: { $gte: endTime },
+              isBooked: false,
+              isBlocked: false,
+            },
+          },
+        }).lean();
+
+        if (!doc) {
+          return null;
+        }
+
+        const newSlots = bookRangeInSlots(doc.slots, startTime, endTime, sessionId);
+        if (!newSlots) {
+          return null;
+        }
+
+        const filter: FilterQuery<AvailabilityDocument> = {
+          _id: doc._id,
+          availabilityId,
+          mentorId,
+          isDeleted: false,
+          __v: typeof doc.__v === 'number' ? doc.__v : { $exists: false },
+        };
+
+        const splitUpdate = await Availability.findOneAndUpdate(
+          filter,
+          {
+            $set: { slots: newSlots },
+            $inc: { __v: 1 },
+          },
+          { new: true }
+        );
+
+        if (splitUpdate) {
+          await invalidateMentorAvailabilityCache(mentorId);
+          return { startTime, endTime };
+        }
+
+        // CAS conflict (__v changed by concurrent update).
+        if (attempt < MAX_RETRIES - 1) {
+          const backoffMs = Math.floor(Math.random() * 20) + 10;
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        }
       }
-  
-      throw new ConflictError('This slot is being booked by someone else. Please try again.');
+
+      logger.error('Slot booking concurrency conflict: maximum retry attempts exhausted', {
+        availabilityId,
+        mentorId,
+        startTime,
+        endTime,
+      });
+      throw new BookingConcurrencyConflictError(
+        'Slot booking concurrency conflict: maximum retry attempts exhausted. Please try again.'
+      );
     }
   
     /**
      * ✅ NEW: cancel par exact booked range wapas free karta hai.
      */
     async releaseRange(availabilityId: string, startTime: string, endTime: string): Promise<boolean> {
-      const MAX_RETRIES = 3;
+      const MAX_RETRIES = 5;
   
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        const doc: any = await Availability.findOne({ availabilityId, isDeleted: false }).lean();
+        const doc = await Availability.findOne({ availabilityId, isDeleted: false }).lean();
         if (!doc) return false;
   
         const newSlots = releaseRangeInSlots(
@@ -434,14 +555,31 @@ class AvailabilityService {
           doc.isDateBlocked ? { reason: doc.dateBlockReason } : undefined
         );
         if (!newSlots) return false;
+
+        const filter: FilterQuery<AvailabilityDocument> = {
+          _id: doc._id,
+          availabilityId,
+          isDeleted: false,
+          __v: typeof doc.__v === 'number' ? doc.__v : { $exists: false },
+        };
   
         const updated = await Availability.findOneAndUpdate(
-          { availabilityId, isDeleted: false, __v: doc.__v ?? null } as any,
-          { $set: { slots: newSlots }, $inc: { __v: 1 } } as any,
+          filter,
+          { $set: { slots: newSlots }, $inc: { __v: 1 } },
           { new: true }
         );
   
-        if (updated) return true;
+        if (updated) {
+          if (doc.mentorId) {
+            await invalidateMentorAvailabilityCache(doc.mentorId);
+          }
+          return true;
+        }
+
+        if (attempt < MAX_RETRIES - 1) {
+          const backoffMs = Math.floor(Math.random() * 20) + 10;
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        }
       }
   
       return false;
@@ -470,6 +608,9 @@ class AvailabilityService {
       }
 
       logger.info(`Availability deleted: ${availabilityId}`);
+      if (availability?.mentorId) {
+        await invalidateMentorAvailabilityCache(availability.mentorId);
+      }
     } catch (error: any) {
       logger.error(`Failed to delete availability: ${error.message}`);
       throw error;
@@ -504,6 +645,9 @@ class AvailabilityService {
         throw new NotFoundError('Availability not found');
       }
 
+      if (existingDoc?.mentorId) {
+        await invalidateMentorAvailabilityCache(existingDoc.mentorId);
+      }
       return updated;
     } catch (error: any) {
       logger.error(`Failed to ${isBlocked ? 'block' : 'unblock'} date: ${error.message}`);
@@ -518,7 +662,9 @@ class AvailabilityService {
       if (!mentor) {
         throw new NotFoundError('Mentor not found');
       }
-      return await availabilityRepository.blockByDate(mentorId, date, timezone, reason);
+      const result = await availabilityRepository.blockByDate(mentorId, date, timezone, reason);
+      await invalidateMentorAvailabilityCache(mentorId);
+      return result;
     } catch (error: any) {
       logger.error(`Failed to block date: ${error.message}`);
       throw error;
@@ -532,6 +678,7 @@ class AvailabilityService {
       if (!result) {
         throw new NotFoundError('No availability found for this date');
       }
+      await invalidateMentorAvailabilityCache(mentorId);
       return result;
     } catch (error: any) {
       logger.error(`Failed to unblock date: ${error.message}`);

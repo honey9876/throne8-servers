@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Volunteer Model - User Volunteer Experience
  * Stores volunteer roles, organizations, causes, media, and skills
  * 
@@ -492,6 +492,10 @@ VolunteerSchema.statics.reorderVolunteers = async function (userId: string, volu
 };
 
 // ==================== EXPORT ====================
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(VolunteerSchema, 'userId');
 
 const Volunteer = mongoose.model<IVolunteer, IVolunteerModel>('Volunteer', VolunteerSchema);
 export default Volunteer;

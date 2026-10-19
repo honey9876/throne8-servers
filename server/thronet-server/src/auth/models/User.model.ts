@@ -8,6 +8,9 @@ import { LoggerUtil } from "@/shared/logger.util";
 import userEmitter from "@/shared/events/emitters/user.emitter";
 import Constants from "@/shared/constants.util";
 import CacheUtil from "@/shared/cache.util";
+import { invalidateUserAuthCache, invalidateAllAuthUserCacheByScan } from "@/shared/cache/authCache";
+import { ProfileCacheRepository } from "@/shared/cache/profileCache";
+import { StudyAnalyticsCacheRepository, LeaderboardCacheRepository } from "@/shared/cache/studyCache";
 import type { IUserBadge } from "@/StudyGroup/interfaces/IBadge";
 
 const logger = LoggerUtil;
@@ -923,6 +926,130 @@ UserSchema.pre("save", async function (next) {
       error: (error as Error).message,
     });
     next(error as Error);
+  }
+});
+
+// Cache invalidation on direct document save (role, status, ban changes, profile info, analytics)
+UserSchema.post("save", async function (doc: any) {
+  try {
+    if (doc?.userId) {
+      await invalidateUserAuthCache(doc.userId);
+      await ProfileCacheRepository.invalidateProfile(doc.userId);
+      await StudyAnalyticsCacheRepository.invalidateUserAnalytics(doc.userId);
+      if (doc.status !== 'active' || doc.flags?.isDeleted) {
+        await LeaderboardCacheRepository.removeUser(doc.userId);
+      }
+    }
+  } catch (error: any) {
+    logger.warn(`[UserSchema] Post-save cache invalidation error: ${error.message}`);
+  }
+});
+
+// Hook methods for all write/mutation paths
+const SINGLE_DOC_USER_MUTATIONS = [
+  "updateOne",
+  "findOneAndUpdate",
+  "deleteOne",
+  "findOneAndDelete",
+  "findOneAndReplace",
+  "replaceOne",
+];
+
+const MULTI_DOC_USER_MUTATIONS = [
+  "updateMany",
+  "deleteMany",
+];
+
+const USER_MUTATION_METHODS = [
+  ...SINGLE_DOC_USER_MUTATIONS,
+  ...MULTI_DOC_USER_MUTATIONS,
+] as any;
+
+// Pre-hook for update/delete/replace operations:
+// Captures affected userIds BEFORE the mutation runs.
+UserSchema.pre(USER_MUTATION_METHODS, async function (this: any) {
+  try {
+    const filter = this.getFilter() || {};
+    const op = this.op;
+
+    const isObjectFilter =
+      (filter.userId !== undefined && typeof filter.userId === "object" && filter.userId !== null) ||
+      (filter._id !== undefined && typeof filter._id === "object" && filter._id !== null && !(filter._id instanceof mongoose.Types.ObjectId));
+
+    // Fast-path: only if filter directly targets userId as a primitive string in single-doc op
+    const isDirectUserId =
+      filter.userId &&
+      typeof filter.userId === "string" &&
+      !filter.userId.startsWith("$");
+
+    if (!isObjectFilter && isDirectUserId && SINGLE_DOC_USER_MUTATIONS.includes(op)) {
+      this._preUpdateUserIds = [filter.userId];
+      return;
+    }
+
+    // Single-document operations affect at most 1 document (only if not an object operator):
+    if (!isObjectFilter && SINGLE_DOC_USER_MUTATIONS.includes(op)) {
+      const doc = await this.model
+        .findOne(filter)
+        .select("userId _id")
+        .lean()
+        .exec();
+
+      if (doc && doc.userId) {
+        this._preUpdateUserIds = [doc.userId];
+      } else {
+        this._preUpdateUserIds = [];
+      }
+      return;
+    }
+
+    // Multi-document path (updateMany, deleteMany OR when filter.userId/filter._id is an object such as $in)
+    const affectedDocs = await this.model
+      .find(filter)
+      .select("userId _id")
+      .limit(501)
+      .lean()
+      .exec();
+
+    this._preUpdateUserIds = affectedDocs
+      .slice(0, 500)
+      .map((d: any) => d.userId)
+      .filter(Boolean);
+
+    // If matches exceed 500 or filter is empty/broad, flag for full SCAN fallback
+    if (affectedDocs.length > 500 || Object.keys(filter).length === 0) {
+      this._preUpdateNeedsScan = true;
+    }
+  } catch (err: any) {
+    this._preUpdateNeedsScan = true;
+  }
+});
+
+// Post-hook for update/delete/replace operations:
+// Invalidates the captured userIds (even if the mutation changed status or deleted doc).
+UserSchema.post(USER_MUTATION_METHODS, async function (this: any) {
+  try {
+    const userIds: string[] = this._preUpdateUserIds || [];
+    if (userIds.length > 0) {
+      await Promise.all(
+        userIds.map((uid: string) =>
+          Promise.all([
+            invalidateUserAuthCache(uid),
+            ProfileCacheRepository.invalidateProfile(uid),
+            StudyAnalyticsCacheRepository.invalidateUserAnalytics(uid),
+            LeaderboardCacheRepository.removeUser(uid),
+          ])
+        )
+      );
+    }
+    if (
+      this._preUpdateNeedsScan ||
+      (userIds.length === 0 && Object.keys(this.getFilter() || {}).length === 0)
+    ) {
+      await invalidateAllAuthUserCacheByScan();
+    }
+  } catch (err: any) {
+    logger.warn(`[UserSchema] Post-mutation cache invalidation error: ${err.message}`);
   }
 });
 

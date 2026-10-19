@@ -59,9 +59,9 @@ class SeniorMentorApplicationService {
   private async uploadPhotoToCloudinary(
     file: Express.Multer.File
   ): Promise<{ url: string; key: string }> {
-    const allowed = ['image/jpeg', 'image/jpg', 'image/png'];
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
     if (!file || !allowed.includes(file.mimetype)) {
-      throw new BadRequestError('Profile photo must be a JPG or PNG image');
+      throw new BadRequestError('Profile photo must be a JPG, PNG, WEBP or GIF image');
     }
     if (file.size > 5 * 1024 * 1024) {
       throw new BadRequestError('Profile photo must be 5MB or smaller');
@@ -342,6 +342,40 @@ class SeniorMentorApplicationService {
   async hasApplied(userId: string): Promise<boolean> {
     const application = await seniorMentorApplicationRepository.findByUserId(userId);
     return !!application;
+  }
+
+  /**
+   * Owner-only photo change. Verified application par bhi allowed
+   * (update() verified ko lock karta hai, photo ko nahi).
+   */
+  async updateProfilePhoto(userId: string, file: Express.Multer.File): Promise<any> {
+    const existing = await seniorMentorApplicationRepository.findByUserId(userId);
+    if (!existing) {
+      throw new NotFoundError('Senior Mentor application');
+    }
+
+    const uploaded = await this.uploadPhotoToCloudinary(file);
+
+    const updated = await seniorMentorApplicationRepository.updateProfilePhotoByUserId(userId, {
+      profilePhoto: uploaded.url,
+      profilePhotoKey: uploaded.key,
+    });
+
+    if (!updated) {
+      // application beech me withdraw ho gayi: naya upload orphan na rahe
+      await cloudinary.uploader.destroy(uploaded.key).catch(() => undefined);
+      throw new NotFoundError('Senior Mentor application');
+    }
+
+    // purani photo Cloudinary se hatao (best-effort)
+    if (existing.profilePhotoKey && existing.profilePhotoKey !== uploaded.key) {
+      cloudinary.uploader.destroy(existing.profilePhotoKey).catch((err: any) =>
+        logger.warn(`Old senior photo cleanup failed (${existing.profilePhotoKey}): ${err?.message}`)
+      );
+    }
+
+    logger.info(`📸 Senior Mentor profile photo updated for user: ${userId}`);
+    return updated;
   }
 
   /**

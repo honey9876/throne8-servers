@@ -954,7 +954,19 @@ class MentorService {
       const firstName = user?.firstName || mentor.user?.firstName || 'Mentor';
       const lastName = user?.lastName || mentor.user?.lastName || '';
       const name = `${firstName} ${lastName}`.trim();
-      const profilePic = mentor.profilePic || user?.profilePic || null;
+      // Mentor.profilePic na ho to account (ProfilePhoto) ki active photo dikhao.
+      // User model me `profilePic` field nahi hai (sirf profilePhotoId), isliye
+      // purana `user?.profilePic` fallback kabhi kaam nahi karta tha.
+      let accountPhotoUrl: string | null = null;
+      if (!mentor.profilePic) {
+        try {
+          const selfDetails = await resolveUserDetails([mentor.userId]);
+          accountPhotoUrl = selfDetails.get(String(mentor.userId))?.photoUrl || null;
+        } catch (photoErr: any) {
+          logger.warn(`Account photo fallback failed for mentor ${mentor.mentorId}: ${photoErr?.message}`);
+        }
+      }
+      const profilePic = mentor.profilePic || accountPhotoUrl;      
 
       const mentorIds = [mentor.mentorId, mentor.userId].filter(Boolean);
 

@@ -15,25 +15,16 @@
 import { Server, Socket } from 'socket.io';
 import { LoggerUtil } from '@/shared/logger.util';
 import { User } from '@/auth/models';
-
-// ─── Debounce map: userId → last DB write timestamp ──────────────────────────
-const lastActiveWriteTs = new Map<string, number>();
-const LAST_ACTIVE_DEBOUNCE_MS = 60_000; // write to DB at most once per minute
+import { SocketPresenceRepository } from '@/shared/cache/socketCache';
 
 async function updateLastActive(userId: string): Promise<void> {
-  const now = Date.now();
-  const last = lastActiveWriteTs.get(userId) ?? 0;
-
-  if (now - last < LAST_ACTIVE_DEBOUNCE_MS) return; // too soon — skip
-
-  lastActiveWriteTs.set(userId, now);
-
   try {
+    const lockAcquired = await SocketPresenceRepository.acquireLastActiveLock(userId, 60);
+    if (!lockAcquired) return; // Debounced across cluster
+
     await User.findByIdAndUpdate(userId, { lastActive: new Date() });
   } catch (err: any) {
     LoggerUtil.error('Failed to update lastActive', { error: err.message, userId });
-    // Remove the timestamp so the next call retries
-    lastActiveWriteTs.delete(userId);
   }
 }
 
@@ -41,8 +32,6 @@ async function updateLastActive(userId: string): Promise<void> {
 export const handlePresenceEvents = (io: Server, socket: Socket, userId: string): void => {
 
   // ── User comes online ──────────────────────────────────────────────────────
-  // Called by client after connecting. The server has already joined the user
-  // to user:{userId} room in socket/index.ts.
   socket.on('user-online', async () => {
     try {
       LoggerUtil.debug(`User ${userId} online`);
@@ -50,10 +39,7 @@ export const handlePresenceEvents = (io: Server, socket: Socket, userId: string)
       // Debounced DB write
       await updateLastActive(userId);
 
-      // Broadcast ONLY to contacts, not the entire server.
-      // user:{userId}:contacts is a room that contains the sockets of users
-      // who are connected and have this user in their network.
-      // You can populate this room when a contact comes online (see below).
+      // Broadcast ONLY to contacts room
       io.to(`user:${userId}:contacts`).emit('user-status-changed', {
         userId,
         isOnline: true,
@@ -65,9 +51,16 @@ export const handlePresenceEvents = (io: Server, socket: Socket, userId: string)
     }
   });
 
-  // ── User goes offline (also called on disconnect from socket/index.ts) ─────
+  // ── User goes offline ──────────────────────────────────────────────────────
   socket.on('user-offline', async () => {
     try {
+      // Check if user still has other active sockets (multi-tab/device safe)
+      const isOnline = await SocketPresenceRepository.isUserOnline(userId);
+      if (isOnline) {
+        // User is still active on another tab or device; do not broadcast offline
+        return;
+      }
+
       await updateLastActive(userId);
 
       io.to(`user:${userId}:contacts`).emit('user-status-changed', {

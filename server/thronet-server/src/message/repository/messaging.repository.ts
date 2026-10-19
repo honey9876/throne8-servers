@@ -21,12 +21,12 @@ import {
     ConversationType,
 } from '../types/message.types';
 
-async function getMessageModel() {
+async function getMessageModel(): Promise<mongoose.Model<IMessage>> {
     if (mongoose.models['DirectMessage']) {
-        return mongoose.models['DirectMessage'];
+        return mongoose.models['DirectMessage'] as mongoose.Model<IMessage>;
     }
     const { default: Message } = await import('../models/messaging.model');
-    return Message;
+    return Message as mongoose.Model<IMessage>;
 }
 // ==================== CONVERSATION REPOSITORY ====================
 
@@ -316,14 +316,14 @@ export class MessageRepository {
         const message = await Message.findOne({ messageId, isDeleted: false });
         if (!message) return null;
 
-        const existing = message.reactions.find((r) => r.emoji === emoji);
+        const existing = message.reactions.find((r: any) => r.emoji === emoji);
 
         if (existing) {
             if (existing.userIds.includes(userId)) {
                 // Remove reaction
-                existing.userIds = existing.userIds.filter((id) => id !== userId);
+                existing.userIds = existing.userIds.filter((id: string) => id !== userId);
                 if (existing.userIds.length === 0) {
-                    message.reactions = message.reactions.filter((r) => r.emoji !== emoji);
+                    message.reactions = message.reactions.filter((r: any) => r.emoji !== emoji);
                 }
             } else {
                 existing.userIds.push(userId);

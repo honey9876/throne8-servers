@@ -1,4 +1,4 @@
-﻿// src/models/mongodb/SavedSearch.ts
+// src/models/mongodb/SavedSearch.ts
 
 import { Schema, model, Document, Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -117,7 +117,7 @@ SavedSearchSchema.index({ lastExecuted: 1, isActive: 1 });
 SavedSearchSchema.statics.findBySavedSearchId = async function (
   savedSearchId: string
 ): Promise<ISavedSearch | null> {
-  return this.findOne({ savedSearchId }).lean().exec();
+  return this.findOne({ savedSearchId }).lean().exec() as unknown as ISavedSearch | null;
 };
 
 SavedSearchSchema.statics.findUserSavedSearches = async function (
@@ -128,7 +128,7 @@ SavedSearchSchema.statics.findUserSavedSearches = async function (
   if (isActive !== undefined) {
     filter.isActive = isActive;
   }
-  return this.find(filter).sort({ createdAt: -1 }).lean().exec();
+  return this.find(filter).sort({ createdAt: -1 }).lean().exec() as unknown as ISavedSearch[];
 };
 
 SavedSearchSchema.statics.executeSavedSearch = async function (

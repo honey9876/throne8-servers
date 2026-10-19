@@ -8,7 +8,7 @@
 import { Kafka, Producer, Message } from 'kafkajs';
 import kafkaConfig from '@/config/kafka.config';
 import { LoggerUtil } from '@/shared/logger.util';
-import topics from '@/kafka/config/topic.config';
+import topics from '@/shared/kafka/config/topic.config';
 
 export interface AuthEvent {
     eventId: string;

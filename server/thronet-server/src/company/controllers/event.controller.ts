@@ -199,24 +199,6 @@ class EventController {
     }
   }
 
-  // =====================================================
-  // DELETE EVENT ✅ resolvedObjectId use karo
-  // =====================================================
-  async deleteEvent(req: Request, res: Response): Promise<void> {
-    try {
-      const objectId = (req as any).resolvedObjectId;
-
-      await eventService.deleteEvent(objectId);
-      ResponseUtil.success(res, null, 'Event deleted successfully');
-    } catch (error: any) {
-      logger.error(`[${req.user?.id}] Error deleting event:`, error);
-      if (error.message === 'Event not found') {
-        ResponseUtil.notFound(res, 'Event not found');
-      } else {
-        ResponseUtil.error(res, error.message || 'Failed to delete event');
-      }
-    }
-  }
 
   // =====================================================
   // SEARCH EVENTS — NO CHANGE

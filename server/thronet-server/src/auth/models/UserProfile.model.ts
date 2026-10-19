@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import validator from 'validator';
 import sharp from 'sharp';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
@@ -85,6 +85,7 @@ export interface IUserProfile extends Document {
     username: string;
     displayName: string;
     bio: string;
+    skills?: string[];
     avatar?: IAvatar;
     contact?: IContact;
     location?: ILocation;

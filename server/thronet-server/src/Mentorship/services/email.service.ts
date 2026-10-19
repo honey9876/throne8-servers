@@ -1,8 +1,8 @@
-import nodemailer, { Transporter } from 'nodemailer';
+// server/thronet-server/src/Mentorship/services/email.service.ts
+
 import axios from 'axios';
 import emailConfig from '@/config/cache/email.confg';
 import { logger } from '@/shared/logger.util';
-
 
 interface EmailOptions {
   to: string | string[];
@@ -51,8 +51,10 @@ interface CancellationData {
   refundStatus?: string;
 }
 
+const toBrevoList = (value: string | string[]) =>
+  (Array.isArray(value) ? value : [value]).map((email) => ({ email }));
+
 class EmailService {
-  private transporter: Transporter | null = null;
   private isConfigured: boolean = false;
 
   constructor() {
@@ -61,30 +63,34 @@ class EmailService {
 
   private initialize(): void {
     try {
+      const cfg = emailConfig.getConfig();
+
+      if (cfg.service !== 'brevo-api') {
+        logger.warn(
+          `📧 Email service disabled - EMAIL_SERVICE must be "brevo-api" (current: ${cfg.service})`
+        );
+        this.isConfigured = false;
+        return;
+      }
+
       if (!emailConfig.isEnabled()) {
-        logger.warn('📧 Email service disabled - credentials not configured');
+        logger.warn(
+          '📧 Email service disabled - BREVO_API_KEY missing or is an SMTP key (xsmtpsib-). Use the REST API key (xkeysib-...)'
+        );
+        this.isConfigured = false;
         return;
       }
 
-      if (emailConfig.getConfig().service === 'brevo-api') {
-        logger.info('✅ Email service ready (Brevo REST API)');
-        this.isConfigured = true;
+      if (!emailConfig.getFromAddress().address) {
+        logger.warn('📧 Email service disabled - SMTP_FROM_ADDRESS not configured');
+        this.isConfigured = false;
         return;
       }
 
-      this.transporter = nodemailer.createTransport(emailConfig.getTransporterOptions());
-
-      this.transporter.verify((error) => {
-        if (error) {
-          logger.error('📧 Email configuration error:', error);
-          this.isConfigured = false;
-        } else {
-          logger.info('✅ Email service ready');
-          this.isConfigured = true;
-        }
-      });
-    } catch(error : any) {
-      logger.error(`📧 Failed to initialize email service:$ {error}`);
+      logger.info('✅ Email service ready (Brevo REST API)');
+      this.isConfigured = true;
+    } catch (error: any) {
+      logger.error(`📧 Failed to initialize email service: ${error?.message || error}`);
       this.isConfigured = false;
     }
   }
@@ -98,69 +104,68 @@ class EmailService {
     try {
       const fromAddress = emailConfig.getFromAddress();
       const currentConfig = emailConfig.getConfig();
+      const apiKey = currentConfig.apiKey || process.env.BREVO_API_KEY;
 
-      // ==================== BREVO API ====================
-      if (currentConfig.service === 'brevo-api') {
-        const toList = Array.isArray(options.to)
-          ? options.to.map((addr) => ({ email: addr }))
-          : [{ email: options.to }];
-
-        const brevoPayload: Record<string, any> = {
-          sender: { name: fromAddress.name, email: fromAddress.address },
-          to: toList,
-          subject: options.subject,
-          htmlContent: options.html || options.text || '',
-        };
-
-        if (options.text) {
-          brevoPayload.textContent = options.text;
-        }
-
-        const apiKey = currentConfig.apiKey || process.env.BREVO_API_KEY;
-        const res = await axios.post(
-          'https://api.brevo.com/v3/smtp/email',
-          brevoPayload,
-          {
-            headers: {
-              'api-key': apiKey,
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-            },
-            timeout: 10000,
-          }
-        );
-
-        logger.info(`📧 Email sent successfully via Brevo to ${options.to}`);
-        logger.debug(`Message ID: ${res.data?.messageId}`);
-        return true;
-      }
-
-      // ==================== NODEMAILER ====================
-      if (!this.transporter) {
-        logger.warn('📧 Email not sent - transporter not available');
-        return false;
-      }
-
-      const mailOptions = {
-        from: `"${fromAddress.name}" <${fromAddress.address}>`,
-        to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
+      const brevoPayload: Record<string, any> = {
+        sender: { name: fromAddress.name, email: fromAddress.address },
+        to: toBrevoList(options.to),
         subject: options.subject,
-        text: options.text,
-        html: options.html,
-        cc: options.cc ? (Array.isArray(options.cc) ? options.cc.join(', ') : options.cc) : undefined,
-        bcc: options.bcc ? (Array.isArray(options.bcc) ? options.bcc.join(', ') : options.bcc) : undefined,
-        replyTo: options.replyTo,
-        attachments: options.attachments,
+        htmlContent: options.html || options.text || '',
       };
 
-      const info = await this.transporter.sendMail(mailOptions);
+      if (options.text) {
+        brevoPayload.textContent = options.text;
+      }
+      if (options.cc) {
+        brevoPayload.cc = toBrevoList(options.cc);
+      }
+      if (options.bcc) {
+        brevoPayload.bcc = toBrevoList(options.bcc);
+      }
+      if (options.replyTo) {
+        brevoPayload.replyTo = { email: options.replyTo };
+      }
 
-      logger.info(`📧 Email sent successfully to ${options.to}`);
-      logger.debug(`Message ID: ${info.messageId}`);
+      // Attachments: Brevo expects base64 `content` or a public `url`
+      if (options.attachments && options.attachments.length > 0) {
+        const attachment = options.attachments
+          .map((a) => {
+            if (a.content !== undefined) {
+              const buf = Buffer.isBuffer(a.content)
+                ? a.content
+                : Buffer.from(a.content, 'utf-8');
+              return { name: a.filename, content: buf.toString('base64') };
+            }
+            if (a.path && /^https?:\/\//i.test(a.path)) {
+              return { name: a.filename, url: a.path };
+            }
+            logger.warn(`📧 Attachment skipped (unsupported source): ${a.filename}`);
+            return null;
+          })
+          .filter(Boolean);
 
+        if (attachment.length > 0) {
+          brevoPayload.attachment = attachment;
+        }
+      }
+
+      const res = await axios.post('https://api.brevo.com/v3/smtp/email', brevoPayload, {
+        headers: {
+          'api-key': apiKey,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        timeout: 10000,
+      });
+
+      logger.info(`📧 Email sent successfully via Brevo to ${options.to}`);
+      logger.debug(`Message ID: ${res.data?.messageId}`);
       return true;
-    } catch(error : any) {
-      logger.error(`📧 Failed to send email:${error}`);
+    } catch (error: any) {
+      const detail = error?.response?.data
+        ? JSON.stringify(error.response.data)
+        : error?.message || String(error);
+      logger.error(`📧 Failed to send email: ${detail}`);
       return false;
     }
   }

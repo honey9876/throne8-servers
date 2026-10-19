@@ -35,9 +35,8 @@ const SeniorMentorApplicationSchema = new Schema<SeniorMentorApplicationDocument
       },
     },
     userId: {
-      type: String,
-      required: [true, 'User ID is required'],
-      index: true,
+     type: String,
+     required: [true, 'User ID is required'],  
     },
     mentorRole: {
       type: String,

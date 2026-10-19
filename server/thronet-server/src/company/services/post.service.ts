@@ -49,7 +49,7 @@ class PostService {
             firstName: company.companyName || 'Company',
             lastName: 'Team',
             email: `team@${slug}-${company._id.toString().slice(-4)}.com`,
-            company: company._id,
+            company: company._id as any,
             designation: 'Admin / Author',
             department: 'Leadership',
             isActive: true,

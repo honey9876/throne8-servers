@@ -1,4 +1,4 @@
-﻿// src/Job-Service/models/Job.model.ts
+// src/Job-Service/models/Job.model.ts
 import mongoose, { Schema, Document, Model, Types } from 'mongoose';
 import Insights from './Insights.model.js';
 import { sanitizeUserId, validId } from '@/shared/security.js';
@@ -668,6 +668,25 @@ jobSchema.pre('save', async function (next) {
       error: error instanceof Error ? error.message : String(error),
     });
     next(error as Error);
+  }
+});
+
+// ==================== POST HOOKS FOR CACHE INVALIDATION ====================
+jobSchema.post('save', async function (doc: any) {
+  if (doc?.companyId) {
+    try {
+      const { CompanyCacheRepository } = await import('@/shared/cache/feedCompanyCommentCache');
+      await CompanyCacheRepository.invalidateCompany(doc.companyId);
+    } catch {}
+  }
+});
+
+jobSchema.post(['deleteOne', 'findOneAndDelete'], async function (doc: any) {
+  if (doc?.companyId) {
+    try {
+      const { CompanyCacheRepository } = await import('@/shared/cache/feedCompanyCommentCache');
+      await CompanyCacheRepository.invalidateCompany(doc.companyId);
+    } catch {}
   }
 });
 

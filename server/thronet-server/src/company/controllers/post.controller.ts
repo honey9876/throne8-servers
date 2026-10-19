@@ -145,7 +145,7 @@ class PostController {
         pollData,
         images,
         videos,
-        documents,
+        documents: documents as any,
       });
 
       res.status(201).json({
@@ -259,7 +259,7 @@ class PostController {
       const pageSize = parseInt(req.query.pageSize as string) || 20;
       const sort = (req.query.sort as string) || 'recent';
 
-      const result = await postService.getPostsByCompany(companyObjectId, page, pageSize, sort);
+      const result: any = await postService.getPostsByCompany(companyObjectId, page, pageSize, sort);
       const rawPosts = result.posts || result.items || (Array.isArray(result) ? result : []);
       const enriched = await this.enrichPostsWithLiked(rawPosts, user);
 

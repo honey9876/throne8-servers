@@ -17,6 +17,7 @@ import { IPostEntry } from '@/Profile/models/Post.model';
 import NotificationService from '@/notifications/services/notification.service';
 import { AnalyticsService } from '@/shared/services/index.service';
 import redisService from '@/services/redis.service';
+import { ReactionCacheRepository } from '@/shared/cache/feedCompanyCommentCache';
 
 // ==================== INTERFACES ====================
 
@@ -1394,6 +1395,7 @@ class PostService {
             const postOwnerId = doc.userId;
 
             const entry = await Post.addReaction(entryId, userId, type as any);
+            ReactionCacheRepository.invalidateReactionSummary(entryId).catch(() => {});
 
             if (postOwnerId) {
                 redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
@@ -1436,6 +1438,7 @@ class PostService {
             const postOwnerId = doc?.userId;
 
             const entry = await Post.removeReaction(entryId, userId);
+            ReactionCacheRepository.invalidateReactionSummary(entryId).catch(() => {});
 
             if (postOwnerId) {
                 redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
@@ -1505,6 +1508,12 @@ class PostService {
         const correlationId = uuidv4();
 
         try {
+            const cached = await ReactionCacheRepository.getCachedSummary(entryId);
+            if (cached) {
+                LoggerUtil.info('Post reactors fetched from cache', { entryId, correlationId });
+                return cached;
+            }
+
             const isObjectId = mongoose.Types.ObjectId.isValid(entryId);
             const doc = await Post.findOne({
                 $or: [
@@ -1537,11 +1546,15 @@ class PostService {
 
             LoggerUtil.info('Post reactors fetched', { entryId, count: merged.length, correlationId });
 
-            return {
+            const result = {
                 total: merged.length,
                 countsByType: entry.reactionCounts || {},
                 reactions: merged,
             };
+
+            await ReactionCacheRepository.setCachedSummary(entryId, result);
+
+            return result;
 
         } catch (error: any) {
             LoggerUtil.error('Get post reactors failed', { error: error.message, entryId, correlationId });

@@ -5,7 +5,7 @@
  */
 
 import CacheUtil from '@/shared/cache.util';
-import logger, { LoggerUtil } from '@/shared/logger.util.js';
+import logger, { LoggerUtil } from '@/shared/logger.util';
 import {
     User,
     UserProfile,
@@ -14,13 +14,14 @@ import {
     AuditLog,
     LoginAttempt,
 } from '@/shared/models/index.models';
-import Constants from '@/shared/constants.util.js';
+import Constants from '@/shared/constants.util';
 import {
     GetAllUsersParams,
     GetAllUsersResult,
     UserForVerification,
     DeviceData,
 } from '../interfaces/auth.interfaces';
+import TokenBlacklistUtil, { hashTokenForBlacklist } from '@/shared/utils/tokenBlacklist.util';
 
 const MAX_ACTIVE_DEVICES = Number(process.env['MAX_ACTIVE_DEVICES']) || 3;
 const VALID_DEVICE_TYPES = ['desktop', 'mobile', 'tablet', 'unknown'];
@@ -471,19 +472,24 @@ export class AuditLogRepository {
 export class AuthCacheRepository {
 
     static async blacklistAccessToken(token: string, ttl: number = 900): Promise<void> {
-        await CacheUtil.set(`blacklist:access:${token}`, 'true', ttl);
+        const hash = hashTokenForBlacklist(token);
+        await CacheUtil.set(`blacklist:access:${hash}`, 'true', ttl);
     }
 
     static async blacklistRefreshToken(token: string): Promise<void> {
+        const hash = hashTokenForBlacklist(token);
         await CacheUtil.set(
-            `blacklist:refresh:${token}`,
+            `blacklist:refresh:${hash}`,
             'true',
             7 * 24 * 60 * 60
         );
     }
 
     static async isBlacklisted(type: 'access' | 'refresh', token: string): Promise<boolean> {
-        return CacheUtil.exists(`blacklist:${type}:${token}`);
+        if (type === 'access') {
+            return TokenBlacklistUtil.isAccessTokenBlacklisted(token);
+        }
+        return TokenBlacklistUtil.isRefreshTokenBlacklisted(token);
     }
 
     static async getCachedProfile(userId: string): Promise<any | null> {

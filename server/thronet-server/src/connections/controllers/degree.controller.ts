@@ -42,7 +42,6 @@ import { SuccessResponse, ErrorResponse, HttpStatus } from '@/shared/response.ut
  * Monitoring: Logs response times, errors with context
  */
 
-class degreeController {}
 
 export const calculateConnectionDegrees = async (
   req: Request,
@@ -633,7 +632,7 @@ export const generateDegreeAnalysisReport = async (
 };
 
 // Export all controller functions
-export default {
+export const degreeController = {
   calculateConnectionDegrees,
   findShortestPathBetweenUsers,
   getDegreeSeparationCount,
@@ -648,6 +647,4 @@ export default {
   generateDegreeAnalysisReport,
 };
 
-export {
-  degreeController
-}
+export default degreeController;

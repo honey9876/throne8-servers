@@ -62,6 +62,8 @@ const withCompanyContext = (handler: (req: Request, res: Response) => Promise<vo
 // These use companyId (UUID) directly, not ObjectId
 // ============================================================
 
+import { CompanyCacheRepository } from '@/shared/cache/feedCompanyCommentCache';
+
 // GET /companies/:companyId  (Job-Service route — uses companyId UUID directly)
 export const getCompanyPageController = withCompanyContext(async (req: Request, res: Response) => {
   const { error } = validateCompanyId(req.params);
@@ -69,12 +71,15 @@ export const getCompanyPageController = withCompanyContext(async (req: Request, 
 
   const { companyId } = req.params;
   const sanitizedCompanyId = sanitizeInput(companyId);
-  const cacheKey = `company_page:${sanitizedCompanyId}`;
 
-  const cached = await CacheUtil.get(cacheKey);
-  if (cached) {
-    const parsed = JSON.parse(cached);
-    return ResponseUtil.success(res, { ...parsed, cached: true }, 'DATA_RETRIEVED');
+  // Check Item K Company Public Cache
+  try {
+    const cached = await CompanyCacheRepository.getCachedPublicProfile(sanitizedCompanyId);
+    if (cached) {
+      return ResponseUtil.success(res, { ...cached, cached: true }, 'DATA_RETRIEVED');
+    }
+  } catch {
+    // Fallback to MongoDB
   }
 
   const company = await Company.findOne({ companyId: sanitizedCompanyId, 'audit.isDeleted': false });
@@ -124,7 +129,11 @@ export const getCompanyPageController = withCompanyContext(async (req: Request, 
     },
   };
 
-  await CacheUtil.set(cacheKey, JSON.stringify(responseData), Number(constants.CACHE_TTLS.COMPANY_PAGE));
+  try {
+    await CompanyCacheRepository.setCachedPublicProfile(sanitizedCompanyId, responseData);
+  } catch {
+    // Non-blocking
+  }
 
   setImmediate(async () => {
     try {

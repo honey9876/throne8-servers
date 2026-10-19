@@ -33,6 +33,7 @@ router.use(AuthMiddleware.authenticate as any);
  * List all conversations for current user
  */
 router.get('/conversations', messageController.getConversations.bind(messageController) as any);
+router.get('/conversations/unread-count', messageController.getUnreadCount.bind(messageController) as any);
 
 /**
  * POST /conversations/direct

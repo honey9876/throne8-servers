@@ -31,7 +31,13 @@ import {
   getClosedJobs, getOpenJobs, applyToJob, getJobApplications, updateApplicationStatus,
   updateJobStatus,
   getUserApplications,
-  createJobService
+  createJobService,
+  getJobById,
+  updateJob,
+  listJobs,
+  getFeaturedJobs,
+  getJobsByCompany,
+  searchJobs
 } from '@/Job-Service/services/job.service';
 import CacheUtil from '@/shared/cache.util';
 
@@ -74,7 +80,7 @@ export const createJobController = withRequestContext(async (req: Request, res: 
   }
 
   const createdJob = await createJobService({
-    userId: req.user?.userId,
+    userId: req.user?.userId || req.user?.id || '',
     requestId: generateSecureId(), // or pass from context if needed
     input: value,
   });
@@ -130,7 +136,7 @@ export const updateJobController = withRequestContext(async (req: Request, res: 
 
   const updatedJob = await updateJob({
     jobId,
-    userId: req.user?.userId,
+    userId: req.user?.userId || req.user?.id || '',
     requestId: generateSecureId(),
     updates: value,
   });
@@ -160,7 +166,7 @@ export const deleteJobController = withRequestContext(async (req: Request, res: 
     throw new AuthorizationError("FORBIDDEN_JOB");
   }
 
-  const updatedBy = sanitizeUserId(req.user?.userId);
+  const updatedBy = sanitizeUserId(req.user?.userId || req.user?.id || '');
   const job = await Job.findOneAndUpdate(
     { jobId, isDeleted: false },
     {

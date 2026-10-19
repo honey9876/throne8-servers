@@ -1,4 +1,4 @@
-﻿import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4 } from 'uuid';
 import mongoose, { Model, Document, Schema } from 'mongoose';
 import Company from './Company.model';
 import logger from '@/shared/logger.util';
@@ -30,6 +30,7 @@ export interface ICompanyReviewDocument extends Document {
   }>;
   isVerified: boolean;
   isPublished: boolean;
+  isAnonymous?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -379,10 +380,15 @@ CompanyReviewSchema.post('save', async function (doc: ICompanyReviewDocument) {
   try {
     if (doc.isPublished) {
       const stats = await CompanyReview.getCompanyStats(doc.company.toString());
-      await Company.findByIdAndUpdate(doc.company, {
+      const comp = await Company.findByIdAndUpdate(doc.company, {
         'stats.averageRating': stats.averageRating,
         'stats.reviewsCount': stats.totalReviews,
-      });
+      }, { new: true }).select('companyId').lean();
+      if (comp?.companyId) {
+        import('@/shared/cache/feedCompanyCommentCache')
+          .then(({ CompanyCacheRepository }) => CompanyCacheRepository.invalidateCompany(comp.companyId))
+          .catch(() => {});
+      }
       logger.info(`Updated company stats for company: ${doc.company}`);
     }
   } catch (error: any) {
@@ -394,9 +400,14 @@ CompanyReviewSchema.post('save', async function (doc: ICompanyReviewDocument) {
 CompanyReviewSchema.pre('deleteOne', { document: true, query: false }, async function () {
   try {
     if (this.isPublished) {
-      await Company.findByIdAndUpdate(this.company, {
+      const comp = await Company.findByIdAndUpdate(this.company, {
         $inc: { 'stats.reviewsCount': -1 }
-      });
+      }, { new: true }).select('companyId').lean();
+      if (comp?.companyId) {
+        import('@/shared/cache/feedCompanyCommentCache')
+          .then(({ CompanyCacheRepository }) => CompanyCacheRepository.invalidateCompany(comp.companyId))
+          .catch(() => {});
+      }
     }
   } catch (error: any) {
     logger.error('Failed to update company stats before review deletion:', error);

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Patent Model - User Patents Management
  * Stores patent information, inventors, status tracking
  * 
@@ -461,6 +461,10 @@ PatentSchema.statics.getNextDisplayOrder = async function (userId: string): Prom
 };
 
 // ==================== EXPORT ====================
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(PatentSchema, 'userId');
 
 const Patent = mongoose.model<IPatent, IPatentModel>('Patent', PatentSchema);
 export default Patent;

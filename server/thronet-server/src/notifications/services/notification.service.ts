@@ -2,6 +2,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import Notification, { INotification } from '../models/Notification.model';
+import { NotificationCacheRepository } from '@/shared/cache/notificationCache';
 import { getIO } from '@/socket';
 import { LoggerUtil as logger } from '@/shared/logger.util';
 import Connection from '@/connections/models/Connection';
@@ -1442,11 +1443,18 @@ class NotificationService {
 
 
     /** Fetch paginated notifications for a user */
+    /** Fetch paginated notifications for a user (cached) */
     static async getNotifications(
         userId: string,
         page = 1,
         limit = 20
     ): Promise<{ notifications: INotification[]; unreadCount: number; total: number }> {
+        // Try cache first
+        const cached = await NotificationCacheRepository.getNotificationList(userId, page, limit);
+        if (cached) {
+            return cached as { notifications: INotification[]; unreadCount: number; total: number };
+        }
+
         const skip = (page - 1) * limit;
 
         const [notifications, unreadCount, total] = await Promise.all([
@@ -1459,7 +1467,30 @@ class NotificationService {
             Notification.countDocuments({ recipientId: userId }),
         ]);
 
-        return { notifications, unreadCount, total };
+        const result = {
+            notifications,
+            unreadCount: Math.max(0, unreadCount),
+            total,
+        };
+
+        // Cache both list and unread count
+        await NotificationCacheRepository.setNotificationList(userId, page, limit, result);
+        await NotificationCacheRepository.setUnreadCount(userId, result.unreadCount);
+
+        return result;
+    }
+
+    /** Fetch unread count for user (cached) */
+    static async getUnreadCount(userId: string): Promise<number> {
+        const cached = await NotificationCacheRepository.getUnreadCount(userId);
+        if (cached !== null) {
+            return cached;
+        }
+
+        const count = await Notification.countDocuments({ recipientId: userId, isRead: false });
+        const safeCount = Math.max(0, count);
+        await NotificationCacheRepository.setUnreadCount(userId, safeCount);
+        return safeCount;
     }
 
     /** Mark one notification as read */
@@ -1468,6 +1499,7 @@ class NotificationService {
             { notificationId, recipientId: userId },
             { $set: { isRead: true } }
         );
+        await NotificationCacheRepository.invalidateUser(userId);
     }
 
     /** Mark all notifications as read */
@@ -1476,11 +1508,13 @@ class NotificationService {
             { recipientId: userId, isRead: false },
             { $set: { isRead: true } }
         );
+        await NotificationCacheRepository.invalidateUser(userId);
     }
 
     /** Delete a notification */
     static async deleteNotification(notificationId: string, userId: string): Promise<void> {
         await Notification.deleteOne({ notificationId, recipientId: userId });
+        await NotificationCacheRepository.invalidateUser(userId);
     }
 }
 

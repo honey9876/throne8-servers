@@ -10,8 +10,8 @@ import { MongoDBInstrumentation } from '@opentelemetry/instrumentation-mongodb';
 import { LoggerUtil } from '@/shared/logger.util';
 
 const mongoInstrumentation = new MongoDBInstrumentation({
-  dbStatementSerializer: (cmd: any, dbName: string, collection: string) => {
-    return `${cmd.name} on ${dbName}.${collection}`;
+  dbStatementSerializer: (cmd: any) => {
+    return cmd ? `${cmd.name || 'query'}` : 'query';
   },
   enhancedDatabaseReporting: true,
 });

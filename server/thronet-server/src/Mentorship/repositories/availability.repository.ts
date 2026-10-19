@@ -1,9 +1,15 @@
-// repositories/availability.repository.ts
 import { Availability } from '../models';
 import { logger } from '@/shared/logger.util';
+import { ConflictError } from '@/shared/errors/app.error';
 
-class AvailabilityRepository {
+export class BookingConcurrencyConflictError extends ConflictError {
+    constructor(message: string = 'Availability conflict: concurrent modification detected. Please retry.') {
+        super(message);
+        this.name = 'BookingConcurrencyConflictError';
+    }
+}
 
+export class AvailabilityRepository {
     /**
  * Create availability
  */
@@ -62,6 +68,7 @@ class AvailabilityRepository {
         if (!availability) return null;
 
         Object.assign(availability, updates);
+        availability.increment();
         await availability.save();
         return availability.toObject();
     }
@@ -107,109 +114,150 @@ class AvailabilityRepository {
      * (used for "block whole date" feature — booked slots kabhi touch nahi hote)
      */
         async setAllSlotsBlocked(availabilityId: string, isBlocked: boolean, reason?: string): Promise<any | null> {
-            const availability = await Availability.findOne({ availabilityId, isDeleted: false });
-            if (!availability) return null;
+            const MAX_RETRIES = 5;
+            for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+                try {
+                    const availability = await Availability.findOne({ availabilityId, isDeleted: false });
+                    if (!availability) return null;
 
-            (availability as any).isDateBlocked = isBlocked;
-            (availability as any).dateBlockReason = isBlocked ? reason : undefined;
+                    (availability as any).isDateBlocked = isBlocked;
+                    (availability as any).dateBlockReason = isBlocked ? reason : undefined;
 
-            availability.slots.forEach((slot: any) => {
-                if (!slot.isBooked) {
-                    slot.isBlocked = isBlocked;
-                    slot.blockReason = isBlocked ? reason : undefined;
+                    availability.slots.forEach((slot: any) => {
+                        if (!slot.isBooked) {
+                            slot.isBlocked = isBlocked;
+                            slot.blockReason = isBlocked ? reason : undefined;
+                        }
+                    });
+            
+                    availability.increment();
+                    await availability.save();
+                    return availability.toObject();
+                } catch (err: any) {
+                    const isVersionError = err?.name === 'VersionError' || err?.message?.includes('No matching document found');
+                    if (isVersionError && attempt < MAX_RETRIES - 1) {
+                        const backoff = Math.floor(Math.random() * 20) + 10;
+                        await new Promise((r) => setTimeout(r, backoff));
+                        continue;
+                    }
+                    if (isVersionError) {
+                        throw new BookingConcurrencyConflictError('Block date conflict: concurrent modification detected. Please retry.');
+                    }
+                    throw err;
                 }
-            });
-    
-            await availability.save();
-            return availability.toObject();
+            }
+            return null;
         }
 
              /**
          * Block a whole date — creates a record if none exists yet (leave/holiday case)
          */
              async blockByDate(mentorId: string, date: Date, timezone: string, reason?: string): Promise<any> {
-                const startOfDay = new Date(date); startOfDay.setHours(0, 0, 0, 0);
-                const endOfDay = new Date(date); endOfDay.setHours(23, 59, 59, 999);
-    
-                const findExisting = () =>
-                    Availability.findOne({
-                        mentorId,
-                        date: { $gte: startOfDay, $lte: endOfDay },
-                        isDeleted: false,
-                    });
-    
-                let availability = await findExisting();
-    
-                if (!availability) {
-                    // ✅ FIX: pehle yahan seedha `new Availability(...).save()`
-                    // call hota tha — agar us date ka record already DB me
-                    // hota (jaisa "Save Month" se pehle se bana hota hai) aur
-                    // upar ka findOne kisi wajah se (double-click race, ya
-                    // replica lag) usko miss kar deta, to save() ka insert
-                    // `mentorId_1_date_1` unique index se takra ke raw MongoDB
-                    // E11000 error throw karta tha — jo controller me
-                    // "Failed to block date" bankar frontend tak leak ho jaata
-                    // tha. Ab insert ko try/catch me wrap kiya hai: agar
-                    // E11000 aaye, to record dobara fetch karke usi ko update
-                    // kar dete hain, insert ki jagah — exact wahi pattern jo
-                    // availabilityService.createAvailability() me already hai.
+                const MAX_RETRIES = 5;
+                for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
                     try {
-                        const newAvailability = new Availability({
-                            mentorId,
-                            date,
-                            slots: [],
-                            dayOfWeek: date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
-                            timezone,
-                            isDateBlocked: true,
-                            dateBlockReason: reason,
+                        const startOfDay = new Date(date); startOfDay.setHours(0, 0, 0, 0);
+                        const endOfDay = new Date(date); endOfDay.setHours(23, 59, 59, 999);
+            
+                        const findExisting = () =>
+                            Availability.findOne({
+                                mentorId,
+                                date: { $gte: startOfDay, $lte: endOfDay },
+                                isDeleted: false,
+                            });
+            
+                        let availability = await findExisting();
+            
+                        if (!availability) {
+                            try {
+                                const newAvailability = new Availability({
+                                    mentorId,
+                                    date,
+                                    slots: [],
+                                    dayOfWeek: date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
+                                    timezone,
+                                    isDateBlocked: true,
+                                    dateBlockReason: reason,
+                                });
+                                await newAvailability.save();
+                                return newAvailability.toObject();
+                            } catch (err: any) {
+                                if (err?.code !== 11000) throw err;
+            
+                                availability = await findExisting();
+                                if (!availability) throw err;
+                            }
+                        }
+            
+                        (availability as any).isDateBlocked = true;
+                        (availability as any).dateBlockReason = reason;
+                        availability.slots.forEach((slot: any) => {
+                            if (!slot.isBooked) {
+                                slot.isBlocked = true;
+                                slot.blockReason = reason;
+                            }
                         });
-                        await newAvailability.save();
-                        return newAvailability.toObject();
+            
+                        availability.increment();
+                        await availability.save();
+                        return availability.toObject();
                     } catch (err: any) {
-                        if (err?.code !== 11000) throw err;
-    
-                        availability = await findExisting();
-                        if (!availability) throw err;
+                        const isVersionError = err?.name === 'VersionError' || err?.message?.includes('No matching document found');
+                        if (isVersionError && attempt < MAX_RETRIES - 1) {
+                            const backoff = Math.floor(Math.random() * 20) + 10;
+                            await new Promise((r) => setTimeout(r, backoff));
+                            continue;
+                        }
+                        if (isVersionError) {
+                            throw new BookingConcurrencyConflictError('Block date conflict: concurrent modification detected. Please retry.');
+                        }
+                        throw err;
                     }
                 }
-    
-                (availability as any).isDateBlocked = true;
-                (availability as any).dateBlockReason = reason;
-                availability.slots.forEach((slot: any) => {
-                    if (!slot.isBooked) {
-                        slot.isBlocked = true;
-                        slot.blockReason = reason;
-                    }
-                });
-    
-                await availability.save();
-                return availability.toObject();
             }
         /**
          * Unblock a whole date by mentorId + date (no availabilityId needed)
          */
         async unblockByDate(mentorId: string, date: Date): Promise<any | null> {
-            const startOfDay = new Date(date); startOfDay.setHours(0, 0, 0, 0);
-            const endOfDay = new Date(date); endOfDay.setHours(23, 59, 59, 999);
+            const MAX_RETRIES = 5;
+            for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+                try {
+                    const startOfDay = new Date(date); startOfDay.setHours(0, 0, 0, 0);
+                    const endOfDay = new Date(date); endOfDay.setHours(23, 59, 59, 999);
 
-            const availability = await Availability.findOne({
-                mentorId,
-                date: { $gte: startOfDay, $lte: endOfDay },
-                isDeleted: false,
-            });
-            if (!availability) return null;
+                    const availability = await Availability.findOne({
+                        mentorId,
+                        date: { $gte: startOfDay, $lte: endOfDay },
+                        isDeleted: false,
+                    });
+                    if (!availability) return null;
 
-            (availability as any).isDateBlocked = false;
-            (availability as any).dateBlockReason = undefined;
-            availability.slots.forEach((slot: any) => {
-                if (!slot.isBooked) {
-                    slot.isBlocked = false;
-                    slot.blockReason = undefined;
+                    (availability as any).isDateBlocked = false;
+                    (availability as any).dateBlockReason = undefined;
+                    availability.slots.forEach((slot: any) => {
+                        if (!slot.isBooked) {
+                            slot.isBlocked = false;
+                            slot.blockReason = undefined;
+                        }
+                    });
+
+                    availability.increment();
+                    await availability.save();
+                    return availability.toObject();
+                } catch (err: any) {
+                    const isVersionError = err?.name === 'VersionError' || err?.message?.includes('No matching document found');
+                    if (isVersionError && attempt < MAX_RETRIES - 1) {
+                        const backoff = Math.floor(Math.random() * 20) + 10;
+                        await new Promise((r) => setTimeout(r, backoff));
+                        continue;
+                    }
+                    if (isVersionError) {
+                        throw new BookingConcurrencyConflictError('Unblock date conflict: concurrent modification detected. Please retry.');
+                    }
+                    throw err;
                 }
-            });
-
-            await availability.save();
-            return availability.toObject();
+            }
+            return null;
         }
         /**
          * Get availability stats

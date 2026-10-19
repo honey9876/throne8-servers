@@ -232,7 +232,7 @@ export const sendDirectMessageController = withAiRequestContext('direct_message'
 
   const result = await aiServiceJob.sendDirectMessage(
     {
-      senderId: sanitizeInput(req.user?.userId),
+      senderId: sanitizeInput(req.user?.userId || req.user?.id || ''),
       recipientId: value.recipientId,
       message: value.message,
       jobId: value.jobId,

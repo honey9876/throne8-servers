@@ -10,6 +10,7 @@ const router = Router();
 router.use(AuthMiddleware.authenticate as any);
 
 router.get('/', NotificationController.getNotifications);
+router.get('/unread-count', NotificationController.getUnreadCount);
 router.patch('/:notificationId/read', NotificationController.markAsRead);
 router.patch('/mark-all-read', NotificationController.markAllAsRead);
 router.delete('/:notificationId', NotificationController.deleteNotification);

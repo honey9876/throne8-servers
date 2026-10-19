@@ -8,8 +8,18 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
+import {
+    REFRESH_COOKIE,
+    setAuthCookies,
+    clearAuthCookies,
+    getRefreshTokenFromRequest,
+    tokensForResponse,
+} from '@/shared/utils/authCookies.util';
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import ResponseUtil from '@/shared/response.util';
+import NotificationService from '../services/notification.service';
 
 import ValidatorUtil from '@/shared/utils/validator.util';
 import LoggerUtil from '@/shared/logger.util';
@@ -80,6 +90,7 @@ interface RegisterBody {
     highestEducation?: string;
     preferredRole?: string;
     cgpa?: string;
+    verificationToken?: string;
     deviceType?: string;
     deviceName?: string;
     os?: string;
@@ -201,6 +212,195 @@ const saveRefreshTokenHash = async (
 
 class AuthController {
 
+    // ==================== PRE-REGISTRATION OTP ====================
+
+    /**
+     * POST /api/v1/auth/register/send-otp
+     * Sends a 6-digit OTP to the email before registration.
+     * Does NOT save anything in MongoDB.
+     */
+    static async sendRegistrationOTP(req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const correlationId = (req as any).correlationId || uuidv4();
+        const ipAddress = req.ip || (req as any).connection?.remoteAddress || '0.0.0.0';
+
+        try {
+            const { email, firstName } = req.body;
+            if (!email) {
+                ResponseUtil.validationError(res, ['Email is required'], 'Validation failed');
+                return;
+            }
+
+            const normalizedEmail = String(email).trim().toLowerCase();
+
+            // 1. Check if email is already registered in MongoDB
+            const existingUser = await User.findOne({ email: normalizedEmail }).select('userId').lean().exec();
+            if (existingUser) {
+                ResponseUtil.conflict(res, 'User already exists with this email', ['Email is already registered']);
+                return;
+            }
+
+            // 2. Per-email rate limit: max 5 requests per 15 minutes
+            const emailRateKey = `reg_otp_rate:${normalizedEmail}`;
+            const emailCount = await CacheUtil.get(emailRateKey);
+            if (emailCount && parseInt(String(emailCount), 10) >= 5) {
+                ResponseUtil.tooManyRequests(res, 'Too many verification code requests for this email. Please try again in 15 minutes.', { retryAfter: 900 });
+                return;
+            }
+
+            // 3. Generate 6-digit OTP
+            const otp = crypto.randomInt(100000, 999999).toString();
+            const salt = process.env.OTP_SALT || 'default-otp-salt-change-in-production';
+            const otpHash = crypto.createHash('sha256').update(otp + salt).digest('hex');
+
+            // 4. Send Email via NotificationService
+            await NotificationService.sendEmail({
+                to: normalizedEmail,
+                subject: 'Verify Your Email - OTP Code',
+                template: 'email-otp',
+                data: {
+                    otp,
+                    expiryMinutes: 10,
+                    userName: firstName || normalizedEmail.split('@')[0],
+                },
+            });
+
+            // 5. Save to Redis with 10 minutes TTL after email dispatched successfully
+            const otpKey = `registration_otp:${normalizedEmail}`;
+            await CacheUtil.set(
+                otpKey,
+                JSON.stringify({
+                    otpHash,
+                    email: normalizedEmail,
+                    attempts: 0,
+                    maxAttempts: 5,
+                    createdAt: Date.now(),
+                }),
+                600 // 10 minutes
+            );
+
+            // Increment rate limiter only upon successful dispatch
+            await CacheUtil.incr(emailRateKey, 900);
+
+            LoggerUtil.info('Registration OTP sent successfully', {
+                email: normalizedEmail,
+                ipAddress,
+                correlationId,
+                duration: Date.now() - startTime,
+            });
+
+            ResponseUtil.success(
+                res,
+                { email: normalizedEmail, expiresIn: 600 },
+                'Verification code sent to your email',
+                200
+            );
+        } catch (error: any) {
+            LoggerUtil.error('Failed to send registration OTP', {
+                error: error.message,
+                email: req.body?.email,
+                ipAddress,
+                correlationId,
+            });
+            ResponseUtil.internalError(res, error.message || 'Failed to send verification code. Please try again.', error);
+        }
+    }
+
+    /**
+     * POST /api/v1/auth/register/verify-otp
+     * Verifies the 6-digit registration OTP.
+     * Returns a short-lived signed verificationToken (15m).
+     */
+    static async verifyRegistrationOTP(req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const correlationId = (req as any).correlationId || uuidv4();
+        const ipAddress = req.ip || (req as any).connection?.remoteAddress || '0.0.0.0';
+
+        try {
+            const { email, otp } = req.body;
+            if (!email || !otp) {
+                ResponseUtil.validationError(res, ['Email and OTP are required'], 'Validation failed');
+                return;
+            }
+
+            const normalizedEmail = String(email).trim().toLowerCase();
+            const normalizedOtp = String(otp).trim();
+
+            if (!/^\d{6}$/.test(normalizedOtp)) {
+                ResponseUtil.validationError(res, ['OTP must be a 6-digit number'], 'Invalid OTP format');
+                return;
+            }
+
+            const otpKey = `registration_otp:${normalizedEmail}`;
+            const cachedData = await CacheUtil.get(otpKey);
+
+            if (!cachedData) {
+                ResponseUtil.badRequest(res, 'Verification code expired or not found. Please request a new code.');
+                return;
+            }
+
+            const record = typeof cachedData === 'string' ? JSON.parse(cachedData) : cachedData;
+
+            if (record.attempts >= (record.maxAttempts || 5)) {
+                await CacheUtil.del(otpKey);
+                ResponseUtil.tooManyRequests(res, 'Maximum verification attempts exceeded. Please request a new code.');
+                return;
+            }
+
+            const salt = process.env.OTP_SALT || 'default-otp-salt-change-in-production';
+            const providedHash = crypto.createHash('sha256').update(normalizedOtp + salt).digest('hex');
+
+            const isMatch =
+                providedHash.length === record.otpHash.length &&
+                crypto.timingSafeEqual(Buffer.from(providedHash), Buffer.from(record.otpHash));
+
+            if (!isMatch) {
+                record.attempts = (record.attempts || 0) + 1;
+                await CacheUtil.set(otpKey, JSON.stringify(record), 600);
+                const remaining = (record.maxAttempts || 5) - record.attempts;
+                ResponseUtil.badRequest(res, `Invalid verification code. ${remaining} attempts remaining.`);
+                return;
+            }
+
+            // OTP verified! Delete from Redis to prevent replay
+            await CacheUtil.del(otpKey);
+
+            // Generate short-lived verificationToken
+            const secret = process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET || 'dev-only-access-secret-change-me-0123456789';
+            const verificationToken = jwt.sign(
+                { email: normalizedEmail, purpose: 'registration_verification' },
+                secret,
+                { expiresIn: '15m' }
+            );
+
+            LoggerUtil.info('Registration OTP verified successfully', {
+                email: normalizedEmail,
+                ipAddress,
+                correlationId,
+                duration: Date.now() - startTime,
+            });
+
+            ResponseUtil.success(
+                res,
+                {
+                    email: normalizedEmail,
+                    verificationToken,
+                    expiresIn: 900,
+                },
+                'Email verified successfully',
+                200
+            );
+        } catch (error: any) {
+            LoggerUtil.error('Failed to verify registration OTP', {
+                error: error.message,
+                email: req.body?.email,
+                ipAddress,
+                correlationId,
+            });
+            ResponseUtil.internalError(res, error.message || 'Failed to verify verification code.', error);
+        }
+    }
+
     // ==================== USER REGISTRATION ====================
 
     static async checkAvailability(req: Request, res: Response): Promise<void> {
@@ -264,12 +464,31 @@ class AuthController {
         const correlationId = (req as any).correlationId || uuidv4();
 
         try {
-            const data = req.body;
-            const normalizedEmail = normalizeEmail(data.email);
-            const normalizedPhone = normalizePhone(data.phoneNumber);
+            const {
+                email,
+                password,
+                confirmPassword,
+                firstName,
+                lastName,
+                location,
+                phoneNumber,
+                userType,
+                jobTitle,
+                companyName,
+                startDate,
+                endDate,
+                collegeName,
+                degree,
+                fieldOfStudy,
+                graduationYear,
+                highestEducation,
+                preferredRole,
+                cgpa,
+                verificationToken,
+            } = req.body;
 
             const ipAddress = req.ip || (req as any).connection?.remoteAddress || '0.0.0.0';
-            const userAgent = (req.headers['user-agent'] as string) || 'Unknown';
+            const userAgent = (req.headers?.['user-agent'] as string) || 'Unknown';
 
             const deviceData: DeviceData = {
                 deviceType: req.body.deviceType || 'desktop',
@@ -280,7 +499,151 @@ class AuthController {
                 ipAddress,
             };
 
-            LoggerUtil.info('Registration attempt started', { ipAddress, correlationId });
+            LoggerUtil.info('Registration attempt started', { email, ipAddress, correlationId });
+
+            // Step 1: Validate input
+            // (type is inferred from ValidatorUtil, so no explicit annotation is needed)
+            const validation = await ValidatorUtil.validateUserRegistration(
+                {
+                    email,
+                    password,
+                    confirmPassword,
+                    firstName,
+                    lastName,
+                    location,
+                    phoneNumber,
+                    userType,
+                    jobTitle,
+                    companyName,
+                    startDate,
+                    endDate,
+                    collegeName,
+                    degree,
+                    fieldOfStudy,
+                    graduationYear,
+                    highestEducation,
+                    preferredRole,
+                    cgpa,
+                },
+                ipAddress
+            );
+
+            if (!validation.isValid) {
+                LoggerUtil.warn('Registration validation failed', {
+                    email,
+                    errors: validation.errors,
+                    ipAddress,
+                    correlationId,
+                });
+                ResponseUtil.validationError(res, validation.errors || [], 'Validation failed');
+                return;
+            }
+
+            const data = validation.data!;
+            const normalizedEmail = data.email.trim().toLowerCase();
+
+            // Validate verificationToken (ensures email was verified before registration)
+            if (!verificationToken) {
+                LoggerUtil.warn('Registration failed - missing verificationToken', {
+                    email: normalizedEmail,
+                    ipAddress,
+                    correlationId,
+                });
+                ResponseUtil.badRequest(
+                    res,
+                    'Verification token is required. Please verify your email before registering.'
+                );
+                return;
+            }
+
+            try {
+                const secret = process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET || 'dev-only-access-secret-change-me-0123456789';
+                const decoded = jwt.verify(verificationToken, secret) as any;
+                if (!decoded || decoded.purpose !== 'registration_verification' || decoded.email !== normalizedEmail) {
+                    LoggerUtil.warn('Registration failed - invalid verificationToken payload', {
+                        email: normalizedEmail,
+                        tokenEmail: decoded?.email,
+                        purpose: decoded?.purpose,
+                        ipAddress,
+                    });
+                    ResponseUtil.unauthorized(
+                        res,
+                        'Invalid verification token for this email. Please verify your email again.'
+                    );
+                    return;
+                }
+                const tokenHash = crypto.createHash('sha256').update(verificationToken).digest('hex');
+                const isConsumed = await CacheUtil.get(`consumed_reg_token:${tokenHash}`);
+                if (isConsumed) {
+                    LoggerUtil.warn('Registration failed - verificationToken already consumed', {
+                        email: normalizedEmail,
+                        ipAddress,
+                        correlationId,
+                    });
+                    ResponseUtil.unauthorized(
+                        res,
+                        'Verification token has already been used. Please verify your email again.'
+                    );
+                    return;
+                }
+            } catch (jwtErr: any) {
+                LoggerUtil.warn('Registration failed - expired or invalid verificationToken', {
+                    email: normalizedEmail,
+                    error: jwtErr.message,
+                    ipAddress,
+                });
+                ResponseUtil.unauthorized(
+                    res,
+                    'Verification token has expired or is invalid. Please verify your email again.'
+                );
+                return;
+            }
+
+            // Step 2: Existing user check
+            const existingUser = await User.findOne({ email: normalizedEmail });
+            if (existingUser) {
+                LoggerUtil.warn('Registration failed - user already exists', {
+                    email: normalizedEmail,
+                    ipAddress,
+                    correlationId,
+                });
+
+                sendAudit({
+                    eventId: uuidv4(),
+                    userId: null,
+                    action: 'REGISTRATION_FAILED',
+                    ipAddress,
+                    status: 'FAILURE',
+                    severity: 'LOW',
+                    timestamp: new Date().toISOString(),
+                    metadata: {
+                        email: normalizedEmail,
+                        reason: 'user_already_exists',
+                        correlationId,
+                    },
+                });
+
+                ResponseUtil.conflict(
+                    res,
+                    'User already exists with this email',
+                    ['Email is already registered']
+                );
+                return;
+            }
+
+            // Normalize phone number (normalizePhone throws if the number is invalid)
+            let normalizedPhone: string;
+            try {
+                normalizedPhone = normalizePhone(data.phoneNumber);
+            } catch {
+                ResponseUtil.validationError(
+                    res,
+                    ['Enter a valid phone number'],
+                    'Validation failed',
+                    [{ field: 'phoneNumber', message: 'Enter a valid phone number' }]
+                );
+                return;
+            }
 
             // Step 3: Register via AuthService
             const result = await AuthService.register(
@@ -303,6 +666,7 @@ class AuthController {
                     highestEducation: data.highestEducation,
                     preferredRole: data.preferredRole,
                     cgpa: data.cgpa,
+                    emailVerified: true,
                 },
                 deviceData
             );
@@ -326,6 +690,14 @@ class AuthController {
             const refreshToken = User.generateRefreshToken(payload);
 
             await saveRefreshTokenHash(result.sessionId, refreshToken, correlationId);
+
+            // Mark verification token as consumed to prevent replay attacks (15m TTL)
+            try {
+                const tokenHash = crypto.createHash('sha256').update(verificationToken).digest('hex');
+                await CacheUtil.set(`consumed_reg_token:${tokenHash}`, '1', 900);
+            } catch (consumedErr: any) {
+                LoggerUtil.warn('Failed to mark verification token consumed (non-critical)', { error: consumedErr?.message });
+            }
 
             // Step 5: Cache session and user data
             try {
@@ -392,6 +764,11 @@ class AuthController {
                 correlationId,
             });
 
+            setAuthCookies(res, {
+                accessToken,
+                refreshToken,
+            });
+
             ResponseUtil.created(res, {
                 user: {
                     userId: result.userId,
@@ -399,8 +776,9 @@ class AuthController {
                     firstName: data.firstName,
                     lastName: data.lastName,
                     role: result.role || 'user',
+                    emailVerified: true,
                 },
-                tokens: buildTokensResponse(accessToken, refreshToken),
+                tokens: tokensForResponse(req, buildTokensResponse(accessToken, refreshToken)),
             }, 'Registration successful');
             return;
 
@@ -414,7 +792,7 @@ class AuthController {
                 ResponseUtil.conflict(
                     res,
                     'Registration conflicts with an existing account',
-                    conflict.fieldErrors.map((fieldError) => fieldError.message),
+                    conflict.fieldErrors.map((fieldError: { message: string }) => fieldError.message),
                     conflict.fieldErrors
                 );
                 return;
@@ -485,7 +863,8 @@ class AuthController {
             });
 
             // Step 1: Validate input
-            const validation: ValidationResult = await ValidatorUtil.validateLogin(
+            // (type is inferred from ValidatorUtil, so no explicit annotation is needed)
+            const validation = await ValidatorUtil.validateLogin(
                 { email, password, rememberMe },
                 ipAddress
             );
@@ -604,13 +983,17 @@ class AuthController {
                 correlationId,
             });
 
+            setAuthCookies(res, { accessToken, refreshToken });
             ResponseUtil.success(res, {
                 user: {
                     userId: result.userId,
                     email: result.email,
                     role: result.role || 'user',
                 },
-                tokens: buildTokensResponse(accessToken, refreshToken),
+                tokens: tokensForResponse(
+                    req,
+                    buildTokensResponse(accessToken, refreshToken)
+                ),
             }, 'Welcome To Throne8', 200);
             return;
 
@@ -685,6 +1068,40 @@ class AuthController {
         }
     }
 
+    // ==================== LOGOUT WITH REFRESH COOKIE ====================
+
+    static async logoutWithRefreshCookie(
+        req: Request,
+        res: Response,
+        next: NextFunction
+    ): Promise<void> {
+        if (req.headers.authorization) return next();
+
+        const refreshToken = (req as any).cookies?.[REFRESH_COOKIE] as string | undefined;
+        if (!refreshToken) return next();
+
+        const correlationId = (req as any).correlationId || uuidv4();
+        try {
+            const decoded: any = User.verifyToken(refreshToken, 'refresh');
+            await AuthService.logout(
+                decoded.userId,
+                decoded.sessionId ? String(decoded.sessionId) : '',
+                decoded.deviceId || '',
+                '',
+                req.ip || 'unknown',
+                correlationId
+            );
+        } catch (error: any) {
+            LoggerUtil.warn('Logout via refresh cookie: could not revoke session', {
+                error: error.message,
+                correlationId,
+            });
+        }
+
+        clearAuthCookies(res);
+        ResponseUtil.success(res, {}, 'Logged out successfully');
+    }
+
     // ==================== REFRESH TOKEN (DB ROTATION) ====================
 
     /**
@@ -696,9 +1113,10 @@ class AuthController {
         const correlationId = (req as any).correlationId || uuidv4();
 
         try {
-            const { refreshToken } = req.body || {};
+            const refreshToken = getRefreshTokenFromRequest(req);
 
             if (!refreshToken || typeof refreshToken !== 'string') {
+                clearAuthCookies(res);
                 ResponseUtil.badRequest(res, 'Refresh token is required');
                 return;
             }
@@ -708,6 +1126,7 @@ class AuthController {
             try {
                 decoded = User.verifyToken(refreshToken, 'refresh');
             } catch (error: any) {
+                clearAuthCookies(res);
                 LoggerUtil.warn('Invalid refresh token', { error: error.message, correlationId });
                 ResponseUtil.unauthorized(res, 'Invalid or expired refresh token');
                 return;
@@ -838,9 +1257,14 @@ class AuthController {
                 correlationId,
             });
 
+            setAuthCookies(res, {
+                accessToken: newAccessToken,
+                refreshToken: newRefreshToken,
+            });
+
             ResponseUtil.success(
                 res,
-                { tokens: buildTokensResponse(newAccessToken, newRefreshToken) },
+                { tokens: tokensForResponse(req, buildTokensResponse(newAccessToken, newRefreshToken)) },
                 'Token refreshed successfully',
                 200
             );
@@ -1425,18 +1849,7 @@ class AuthController {
                 ipAddress,
                 correlationId
             );
-
-            res.clearCookie('accessToken', {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
-            });
-
-            res.clearCookie('refreshToken', {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
-            });
+            clearAuthCookies(res);
 
             LoggerUtil.info('Logout successful', { userId, sessionId, correlationId });
 
@@ -1510,18 +1923,7 @@ class AuthController {
                 ipAddress,
                 correlationId
             );
-
-            res.clearCookie('accessToken', {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
-            });
-
-            res.clearCookie('refreshToken', {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
-            });
+            clearAuthCookies(res);
 
             LoggerUtil.info('Logout all devices successful', {
                 userId,

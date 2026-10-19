@@ -1,4 +1,4 @@
-﻿/**
+/**
  * conversation.model.ts
  * MongoDB schema for conversations (direct + group)
  * unreadCounts stored as Map<userId(UUID), count>
@@ -155,6 +155,82 @@ ConversationSchema.statics.getOrCreateDirect = async function (
         unreadCounts: new Map(),
     });
 };
+
+// ── Cache Invalidation Hooks ─────────────────────────────────
+ConversationSchema.post('save', async function (doc: any) {
+    if (doc && Array.isArray(doc.members) && doc.members.length > 0) {
+        try {
+            const { ChatCacheRepository } = await import('@/shared/cache/chatCache');
+            await ChatCacheRepository.invalidateUser(doc.members);
+        } catch {
+            // fail-safe
+        }
+    }
+});
+
+ConversationSchema.post('insertMany', async function (docs: any) {
+    if (Array.isArray(docs)) {
+        const allMembers: string[] = [];
+        docs.forEach((d: any) => {
+            if (Array.isArray(d.members)) {
+                allMembers.push(...d.members);
+            }
+        });
+        const uniqueMembers = [...new Set(allMembers.filter(Boolean))];
+        if (uniqueMembers.length > 0) {
+            try {
+                const { ChatCacheRepository } = await import('@/shared/cache/chatCache');
+                await ChatCacheRepository.invalidateUser(uniqueMembers);
+            } catch {
+                // fail-safe
+            }
+        }
+    }
+});
+
+const CONV_MUTATION_METHODS = [
+    'updateOne',
+    'updateMany',
+    'deleteOne',
+    'deleteMany',
+    'findOneAndUpdate',
+    'findOneAndDelete',
+    'replaceOne',
+    'findOneAndReplace',
+] as const;
+
+ConversationSchema.pre(CONV_MUTATION_METHODS as any, async function (this: any) {
+    try {
+        const filter = this.getFilter() || {};
+        const affectedDocs = await this.model
+            .find(filter)
+            .select('members')
+            .limit(501)
+            .lean()
+            .exec();
+        const allMembers: string[] = [];
+        affectedDocs.forEach((d: any) => {
+            if (Array.isArray(d.members)) {
+                allMembers.push(...d.members);
+            }
+        });
+        this._preUpdateConvMembers = [...new Set(allMembers.filter(Boolean))];
+    } catch {
+        this._preUpdateConvMembers = [];
+    }
+});
+
+ConversationSchema.post(CONV_MUTATION_METHODS as any, async function (this: any) {
+    try {
+        const members: string[] = this._preUpdateConvMembers || [];
+        if (members.length > 0) {
+            const { ChatCacheRepository } = await import('@/shared/cache/chatCache');
+            await ChatCacheRepository.invalidateUser(members);
+        }
+    } catch {
+        // fail-safe
+    }
+});
 
 // ==================== EXPORT ====================
 

@@ -62,6 +62,9 @@ export interface ProfileData {
     highestEducation?: string;
     preferredRole?: string;
     cgpa?: string;
+
+    // Email verification status
+    emailVerified?: boolean;
 }
 
 // ==================== RESULT INTERFACES ====================

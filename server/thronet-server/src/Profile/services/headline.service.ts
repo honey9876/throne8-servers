@@ -192,7 +192,7 @@ class HeadlineService {
  * Get headline by ID
  */
     static async getHeadlineById(headlineId: string): Promise<IHeadline> {
-        const headline = await Headline.findByHeadlineId(headlineId);
+        const headline = await Headline.findOne({ headlineId, 'flags.isDeleted': false }).lean<IHeadline>().exec();
 
         if (!headline) {
             throw new Error('Headline not found');
@@ -240,12 +240,26 @@ class HeadlineService {
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
-                .lean(),
+                .lean<IHeadline[]>(),
             Headline.countDocuments(query)
         ]);
 
-        return { headlines: headlines as unknown as IHeadline[], total };
+        return { headlines, total };
     }
+
+    /**
+     * Allowed fields that clients may modify on a headline.
+     * Protected fields (version, status, flags, metadata, type, headlineId) are computed exclusively by the service.
+     */
+    static readonly ALLOWED_UPDATE_FIELDS = new Set([
+        'title',
+        'message',
+        'priority',
+        'audience',
+        'scheduling',
+        'styling',
+        'actions',
+    ]);
 
     /**
      * Update headline
@@ -256,29 +270,48 @@ class HeadlineService {
         updatedBy: string,
         updatedByName: string
     ): Promise<IHeadline> {
-        const headline = await Headline.findByHeadlineId(headlineId);
+        // Enforce strict allowlist: version, status, flags, metadata, type are computed by service and ignored if passed
+        const safeUpdates: Record<string, any> = {};
+        for (const [key, value] of Object.entries(updates || {})) {
+            if (HeadlineService.ALLOWED_UPDATE_FIELDS.has(key)) {
+                safeUpdates[key] = value;
+            }
+        }
+
+        const setFields: Record<string, any> = {
+            ...safeUpdates,
+            'metadata.lastModifiedBy': updatedBy,
+            'metadata.lastModifiedByName': updatedByName,
+            updatedAt: new Date(),
+        };
+
+        // Service computes status from scheduling dates (clients cannot set status)
+        const now = new Date();
+        const sched = safeUpdates['scheduling'];
+        if (sched) {
+            if (sched.publishAt && new Date(sched.publishAt) > now) {
+                setFields['status'] = 'SCHEDULED';
+            } else if (sched.expiresAt && new Date(sched.expiresAt) < now) {
+                setFields['status'] = 'EXPIRED';
+            } else if (sched.publishAt && new Date(sched.publishAt) <= now) {
+                setFields['status'] = 'ACTIVE';
+            }
+        }
+
+        const headline = await Headline.findOneAndUpdate(
+            { headlineId, 'flags.isDeleted': false },
+            {
+                $set: setFields,
+                $inc: { 'metadata.version': 1 },
+            },
+            { new: true, runValidators: true }
+        ).lean<IHeadline>().exec();
 
         if (!headline) {
             throw new Error('Headline not found');
         }
 
-        // Update allowed fields
-        const allowedFields = [
-            'title', 'message', 'priority', 'status', 'audience',
-            'scheduling', 'styling', 'actions', 'flags'
-        ];
-
-        allowedFields.forEach(field => {
-            if (updates[field as keyof IHeadline] !== undefined) {
-                (headline as any)[field] = updates[field as keyof IHeadline];
-            }
-        });
-
-        // Update metadata
-        headline.metadata.lastModifiedBy = updatedBy;
-        headline.metadata.lastModifiedByName = updatedByName;
-
-        await headline.save();
+        await this.invalidateHeadlineCache(headline.type, headlineId);
 
         return headline;
     }
@@ -324,6 +357,9 @@ class HeadlineService {
             logger.info('Expiring old headlines', { correlationId });
 
             const count = await Headline.expireOldHeadlines();
+            if (count > 0) {
+                await this.invalidateHeadlineCache('*');
+            }
 
             logger.info('Old headlines expired', {
                 count,

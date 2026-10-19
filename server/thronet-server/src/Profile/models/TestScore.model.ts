@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Test Score Model - User Test/Exam Scores
  * Stores standardized test scores with validity tracking
  * 
@@ -371,6 +371,10 @@ TestScoreSchema.statics.reorderTestScores = async function (userId: string, orde
 };
 
 // ==================== EXPORT ====================
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(TestScoreSchema, 'userId');
 
 const TestScore = mongoose.model<ITestScore, ITestScoreModel>('TestScore', TestScoreSchema);
 export default TestScore;

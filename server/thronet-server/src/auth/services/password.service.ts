@@ -121,25 +121,25 @@ class PasswordService {
     static async verifyPasswordChangeOTP(userId: string, email: string, otp: string, newPassword: string, ipAddress: string, userAgent: string) {
         const correlationId = uuidv4();
         try {
-            // Step 1: Verify OTP
-            const otpVerification = await OTPVerification.verifyOTPByType(userId, otp, 'password_change');
-            if (!(otpVerification as any).success) throw new Error('Invalid or expired OTP');
-
-            // Step 2: Password strength
+            // Step 1: Password strength
             const passwordStrength = zxcvbn(newPassword, [email, userId]);
             if (passwordStrength.score < 3) {
                 const feedbackMsg = [passwordStrength.feedback.warning, ...passwordStrength.feedback.suggestions]
                     .filter(Boolean).join(' ').trim();
-                throw new Error(feedbackMsg || 'Password is too weak. Please choose a stronger password.');
+                throw new Error(feedbackMsg ? `Password is too weak: ${feedbackMsg}` : 'Password is too weak. Please choose a stronger password.');
             }
 
-            // Step 3: Fetch user
+            // Step 2: Fetch user
             const user = await User.findOne({ userId }).select('+passwordHash email firstName').lean().exec();
             if (!user) throw new Error('User not found');
 
-            // Step 4: Password history
+            // Step 3: Password history
             const isRecentPassword = await PasswordHistory.isPasswordRecentlyUsed(userId, newPassword);
             if (isRecentPassword) throw new Error('Cannot reuse any of your last 5 passwords');
+
+            // Step 4: Verify OTP
+            const otpVerification = await OTPVerification.verifyOTPByType(userId, otp, 'password_change', email);
+            if (!(otpVerification as any)?.success) throw new Error('Invalid or expired OTP');
 
             // Step 5: Save to history
             if ((user as any).passwordHash) {
@@ -288,21 +288,21 @@ class PasswordService {
             const user = await User.findOne({ email: normalizedEmail }).select('+passwordHash userId email firstName').lean().exec();
             if (!user) throw new Error('Invalid or expired reset code');
 
-            // Step 2: Verify reset code
-            const otpVerification = await OTPVerification.verifyOTPByType((user as any).userId, resetCode, 'password_reset');
-            if (!(otpVerification as any).success) throw new Error('Invalid or expired reset code');
-
-            // Step 3: Password strength
+            // Step 2: Password strength
             const passwordStrength = zxcvbn(newPassword, [normalizedEmail, (user as any).userId]);
             if (passwordStrength.score < 3) {
                 const feedbackMsg = [passwordStrength.feedback.warning, ...passwordStrength.feedback.suggestions]
                     .filter(Boolean).join(' ').trim();
-                throw new Error(feedbackMsg || 'Password is too weak. Please choose a stronger password.');
+                throw new Error(feedbackMsg ? `Password is too weak: ${feedbackMsg}` : 'Password is too weak. Please choose a stronger password.');
             }
 
-            // Step 4: Password history
+            // Step 3: Password history
             const isRecentPassword = await PasswordHistory.isPasswordRecentlyUsed((user as any).userId, newPassword);
             if (isRecentPassword) throw new Error('Cannot reuse any of your last 5 passwords');
+
+            // Step 4: Verify reset code
+            const otpVerification = await OTPVerification.verifyOTPByType((user as any).userId, resetCode, 'password_reset', normalizedEmail);
+            if (!(otpVerification as any)?.success) throw new Error('Invalid or expired reset code');
 
             // Step 5: Save to history
             if ((user as any).passwordHash) {

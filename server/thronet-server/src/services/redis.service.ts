@@ -1,4 +1,4 @@
-﻿// services/redis.service.ts
+// services/redis.service.ts
 import Redis, { Cluster } from 'ioredis';
 import { redisConfig } from '@/config/cache/redis.config';
 import { logger } from '@/shared/logger.util';
@@ -151,6 +151,29 @@ class RedisService {
     }
 
     /**
+     * Ensure connected lazily if called before startup finishes
+     */
+    async ensureConnected(): Promise<boolean> {
+        if (this.connected && this.client) {
+            return true;
+        }
+        if (this.isConnecting) {
+            if (this.connectionPromise) {
+                try {
+                    await this.connectionPromise;
+                } catch {}
+            }
+            return this.connected;
+        }
+        try {
+            await this.connect();
+            return this.connected;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
      * Separate method for actual connection logic
      */
     private async performConnect(): Promise<void> {
@@ -220,8 +243,15 @@ class RedisService {
                 }
             });
 
-            // Wait for connection to be ready
-            await this.waitForConnection();
+            // If client is in 'wait' or 'close' status, explicitly trigger connect
+            if ((this.client as any).status === 'wait' || (this.client as any).status === 'close') {
+                await this.client.connect().catch((err: any) => {
+                    logger.warn('Redis client initial connect returned error', { error: err.message });
+                });
+            }
+
+            // Wait for connection to be ready (timeout 15s)
+            await this.waitForConnection(15000);
 
             // Test connection with PING
             await this.client.ping();
@@ -302,6 +332,10 @@ class RedisService {
         this.metrics.totalOperations++;
 
         try {
+            if (!this.connected) {
+                await this.ensureConnected();
+            }
+
             if (!this.client || !this.connected) {
                 logger.warn('⚠️ [REDIS GET] Client not connected', { key });
                 this.metrics.cacheMisses++;
@@ -368,6 +402,10 @@ class RedisService {
         this.metrics.totalOperations++;
 
         try {
+            if (!this.connected) {
+                await this.ensureConnected();
+            }
+
             if (!this.client || !this.connected) {
                 logger.warn('⚠️ [REDIS SET] Client not connected', { key });
                 return;
@@ -425,6 +463,10 @@ class RedisService {
         this.metrics.totalOperations++;
 
         try {
+            if (!this.connected) {
+                await this.ensureConnected();
+            }
+
             if (!this.client || !this.connected) {
                 logger.warn('⚠️ [REDIS DEL] Client not connected', { key });
                 return;

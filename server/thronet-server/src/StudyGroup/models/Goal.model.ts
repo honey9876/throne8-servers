@@ -215,6 +215,47 @@ goalSchema.methods.updateProgress = function (this: any, hoursToAdd: number) {
   return this.save();
 };
 
+// Invalidation hooks for study analytics
+goalSchema.post('save', async function (doc: any) {
+  const uid = doc?.user || doc?.userId;
+  if (uid) {
+    try {
+      const { StudyAnalyticsCacheRepository } = await import('@/shared/cache/studyCache');
+      await StudyAnalyticsCacheRepository.invalidateUserAnalytics(String(uid));
+    } catch {}
+  }
+});
+
+goalSchema.pre(
+  ['updateOne', 'updateMany', 'findOneAndUpdate', 'deleteOne', 'deleteMany', 'findOneAndDelete'] as any,
+  async function (this: any) {
+    try {
+      const filter = this.getFilter ? this.getFilter() : {};
+      let uid = filter.user || filter.userId;
+      if (!uid && (filter._id || filter.goalId)) {
+        const doc = await this.model.findOne(filter).select('user userId').lean();
+        if (doc) this._targetUserId = doc.user || doc.userId;
+      } else if (uid) {
+        this._targetUserId = uid;
+      }
+    } catch {}
+  }
+);
+
+goalSchema.post(
+  ['updateOne', 'updateMany', 'findOneAndUpdate', 'deleteOne', 'deleteMany', 'findOneAndDelete'] as any,
+  async function (this: any, res: any) {
+    try {
+      const filter = this.getFilter ? this.getFilter() : {};
+      const uid = this._targetUserId || filter.user || filter.userId || (res && (res.user || res.userId));
+      if (uid) {
+        const { StudyAnalyticsCacheRepository } = await import('@/shared/cache/studyCache');
+        await StudyAnalyticsCacheRepository.invalidateUserAnalytics(String(uid));
+      }
+    } catch {}
+  }
+);
+
 const Goal: Model<IGoal> = mongoose.model<IGoal>('StudyGroup_Goal', goalSchema);
 
 export default Goal;

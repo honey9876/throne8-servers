@@ -3,14 +3,11 @@ import NotificationService from '../services/notification.service';
 import { SuccessResponse, ErrorResponse, HttpStatus } from '@/shared/response.util';
 import { asyncHandler } from '@/shared/utils/helpers.util';
 
-interface AuthRequest extends Request {
-    user?: { id: string; userId?: string; role: string; email: string };
-}
-
 export default class NotificationController {
 
-    static getNotifications = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
-        const userId = req.user?.userId || req.user?.id;
+    static getNotifications = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+        const user = (req as any).user;
+        const userId = user?.userId || user?.id;
         if (!userId) return next(new ErrorResponse('Auth required', HttpStatus.UNAUTHORIZED));
 
         const page = parseInt(req.query.page as string) || 1;
@@ -22,31 +19,45 @@ export default class NotificationController {
         res.json(SuccessResponse(result, 'Notifications fetched'));
     });
 
-    static markAsRead = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
-        const userId = req.user?.userId || req.user?.id;
+    static getUnreadCount = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+        const user = (req as any).user;
+        const userId = user?.userId || user?.id;
+        if (!userId) return next(new ErrorResponse('Auth required', HttpStatus.UNAUTHORIZED));
+
+        const unreadCount = await NotificationService.getUnreadCount(userId);
+        res.json(SuccessResponse({ unreadCount }, 'Unread count fetched'));
+    });
+
+    static markAsRead = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+        const user = (req as any).user;
+        const userId = user?.userId || user?.id;
         if (!userId) return next(new ErrorResponse('Auth required', HttpStatus.UNAUTHORIZED));
 
         await NotificationService.markAsRead(req.params.notificationId, userId);
         res.json(SuccessResponse(null, 'Marked as read'));
     });
 
-    static markAllAsRead = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
-        const userId = req.user?.userId || req.user?.id;
+    static markAllAsRead = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+        const user = (req as any).user;
+        const userId = user?.userId || user?.id;
         if (!userId) return next(new ErrorResponse('Auth required', HttpStatus.UNAUTHORIZED));
 
         await NotificationService.markAllAsRead(userId);
 
         // Emit updated count via socket
         try {
-            const { getIO } = await import('@/socket');
-            getIO().to(`user:${userId}`).emit('notification:unread:count', { count: 0 });
+            const socketModule = await import('@/socket') as any;
+            if (typeof socketModule.getIO === 'function') {
+                socketModule.getIO().to(`user:${userId}`).emit('notification:unread:count', { count: 0 });
+            }
         } catch (_) { }
 
         res.json(SuccessResponse(null, 'All marked as read'));
     });
 
-    static deleteNotification = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
-        const userId = req.user?.userId || req.user?.id;
+    static deleteNotification = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+        const user = (req as any).user;
+        const userId = user?.userId || user?.id;
         if (!userId) return next(new ErrorResponse('Auth required', HttpStatus.UNAUTHORIZED));
 
         await NotificationService.deleteNotification(req.params.notificationId, userId);

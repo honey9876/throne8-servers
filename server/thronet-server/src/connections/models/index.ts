@@ -1,23 +1,22 @@
-import Connection from "./Connection"
-// import ConnectionBlock, { 
-//     BlockReason, 
-//     BlockSeverity, 
-//     BlockType, 
-//     BlockStatus, 
-//     IConnectionBlock
-// } from "./ConnectionBlock"
-import ConnectionBlock from "./ConnectionBlock"
-import ConnectionRequest from "./ConnectionRequest"
-import { Follow } from "./Follow"
+import Connection from "./Connection";
+import ConnectionBlock, {
+    BlockReason,
+    BlockSeverity,
+    BlockType,
+    BlockStatus,
+    IConnectionBlock
+} from "./ConnectionBlock";
+import ConnectionRequest from "./ConnectionRequest";
+import { Follow } from "./Follow";
 
 export {
     Connection,
+    ConnectionBlock,
     ConnectionRequest,
     Follow,
-    // ConnectionBlock,
-    // BlockType,
-    // BlockReason,
-    // BlockSeverity,
-    // BlockStatus,
-    // IConnectionBlock,
-}
+    BlockType,
+    BlockReason,
+    BlockSeverity,
+    BlockStatus,
+    IConnectionBlock,
+};

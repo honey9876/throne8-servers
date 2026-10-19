@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Career Break Model - User Career Break History
  * Stores career gaps with reasons and privacy controls
  * 
@@ -297,6 +297,10 @@ CareerBreakSchema.statics.findActiveById = async function (careerBreakId: string
 };
 
 // ==================== EXPORT ====================
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(CareerBreakSchema, 'userId');
 
 const CareerBreak = mongoose.model<ICareerBreak, ICareerBreakModel>('CareerBreak', CareerBreakSchema);
 export default CareerBreak;

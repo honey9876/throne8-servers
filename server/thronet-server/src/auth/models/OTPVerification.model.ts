@@ -56,7 +56,7 @@ export interface IOTPVerificationModel extends Model<IOTPVerification> {
         maxAttempts?: number;
         metadata?: Record<string, any>;
     }): Promise<{ otp: string; otpRecord: Partial<IOTPVerification> }>;
-    verifyOTPByType(userId: string, otp: string, otpType: OTPType): Promise<{ success: boolean; otpId: string; verifiedAt: Date }>;
+    verifyOTPByType(userId: string, otp: string, otpType: OTPType, email?: string): Promise<{ success: boolean; otpId: string; verifiedAt: Date }>;
     getActiveOTP(userId: string, otpType: OTPType): Promise<IOTPVerification | null>;
     cleanupExpiredOTPs(): Promise<number>;
 }
@@ -193,7 +193,11 @@ OTPVerificationSchema.statics.createOTP = async function (data: any) {
     });
     if (recentOTPs >= 5) throw new Error('Too many OTP requests. Please try again later.');
 
-    await this.updateMany({ userId, otpType, status: 'pending' }, { $set: { status: 'revoked' } });
+    const revokeConditions: any[] = [{ userId }];
+    if (email) {
+        revokeConditions.push({ email: email.toLowerCase().trim() });
+    }
+    await this.updateMany({ $or: revokeConditions, otpType, status: 'pending' }, { $set: { status: 'revoked' } });
 
     const otp = this.generateOTP();
     const salt = process.env.OTP_SALT || 'default-otp-salt-change-in-production';
@@ -233,9 +237,49 @@ OTPVerificationSchema.statics.createOTP = async function (data: any) {
     };
 };
 
-OTPVerificationSchema.statics.verifyOTPByType = async function (userId: string, otp: string, otpType: OTPType) {
-    const otpRecord = await this.findOne({ userId, otpType, status: 'pending' }).select('+otpHash');
-    if (!otpRecord) throw new Error('No pending OTP found. Please request a new one.');
+OTPVerificationSchema.statics.verifyOTPByType = async function (
+    userId: string,
+    otp: string,
+    otpType: OTPType,
+    email?: string
+) {
+    const queryConditions: any[] = [{ userId }];
+    if (email) {
+        queryConditions.push({ email: email.toLowerCase().trim() });
+    }
+    if (userId && userId.includes('@')) {
+        queryConditions.push({ email: userId.toLowerCase().trim() });
+    }
+
+    const otpRecord = await this.findOne({
+        $or: queryConditions,
+        otpType,
+        status: 'pending',
+    }).sort({ createdAt: -1 }).select('+otpHash');
+
+    if (!otpRecord) {
+        const latestRecord = await this.findOne({
+            $or: queryConditions,
+            otpType,
+        }).sort({ createdAt: -1 });
+
+        if (latestRecord) {
+            if (latestRecord.status === 'verified') {
+                throw new Error('OTP already verified');
+            }
+            if (latestRecord.status === 'revoked') {
+                throw new Error('This OTP has been revoked. Please request a new one.');
+            }
+            if (latestRecord.status === 'failed') {
+                throw new Error('Maximum verification attempts exceeded');
+            }
+            if (latestRecord.status === 'expired' || (latestRecord.expiresAt && new Date() > latestRecord.expiresAt)) {
+                throw new Error('OTP expired');
+            }
+        }
+        throw new Error('No pending OTP found. Please request a new one.');
+    }
+
     await otpRecord.verifyOTP(otp);
     return { success: true, otpId: otpRecord.otpId, verifiedAt: otpRecord.verifiedAt };
 };

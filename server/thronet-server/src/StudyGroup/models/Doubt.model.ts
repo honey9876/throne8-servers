@@ -8,6 +8,7 @@ import mongoose, { Schema, Model } from "mongoose";
 import { IDoubt } from "../interfaces/IDoubt";
 import { validId } from "@/shared/security";
 import { v4 as uuidv4 } from "uuid";
+import { DoubtCacheRepository } from "@/shared/cache/feedCompanyCommentCache";
 
 interface IDoubtMethods {
   markAsSolved(answerId: string): Promise<void>;
@@ -514,6 +515,18 @@ doubtSchema.pre("findOneAndUpdate", function (next) {
     this.where({ isDeleted: false });
   }
   next();
+});
+
+doubtSchema.post("save", function (doc: any) {
+  if (doc) {
+    DoubtCacheRepository.invalidateDoubt(doc.doubtId, doc.group ? String(doc.group) : undefined).catch(() => {});
+  }
+});
+
+doubtSchema.post(["deleteOne", "findOneAndDelete"], function (doc: any) {
+  if (doc) {
+    DoubtCacheRepository.invalidateDoubt(doc.doubtId, doc.group ? String(doc.group) : undefined).catch(() => {});
+  }
 });
 
 const Doubt = mongoose.model<IDoubt, DoubtModel>(

@@ -203,6 +203,47 @@ taskSchema.statics.getUpcomingTasks = function (userId: string, days: number = 7
   }).sort({ deadline: 1 });
 };
 
+// Invalidation hooks for study analytics
+taskSchema.post('save', async function (doc: any) {
+  const uid = doc?.userId || doc?.user;
+  if (uid) {
+    try {
+      const { StudyAnalyticsCacheRepository } = await import('@/shared/cache/studyCache');
+      await StudyAnalyticsCacheRepository.invalidateUserAnalytics(String(uid));
+    } catch {}
+  }
+});
+
+taskSchema.pre(
+  ['updateOne', 'updateMany', 'findOneAndUpdate', 'deleteOne', 'deleteMany', 'findOneAndDelete'] as any,
+  async function (this: any) {
+    try {
+      const filter = this.getFilter ? this.getFilter() : {};
+      let uid = filter.userId || filter.user;
+      if (!uid && (filter._id || filter.taskId)) {
+        const doc = await this.model.findOne(filter).select('userId user').lean();
+        if (doc) this._targetUserId = doc.userId || doc.user;
+      } else if (uid) {
+        this._targetUserId = uid;
+      }
+    } catch {}
+  }
+);
+
+taskSchema.post(
+  ['updateOne', 'updateMany', 'findOneAndUpdate', 'deleteOne', 'deleteMany', 'findOneAndDelete'] as any,
+  async function (this: any, res: any) {
+    try {
+      const filter = this.getFilter ? this.getFilter() : {};
+      const uid = this._targetUserId || filter.userId || filter.user || (res && (res.userId || res.user));
+      if (uid) {
+        const { StudyAnalyticsCacheRepository } = await import('@/shared/cache/studyCache');
+        await StudyAnalyticsCacheRepository.invalidateUserAnalytics(String(uid));
+      }
+    } catch {}
+  }
+);
+
 const Task: Model<ITask> = mongoose.model<ITask>('StudyGroup_Task', taskSchema);
 
 export default Task;

@@ -1,4 +1,4 @@
-﻿import mongoose, { Model, Document, Schema } from 'mongoose';
+import mongoose, { Model, Document, Schema } from 'mongoose';
 
 // =====================================================
 // INTERFACES
@@ -286,6 +286,46 @@ FollowerSchema.set('toJSON', {
 });
 
 FollowerSchema.set('toObject', { virtuals: true });
+
+FollowerSchema.post('save', async function (doc: any) {
+  if (doc?.following) {
+    try {
+      const Company = mongoose.model('Company');
+      const isObjectId = mongoose.Types.ObjectId.isValid(doc.following);
+      const comp = await Company.findOne({
+        $or: [
+          ...(isObjectId ? [{ _id: doc.following }] : []),
+          { companyId: doc.following },
+        ],
+      }).select('companyId').lean() as any;
+      const targetCompanyId = comp?.companyId || doc.following;
+      if (targetCompanyId) {
+        const { CompanyCacheRepository } = await import('@/shared/cache/feedCompanyCommentCache');
+        await CompanyCacheRepository.invalidateCompany(targetCompanyId, comp?._id ? String(comp._id) : undefined);
+      }
+    } catch {}
+  }
+});
+
+FollowerSchema.post(['deleteOne', 'findOneAndDelete'], async function (doc: any) {
+  if (doc?.following) {
+    try {
+      const Company = mongoose.model('Company');
+      const isObjectId = mongoose.Types.ObjectId.isValid(doc.following);
+      const comp = await Company.findOne({
+        $or: [
+          ...(isObjectId ? [{ _id: doc.following }] : []),
+          { companyId: doc.following },
+        ],
+      }).select('companyId').lean() as any;
+      const targetCompanyId = comp?.companyId || doc.following;
+      if (targetCompanyId) {
+        const { CompanyCacheRepository } = await import('@/shared/cache/feedCompanyCommentCache');
+        await CompanyCacheRepository.invalidateCompany(targetCompanyId, comp?._id ? String(comp._id) : undefined);
+      }
+    } catch {}
+  }
+});
 
 // =====================================================
 // EXPORT MODEL

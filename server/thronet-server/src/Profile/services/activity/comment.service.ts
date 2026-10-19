@@ -13,6 +13,7 @@ import redisService from '@/services/redis.service';
 
 
 import NotificationService from '@/notifications/services/notification.service';
+import { CommentCacheRepository } from '@/shared/cache/feedCompanyCommentCache';
 // ==================== INTERFACES ====================
 
 interface CreateCommentResult {
@@ -117,6 +118,9 @@ class CommentService {
                 redisService.deleteByPattern(`feed:v1:${postOwnerId}:page:*`).catch(() => {});
             }
 
+            // Invalidate post comments cache
+            CommentCacheRepository.invalidatePostComments(postId).catch(() => {});
+
             // ✅ Notify post owner (non-blocking, skip if commenting on own post)
             if (postOwnerId && postOwnerId !== userId) {
                 setImmediate(async () => {
@@ -203,27 +207,91 @@ class CommentService {
     /**
      * ✅ Get all comments for a post
      */
-    static async getCommentsByPostId(postId: string): Promise<any> {
+    static async getCommentsByPostId(postId: string, viewerId?: string): Promise<any> {
         const correlationId = uuidv4();
 
         try {
             LoggerUtil.info('Fetching comments for post', {
                 postId,
+                viewerId,
                 correlationId,
             });
 
-            const comments = await Comment.findByPostId(postId);
+            let result: any = null;
+
+            // Check Item K comments read cache
+            try {
+                const cached = await CommentCacheRepository.getCachedPostComments(postId);
+                if (cached) result = cached;
+            } catch {
+                // Fallback to MongoDB
+            }
+
+            if (!result) {
+                const comments = await Comment.findByPostId(postId);
+
+                result = {
+                    comments,
+                    total: comments.length,
+                };
+
+                CommentCacheRepository.setCachedPostComments(postId, result).catch(() => {});
+            }
+
+            // Per-request viewer block filtering & post visibility
+            try {
+                const Post = (await import('@/Profile/models/Post.model')).default;
+                const post = await Post.findOne({ 'posts.entryId': postId }).lean();
+                if (post) {
+                    const entry = (post as any).posts?.find((p: any) => p.entryId === postId && !p.isDeleted);
+                    if (!entry) {
+                        return { comments: [], total: 0 };
+                    }
+                    // Private post: unauthenticated or non-author viewers cannot access comments
+                    if (entry.isPublic === false) {
+                        if (!viewerId || post.userId !== viewerId) {
+                            return { comments: [], total: 0 };
+                        }
+                    }
+                }
+
+                // If viewerId is provided, apply dynamic block filtering
+                if (viewerId) {
+                    const ConnectionBlock = (await import('@/connections/models/ConnectionBlock')).default;
+                    const blocks = await ConnectionBlock.find({
+                        $or: [{ blockerId: viewerId }, { blockedId: viewerId }],
+                        isActive: true,
+                    }).select('blockerId blockedId').lean();
+
+                    if (blocks && blocks.length > 0) {
+                        const blockedIds = new Set(
+                            blocks.map((b: any) => (b.blockerId === viewerId ? b.blockedId : b.blockerId))
+                        );
+
+                        if (post && blockedIds.has(String(post.userId))) {
+                            return { comments: [], total: 0 };
+                        }
+
+                        if (result?.comments && result.comments.length > 0) {
+                            const filtered = result.comments.filter((c: any) => !blockedIds.has(String(c.userId)));
+                            return {
+                                comments: filtered,
+                                total: result.total, // Keep total as the true total comments on the post
+                            };
+                        }
+                    }
+                }
+            } catch (err: any) {
+                LoggerUtil.warn('Failed to apply post visibility or block filtering to comments', { error: err.message });
+            }
 
             LoggerUtil.info('Comments fetched successfully', {
                 postId,
-                count: comments.length,
+                count: result.comments?.length || 0,
                 correlationId,
             });
 
-            return {
-                comments,
-                total: comments.length,
-            };
+            return result;
 
         } catch (error: any) {
             LoggerUtil.error('Get comments by post failed', {

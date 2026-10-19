@@ -61,5 +61,102 @@ NotificationSchema.index(
     }
 );
 
+// ── Cache Invalidation Hooks ─────────────────────────────────
+// Dynamically imported / invoked to avoid circular module dependencies
+NotificationSchema.post('save', async function (doc: any) {
+    if (doc && doc.recipientId) {
+        try {
+            const { NotificationCacheRepository } = await import('@/shared/cache/notificationCache');
+            await NotificationCacheRepository.invalidateUser(doc.recipientId);
+        } catch {
+            // fail-safe
+        }
+    }
+});
+
+NotificationSchema.post('insertMany', async function (docs: any) {
+    if (Array.isArray(docs)) {
+        const recipientIds = [...new Set(docs.map((d: any) => d.recipientId).filter(Boolean))];
+        if (recipientIds.length > 0) {
+            try {
+                const { NotificationCacheRepository } = await import('@/shared/cache/notificationCache');
+                await NotificationCacheRepository.invalidateUser(recipientIds);
+            } catch {
+                // fail-safe
+            }
+        }
+    }
+});
+
+const NOTIF_MUTATION_METHODS = [
+    'updateOne',
+    'updateMany',
+    'deleteOne',
+    'deleteMany',
+    'findOneAndUpdate',
+    'findOneAndDelete',
+    'replaceOne',
+    'findOneAndReplace',
+] as const;
+
+NotificationSchema.pre(NOTIF_MUTATION_METHODS as any, async function (this: any) {
+    try {
+        const filter = this.getFilter() || {};
+        if (filter.recipientId && typeof filter.recipientId === 'string') {
+            this._preUpdateRecipientIds = [filter.recipientId];
+            return;
+        }
+        if (filter.recipientId && typeof filter.recipientId === 'object' && Array.isArray(filter.recipientId.$in)) {
+            this._preUpdateRecipientIds = filter.recipientId.$in.map(String);
+            return;
+        }
+        const affectedDocs = await this.model
+            .find(filter)
+            .select('recipientId')
+            .limit(501)
+            .lean()
+            .exec();
+        this._preUpdateRecipientIds = [...new Set(affectedDocs.map((d: any) => d.recipientId).filter(Boolean))];
+    } catch {
+        this._preUpdateRecipientIds = [];
+    }
+});
+
+NotificationSchema.post(NOTIF_MUTATION_METHODS as any, async function (this: any) {
+    try {
+        const ids: string[] = this._preUpdateRecipientIds || [];
+        if (ids.length > 0) {
+            const { NotificationCacheRepository } = await import('@/shared/cache/notificationCache');
+            await NotificationCacheRepository.invalidateUser(ids);
+        }
+    } catch {
+        // fail-safe
+    }
+});
+
+NotificationSchema.post('save', async function (doc: any) {
+    try {
+        if (doc?.recipientId) {
+            const { NotificationCacheRepository } = await import('@/shared/cache/notificationCache');
+            await NotificationCacheRepository.invalidateUser(String(doc.recipientId));
+        }
+    } catch {
+        // fail-safe
+    }
+});
+
+NotificationSchema.post('insertMany', async function (docs: any) {
+    try {
+        const arr = Array.isArray(docs) ? docs : [docs];
+        const recipientIds = [...new Set(arr.map((d: any) => d?.recipientId).filter(Boolean))];
+        if (recipientIds.length > 0) {
+            const { NotificationCacheRepository } = await import('@/shared/cache/notificationCache');
+            await NotificationCacheRepository.invalidateUser(recipientIds);
+        }
+    } catch {
+        // fail-safe
+    }
+});
+
 const Notification = mongoose.model<INotification, INotificationModel>('Notification-service', NotificationSchema);
 export default Notification;

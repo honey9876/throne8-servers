@@ -11,8 +11,8 @@
 import { Kafka, Producer, Message, ProducerRecord } from 'kafkajs';
 import LoggerUtil from '@/shared/logger.util';
 import kafkaConfig from '@/config/kafka.config';
-import ProducerMetrics from '@/kafka/metrics/producer.metrics';
-import ErrorHandler from '@/kafka/utils/error-handler';
+import ProducerMetrics from '@/shared/kafka/metrics/producer.metrics';
+import ErrorHandler from '@/shared/kafka/utils/error-handler';
 
 // ==================== INTERFACES ====================
 

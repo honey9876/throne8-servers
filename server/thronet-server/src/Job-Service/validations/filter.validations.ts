@@ -272,7 +272,7 @@ export const validateCompleteFilterInput = (input: any) => {
 
 // Your existing optimized query builder (cleaned up with comments & safety)
 export const buildOptimizedQuery = (filters: any, userProfile : IUserProfile | null | undefined) => {
-  const baseQuery = {
+  const baseQuery: Record<string, any> = {
     status: 'active',
     isDeleted: false,
   };
@@ -288,15 +288,15 @@ export const buildOptimizedQuery = (filters: any, userProfile : IUserProfile | n
   }
 
   // Location
-  if (filters.city?.length) baseQuery['location.city'] = { $in: filters.city.map(c => new RegExp(c, 'i')) };
-  if (filters.state?.length) baseQuery['location.state'] = { $in: filters.state.map(s => new RegExp(s, 'i')) };
+  if (filters.city?.length) baseQuery['location.city'] = { $in: filters.city.map((c: string) => new RegExp(c, 'i')) };
+  if (filters.state?.length) baseQuery['location.state'] = { $in: filters.state.map((s: string) => new RegExp(s, 'i')) };
   if (filters.country) baseQuery['location.country'] = filters.country;
   if (filters.remote !== undefined) baseQuery['location.remote'] = filters.remote;
   if (filters.workMode?.length) baseQuery['location.workMode'] = { $in: filters.workMode };
 
   // Salary
   if (filters.salaryRange) {
-    const ranges = {
+    const ranges: Record<string, [number, number]> = {
       '0-3L': [0, 300000],
       '3L-6L': [300000, 600000],
       '6L-10L': [600000, 1000000],
@@ -305,9 +305,12 @@ export const buildOptimizedQuery = (filters: any, userProfile : IUserProfile | n
       '25L-50L': [2500000, 5000000],
       '50L+': [5000000, Infinity],
     };
-    const [min, max] = ranges[filters.salaryRange];
-    baseQuery['salary.min'] = { $gte: min };
-    if (max !== Infinity) baseQuery['salary.max'] = { $lte: max };
+    const range = ranges[filters.salaryRange];
+    if (range) {
+      const [min, max] = range;
+      baseQuery['salary.min'] = { $gte: min };
+      if (max !== Infinity) baseQuery['salary.max'] = { $lte: max };
+    }
   } else {
     if (filters.minSalary) baseQuery['salary.min'] = { $gte: filters.minSalary };
     if (filters.maxSalary) baseQuery['salary.max'] = { $lte: filters.maxSalary };
@@ -332,25 +335,27 @@ export const buildOptimizedQuery = (filters: any, userProfile : IUserProfile | n
   // Industry & Function
   if (filters.industry?.length) baseQuery.industry = { $in: filters.industry };
   if (filters.jobFunction?.length) baseQuery.jobFunction = { $in: filters.jobFunction };
-  if (filters.department?.length) baseQuery.department = { $in: filters.department.map(d => new RegExp(d, 'i')) };
+  if (filters.department?.length) baseQuery.department = { $in: filters.department.map((d: string) => new RegExp(d, 'i')) };
 
   // Education & Skills
   if (filters.education?.length) baseQuery['requirements.education'] = { $in: filters.education };
   if (filters.degree?.length) baseQuery['requirements.degree'] = { $in: filters.degree };
-  if (filters.skills?.length) baseQuery['skills.name'] = { $in: filters.skills.map(s => new RegExp(s, 'i')) };
-  if (filters.certifications?.length) baseQuery['requirements.certifications'] = { $in: filters.certifications.map(c => new RegExp(c, 'i')) };
+  if (filters.skills?.length) baseQuery['skills.name'] = { $in: filters.skills.map((s: string) => new RegExp(s, 'i')) };
+  if (filters.certifications?.length) baseQuery['requirements.certifications'] = { $in: filters.certifications.map((c: string) => new RegExp(c, 'i')) };
   if (filters.languages?.length) baseQuery['requirements.languages'] = { $in: filters.languages };
 
   // Date Filters
   if (filters.datePosted && filters.datePosted !== 'any') {
-    const now = new Date();
-    const dateFilters = {
+    const now = Date.now();
+    const dateFilters: Record<string, Date> = {
       'past-24h': new Date(now - 86400000),
       'past-week': new Date(now - 7 * 86400000),
       'past-month': new Date(now - 30 * 86400000),
       'past-3-months': new Date(now - 90 * 86400000),
     };
-    baseQuery['dates.posted'] = { $gte: dateFilters[filters.datePosted] };
+    if (dateFilters[filters.datePosted]) {
+      baseQuery['dates.posted'] = { $gte: dateFilters[filters.datePosted] };
+    }
   }
 
   // Benefits & Features
@@ -373,7 +378,7 @@ export const buildOptimizedQuery = (filters: any, userProfile : IUserProfile | n
   // Personalization boost (optional)
   if (userProfile?.skills?.length) {
     baseQuery.$or = baseQuery.$or || [];
-    baseQuery.$or.push({ 'skills.name': { $in: userProfile.skills.map(s => new RegExp(s, 'i')) } });
+    baseQuery.$or.push({ 'skills.name': { $in: userProfile.skills.map((s: string) => new RegExp(s, 'i')) } });
   }
 
   return baseQuery;
@@ -381,7 +386,7 @@ export const buildOptimizedQuery = (filters: any, userProfile : IUserProfile | n
 
 // Sorting logic (unchanged but with safety)
 export const getSortOptions = (sortBy: string, sortOrder: string = 'desc') => {
-  const options = {
+  const options: Record<string, any> = {
     relevance: { score: { $meta: 'textScore' }, 'dates.posted': sortOrder === 'asc' ? 1 : -1 },
     date: { 'dates.posted': sortOrder === 'asc' ? 1 : -1 },
     'salary-high': { 'salary.max': -1, 'dates.posted': -1 },
@@ -389,5 +394,5 @@ export const getSortOptions = (sortBy: string, sortOrder: string = 'desc') => {
     'company-rating': { 'company.rating': -1, 'dates.posted': -1 },
     'experience-match': { 'experience.min': 1, 'dates.posted': -1 },
   };
-  return options[sortBy] || options.relevance;
+  return options[sortBy] || options['relevance'];
 };

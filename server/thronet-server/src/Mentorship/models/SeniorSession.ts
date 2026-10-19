@@ -71,7 +71,6 @@ const SeniorSessionBookingSchema = new Schema<ISeniorSessionBooking>(
     menteeId: {
       type: String,
       required: [true, 'Mentee ID is required'],
-      index: true,
     },
 
     bookedBy: {

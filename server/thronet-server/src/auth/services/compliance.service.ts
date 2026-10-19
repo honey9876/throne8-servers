@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import geoip from 'geoip-lite';
 import * as crypto from 'crypto';
 import User from '@/auth/models/User.model';
-import OTPVerification from '@/auth/models/OTPVerification.model';
+import OTPVerification, { OTPType } from '@/auth/models/OTPVerification.model';
 import Session from '@/auth/models/Session.model';
 import { LoggerUtil } from '@/shared/logger.util';
 import CacheUtil from '@/shared/cache.util';
@@ -143,15 +143,16 @@ class ComplianceService {
         }
     }
 
-    static async sendAnnualIdentityReCheckOTP(userId: string, verificationType: string, ipAddress: string): Promise<{ success: boolean; message: string; expiresAt: Date; expiresIn: number }> {
+    static async sendAnnualIdentityReCheckOTP(userId: string, verificationType: 'email' | 'phone', ipAddress: string): Promise<{ success: boolean; message: string; expiresAt: Date; expiresIn: number }> {
         const correlationId = uuidv4();
         try {
             const user = await User.findOne({ userId }).select('email phoneNumber firstName').lean().exec();
             if (!user) throw new Error('User not found');
 
+            const otpType: OTPType = verificationType === 'email' ? 'annual_email_recheck' : 'annual_phone_recheck';
             const { otp, otpRecord } = await OTPVerification.createOTP({
                 userId,
-                otpType: `annual_${verificationType}_recheck`,
+                otpType,
                 email: verificationType === 'email' ? (user as any).email : undefined,
                 phoneNumber: verificationType === 'phone' ? (user as any).phoneNumber : undefined,
                 expiryMinutes: 15,
@@ -186,10 +187,11 @@ class ComplianceService {
         }
     }
 
-    static async verifyAnnualIdentityReCheckOTP(userId: string, otp: string, verificationType: string, ipAddress: string): Promise<{ success: boolean; message: string; verifiedAt: string }> {
+    static async verifyAnnualIdentityReCheckOTP(userId: string, otp: string, verificationType: 'email' | 'phone', ipAddress: string): Promise<{ success: boolean; message: string; verifiedAt: string }> {
         const correlationId = uuidv4();
         try {
-            await OTPVerification.verifyOTPByType(userId, otp, `annual_${verificationType}_recheck`);
+            const otpType: OTPType = verificationType === 'email' ? 'annual_email_recheck' : 'annual_phone_recheck';
+            await OTPVerification.verifyOTPByType(userId, otp, otpType);
 
             const updateField = verificationType === 'email' ? 'emailVerifiedAt' : 'phoneVerifiedAt';
             await User.findOneAndUpdate({ userId }, { $set: { [updateField]: new Date() } });

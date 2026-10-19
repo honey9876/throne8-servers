@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { LoggerUtil } from '@/shared/logger.util';
 
@@ -256,6 +256,10 @@ EducationSchema.statics.findActiveById = async function (
         throw error;
     }
 };
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(EducationSchema, 'userId');
 
 const Education = mongoose.model<IEducation, IEducationModel>('Education', EducationSchema);
 export default Education;

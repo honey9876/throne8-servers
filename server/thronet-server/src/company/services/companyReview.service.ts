@@ -154,7 +154,7 @@ export class CompanyReviewService {
       const existing = await reviewRepository.findByObjectId(objectId);
       if (!existing) throw new Error('Review not found');
 
-      const updated = await reviewRepository.updateByObjectId(objectId, data);
+      const updated = await reviewRepository.updateByObjectId(objectId, data as any);
       if (!updated) throw new Error('Review not found');
 
       logger.info(`Review updated: ${objectId}`);

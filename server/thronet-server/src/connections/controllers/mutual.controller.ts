@@ -42,17 +42,7 @@ import { asyncHandler } from '@/shared/utils/helpers.util';
  * Monitoring: Logs response times, errors with context
  */
 
-interface AuthRequest extends Request {
-  user?: {
-    id: string;
-    userId?: string;
-    isAdmin: boolean;
-    email: string;
-    role: 'user' | 'admin';
-    deviceId?: string | null;
-    sessionId?: string | null;
-  };
-}
+type AuthRequest = Request;
 
 class mutualController {
 

@@ -19,18 +19,22 @@ const customMessages = {
   'string.unsafeContent': 'Input contains unsafe content (e.g., scripts)',
 };
 
-// Reusable rules
-const uuidSchema = () =>
-  Joi.string().uuid({ version: ['uuidv4'] }).required().messages(customMessages);
+const uuidSchema = (label?: string) => {
+  const schema = Joi.string().uuid({ version: ['uuidv4'] }).required().messages(customMessages);
+  return label ? schema.label(label) : schema;
+};
 
 const stringRequired = (label: string, min = 1, max = 255) =>
   Joi.string().trim().min(min).max(max).required().label(label).messages(customMessages);
+
+const stringOptional = (label: string, max = 255) =>
+  Joi.string().trim().max(max).optional().allow('', null).label(label).messages(customMessages);
 
 // 1. Normalize array fields helper (unchanged - it's good)
 export const normalizeArrayFields = (data: any) => {
   const arrayFields = ['skills', 'searchKeywords', 'tags', 'diversityTags'];
 
-  const nestedArrayFields = {
+  const nestedArrayFields: Record<string, string[]> = {
     requirements: ['certifications', 'mandatorySkills', 'preferredSkills'],
     benefits: ['others'],
   };
@@ -45,7 +49,7 @@ export const normalizeArrayFields = (data: any) => {
   // Normalize nested arrays
   Object.keys(nestedArrayFields).forEach((parent) => {
     if (data[parent]) {
-      nestedArrayFields[parent].forEach((field) => {
+      nestedArrayFields[parent].forEach((field: string) => {
         if (
           data[parent][field] &&
           typeof data[parent][field] === 'object' &&
@@ -61,8 +65,7 @@ export const normalizeArrayFields = (data: any) => {
 };
 
 // 2. Create Job Validation (POST /jobs)
-export const validateCreateJobInput = (input: any) => {
-  const schema = Joi.object({
+export const createJobSchema = Joi.object({
     title: stringRequired('Job Title', 5, 200).pattern(/^[a-zA-Z0-9\s\-.,&()']+$/),
 
     companyId: uuidSchema().label('Company ID'),
@@ -200,15 +203,17 @@ export const validateCreateJobInput = (input: any) => {
   })
     .messages(customMessages);
 
-  return schema.validate(input, { abortEarly: false, stripUnknown: true });
+export const validateCreateJobInput = (input: any) => {
+  return createJobSchema.validate(input, { abortEarly: false, stripUnknown: true });
 };
+(validateCreateJobInput as any).schema = createJobSchema;
 
 // 3. Update Job Validation (PATCH /jobs/:id)
 export const validateUpdateJobInput = (input: any) => {
-  // Same schema as create, but all fields optional
-  const createSchema = validateCreateJobInput.schema; // Reuse base schema
-
-  const updateSchema = createSchema.fork(Object.keys(createSchema.describe().keys), (field) => field.optional());
+  const updateSchema = createJobSchema.fork(
+    Object.keys(createJobSchema.describe().keys || {}),
+    (field: any) => field.optional()
+  );
 
   return updateSchema
     .min(1) // At least one field must be provided for update

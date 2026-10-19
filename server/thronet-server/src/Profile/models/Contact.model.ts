@@ -316,5 +316,9 @@ ContactSchema.statics.checkProfileUrlAvailability = async function (
     }
 };
 
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(ContactSchema, 'userId');
+
 const Contact = mongoose.model<IContact, IContactModel>('Contact', ContactSchema);
 export default Contact;

@@ -53,8 +53,8 @@ class EmailVerificationService {
                 eventId: uuidv4(), userId,
                 action: Constants.AUDIT_ACTIONS.EMAIL_VERIFICATION_LINK_SENT,
                 ipAddress,
-                status: Constants.AUDIT_STATUS.FAILURE as 'FAILURE',
-                severity: Constants.AUDIT_SEVERITIES.MEDIUM as 'MEDIUM',
+                status: Constants.AUDIT_STATUS.SUCCESS as 'SUCCESS',
+                severity: Constants.AUDIT_SEVERITIES.LOW as 'LOW',
                 timestamp: new Date().toISOString(),
                 metadata: { email: user.email, otpId: otpRecord.otpId, expiresAt: otpRecord.expiresAt, correlationId },
             });

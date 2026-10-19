@@ -4,7 +4,7 @@
  * No business logic here.
  */
 
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { validationResult } from 'express-validator';
 import messageService from '../services/messaging.service';
 import ResponseUtil from '../../shared/response.util';
@@ -12,13 +12,12 @@ import {
     MessageType,
     MessageStatus,
 } from '../types/message.types';
-import { AuthRequest } from '@/Mentorship/interface/express';
 
 console.log('🔍 message.controller.ts LOADING START');
 
 // ==================== HELPER ====================
 
-function handleValidation(req: AuthRequest, res: Response): boolean {
+function handleValidation(req: Request, res: Response): boolean {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         ResponseUtil.validationError(res, errors.array().map(e => e.msg));
@@ -27,8 +26,8 @@ function handleValidation(req: AuthRequest, res: Response): boolean {
     return true;
 }
 
-function userId(req: AuthRequest): string {
-    return req.user!.userId;
+function userId(req: Request): string {
+    return (req.user as any)?.userId || (req.user as any)?.id || '';
 }
 
 // ==================== CONTROLLER ====================
@@ -39,7 +38,7 @@ class MessageController {
      * POST /conversations/direct
      * Get or create a direct conversation with another user
      */
-    async getOrCreateDirect(req: AuthRequest, res: Response) {
+    async getOrCreateDirect(req: Request, res: Response) {
         if (!handleValidation(req, res)) return;
 
         try {
@@ -57,10 +56,19 @@ class MessageController {
      * GET /conversations
      * All conversations for current user
      */
-    async getConversations(req: AuthRequest, res: Response) {
+    async getConversations(req: Request, res: Response) {
         try {
             const conversations = await messageService.getConversations(userId(req));
             return ResponseUtil.success(res, conversations, 'Conversations fetched');
+        } catch (err: any) {
+            return ResponseUtil.error(res, err.message, err.status || 500);
+        }
+    }
+
+    async getUnreadCount(req: Request, res: Response) {
+        try {
+            const count = await messageService.getUnreadCount(userId(req));
+            return ResponseUtil.success(res, { unreadCount: count }, 'Unread message count fetched');
         } catch (err: any) {
             return ResponseUtil.error(res, err.message, err.status || 500);
         }
@@ -70,7 +78,7 @@ class MessageController {
      * POST /messages
      * Send a message
      */
-    async sendMessage(req: AuthRequest, res: Response) {
+    async sendMessage(req: Request, res: Response) {
         if (!handleValidation(req, res)) return;
 
         try {
@@ -92,7 +100,7 @@ class MessageController {
      * GET /conversations/:conversationId/messages
      * Paginated message history (cursor-based)
      */
-    async getHistory(req: AuthRequest, res: Response) {
+    async getHistory(req: Request, res: Response) {
         if (!handleValidation(req, res)) return;
 
         try {
@@ -111,7 +119,7 @@ class MessageController {
      * GET /conversations/:conversationId/messages/search
      * Full-text search inside a conversation
      */
-    async searchMessages(req: AuthRequest, res: Response) {
+    async searchMessages(req: Request, res: Response) {
         if (!handleValidation(req, res)) return;
 
         try {
@@ -131,7 +139,7 @@ class MessageController {
      * PATCH /conversations/:conversationId/seen
      * Mark all messages in a conversation as seen
      */
-    async markSeen(req: AuthRequest, res: Response) {
+    async markSeen(req: Request, res: Response) {
         if (!handleValidation(req, res)) return;
 
         try {
@@ -149,7 +157,7 @@ class MessageController {
      * GET /conversations/:conversationId/messages/pinned
      * Get all pinned messages
      */
-    async getPinned(req: AuthRequest, res: Response) {
+    async getPinned(req: Request, res: Response) {
         try {
             const messages = await messageService.getPinnedMessages(
                 userId(req),
@@ -165,7 +173,7 @@ class MessageController {
      * PATCH /messages/:messageId/pin
      * Toggle pin on a message
      */
-    async togglePin(req: AuthRequest, res: Response) {
+    async togglePin(req: Request, res: Response) {
         if (!handleValidation(req, res)) return;
 
         try {
@@ -183,7 +191,7 @@ class MessageController {
      * POST /messages/react
      * Add or remove emoji reaction
      */
-    async toggleReaction(req: AuthRequest, res: Response) {
+    async toggleReaction(req: Request, res: Response) {
         if (!handleValidation(req, res)) return;
 
         try {
@@ -201,7 +209,7 @@ class MessageController {
      * DELETE /messages/:messageId
      * Soft delete own message
      */
-    async deleteMessage(req: AuthRequest, res: Response) {
+    async deleteMessage(req: Request, res: Response) {
         if (!handleValidation(req, res)) return;
 
         try {

@@ -289,9 +289,24 @@ export class MutualService {
   async invalidateMutualCache(userId: string): Promise<void> {
     try {
       if (!this.redisClient) return;
-      const keys = await this.redisClient.keys(`mutuals:${userId}:*`);
+      let cursor = '0';
+      const keys: string[] = [];
+      do {
+        const [nextCursor, matchedKeys] = await this.redisClient.scan(
+          cursor,
+          'MATCH',
+          `mutuals:${userId}:*`,
+          'COUNT',
+          100
+        );
+        cursor = nextCursor;
+        if (matchedKeys && matchedKeys.length > 0) {
+          keys.push(...matchedKeys);
+        }
+      } while (cursor !== '0');
+
       if (keys.length > 0) {
-        await this.redisClient.del(keys);
+        await Promise.all(keys.map((k) => this.redisClient.del(k)));
         logger.info('Mutual cache invalidated', { userId, keysCount: keys.length } as unknown as PublicLogMetadata);
       }
     } catch (error: any) {

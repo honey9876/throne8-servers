@@ -9,7 +9,7 @@
 import { Kafka, Admin } from 'kafkajs';
 import kafkaConfig from '@/config/kafka.config';
 import { LoggerUtil } from '@/shared/logger.util';
-import { getAllTopicNames } from '@/kafka/config/topic.config';
+import { getAllTopicNames } from '@/shared/kafka/config/topic.config';
 
 export interface KafkaHealthStatus {
     isHealthy: boolean;
@@ -37,7 +37,7 @@ export class KafkaHealthUtil {
             const cluster = await admin.describeCluster();
             const topics = await admin.listTopics();
 
-            const missingTopics = expectedTopics.filter(topic => !topics.includes(topic));
+            const missingTopics = expectedTopics.filter((topic: string) => !topics.includes(topic));
 
             const isHealthy = cluster.brokers.length > 0 && missingTopics.length === 0;
 

@@ -16,13 +16,18 @@
 
 const fs = require('fs');
 const pathModule = require('path');
-const candidateProdPath = pathModule.join(__dirname, '../../../../.env.production');
-const candidateDevPath = pathModule.join(__dirname, '../../../../.env');
-const chosenEnvPath = (process.env['NODE_ENV'] === 'production' && fs.existsSync(candidateProdPath))
-    ? candidateProdPath
-    : candidateDevPath;
 
-require('dotenv').config({ path: chosenEnvPath });
+const envCandidates = [
+    pathModule.join(process.cwd(), '.env'),
+    pathModule.join(__dirname, '../../../.env'),
+    pathModule.join(__dirname, '../../../../../.env'),
+];
+
+for (const envPath of envCandidates) {
+    if (fs.existsSync(envPath)) {
+        require('dotenv').config({ path: envPath });
+    }
+}
 
 interface EnvConfig {
     // ── Core ──────────────────────────────────────────────────────────────

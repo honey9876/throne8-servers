@@ -10,6 +10,11 @@ export async function enableUserSharding(): Promise<void> {
             return;
         }
 
+        if (!mongoose.connection.db) {
+            logger.warn('User sharding skipped: database connection not ready');
+            return;
+        }
+
         const adminDb = mongoose.connection.db.admin();
         const dbName = mongoose.connection.db.databaseName;
 

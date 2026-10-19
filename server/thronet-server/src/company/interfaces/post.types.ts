@@ -23,6 +23,7 @@ export interface CreatePostDTO {
     caption?: string;
   }>;
   tags?: string[];
+  status?: PostStatus | string;
   scheduledFor?: Date | string;
 }
 

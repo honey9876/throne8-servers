@@ -46,7 +46,7 @@ export class JobMaintenanceService {
         date: { $lt: cutoff.toISOString().split('T')[0] }
       }).lean();
 
-      if (oldRecords.length === 0) return;
+      if (oldRecords.length === 0 || !mongoose.connection.db) return;
 
       await mongoose.connection.db.collection('job_analytics_archive').insertMany(oldRecords);
       await Insights.deleteMany({ date: { $lt: cutoff.toISOString().split('T')[0] } });

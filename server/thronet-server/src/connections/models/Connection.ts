@@ -1,4 +1,4 @@
-﻿// src/models/mongodb/Connection.ts
+// src/models/mongodb/Connection.ts
 
 import { Schema, model, Document, Model, Types, Query } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -1041,6 +1041,10 @@ ConnectionSchema.statics.cleanupInactiveConnections = async function (
     } as unknown as PublicLogMetadata);
     return result.modifiedCount;
 };
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachConnectionCacheHooks } from '@/shared/cache/connectionCache';
+attachConnectionCacheHooks(ConnectionSchema as any);
 
 const Connection: IConnectionModel = model<IConnection, IConnectionModel>('Connection', ConnectionSchema);
 

@@ -16,6 +16,11 @@ import { getRedisClient } from '@/services/redis.service';
 import waitlistCron from '@/jobs/waitlistCron';
 // ✅ NEW: in-app notification wiring
 import NotificationService, { NotificationType, NotificationChannel } from './notification.service';
+import {
+  acquireBookingLock,
+  releaseBookingLock,
+  invalidateMentorAvailabilityCache,
+} from '@/shared/cache/mentorshipCache';
 
 interface BookingInput {
   mentorId: string;
@@ -50,12 +55,9 @@ const FALLBACK_FRONTEND_URL = 'https://throne8-client-main.vercel.app';
 
 class BookingService {
   async createBooking(input: BookingInput, authToken?: string): Promise<BookingResult> {
-    const lockKey = `booking:lock:${input.mentorId}:${input.scheduledAt.getTime()}`;
-    const lockValue = `${input.menteeId}-${Date.now()}`;
-
-    const redisClient = await getRedisClient();
-    const acquired = await redisClient.set(lockKey, lockValue, 'EX', 60, 'NX');
-    if (!acquired) {
+    const scheduledTimestamp = input.scheduledAt.getTime();
+    const lock = await acquireBookingLock(input.mentorId, scheduledTimestamp, 60000);
+    if (!lock.acquired) {
       throw new ConflictError(
         'This slot is currently being booked by another user. Please try again in a moment.'
       );
@@ -131,6 +133,9 @@ class BookingService {
 
       logger.info(`🎉 Booking completed successfully: ${session._id}`);
 
+      // Invalidate mentor availability cache immediately after booking
+      await invalidateMentorAvailabilityCache(input.mentorId);
+
       return {
         session,
         meetingDetails,
@@ -141,15 +146,8 @@ class BookingService {
       logger.error(`❌ Booking flow failed: ${error.message}`);
       throw error;
     } finally {
-      try {
-        const redisClient = await getRedisClient();
-        const current = await redisClient.get(lockKey);
-        if (current === lockValue) {
-          await redisClient.del(lockKey);
-        }
-      } catch (lockError: any) {
-        logger.warn(`⚠️ Failed to release booking lock: ${lockError.message}`);
-      }
+      // Release lock atomically via Lua script (verifies unique token)
+      await releaseBookingLock(input.mentorId, scheduledTimestamp, lock.token);
     }
   }
 

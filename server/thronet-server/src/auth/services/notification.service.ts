@@ -50,76 +50,59 @@ interface EmailConfig {
   retryDelay: number;
 }
 
-const configuredService = (process.env.EMAIL_SERVICE || 'gmail').toLowerCase().trim();
-const rawApiKey = (process.env.BREVO_API_KEY || '').trim();
-const isSmtpKeyInApiField = rawApiKey.startsWith('xsmtpsib-');
-const hasSmtpCreds = !!(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
+import dotenv from 'dotenv';
 
-// Determine service strategy
-const isExplicitBrevoSmtp = configuredService === 'brevo-smtp' || configuredService === 'brevo_smtp';
-const isExplicitBrevoApi = configuredService === 'brevo-api' || configuredService === 'brevo_api';
-const isBrevoSmart = configuredService === 'brevo';
-
-let activeService = configuredService;
-if (isExplicitBrevoSmtp) {
-  activeService = 'brevo-smtp';
-} else if (isExplicitBrevoApi) {
-  activeService = 'brevo-api';
-} else if (isBrevoSmart) {
-  // If user provided SMTP credentials or placed an xsmtpsib- key in BREVO_API_KEY, use Brevo SMTP
-  activeService = (hasSmtpCreds || isSmtpKeyInApiField) ? 'brevo-smtp' : 'brevo-api';
+// Ensure .env is loaded in all contexts
+if (!process.env.SMTP_USER && !process.env.EMAIL_SERVICE) {
+  dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+  dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
 }
 
-const emailConfig: EmailConfig = {
-  service: activeService,
-  host: process.env.SMTP_HOST || (activeService === 'brevo-smtp' ? 'smtp-relay.brevo.com' : 'smtp.gmail.com'),
-  port: parseInt(process.env.SMTP_PORT || '587', 10),
-  secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
-  auth: {
-    user:
-      activeService === 'sendgrid'
-        ? 'apikey'
-        : process.env.SMTP_USER || process.env.EMAIL_USER || '',
-    pass:
-      activeService === 'sendgrid'
-        ? process.env.SENDGRID_API_KEY || ''
-        : process.env.SMTP_PASSWORD || (isBrevoSmart && isSmtpKeyInApiField ? rawApiKey : '') || process.env.EMAIL_PASSWORD || '',
-  },
-  from: {
-    name: process.env.EMAIL_FROM_NAME || 'Throne8',
-    address: process.env.SMTP_FROM_ADDRESS || process.env.EMAIL_FROM || process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER || '',
-  },
-  apiKey: activeService === 'brevo-api' ? rawApiKey : undefined,
-  maxRetries: 3,
-  retryDelay: 2000, // ms
-};
+function getEmailConfig(): EmailConfig {
+  const configuredService = (process.env.EMAIL_SERVICE || 'gmail').toLowerCase().trim();
+  const rawApiKey = (process.env.BREVO_API_KEY || '').trim();
+  const isSmtpKeyInApiField = rawApiKey.startsWith('xsmtpsib-');
+  const hasSmtpCreds = !!(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
 
-// Initialize SendGrid HTTP API client (bypasses SMTP, which Railway blocks)
-if (emailConfig.service === 'sendgrid' && process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  // Determine service strategy
+  const isExplicitBrevoSmtp = configuredService === 'brevo-smtp' || configuredService === 'brevo_smtp';
+  const isExplicitBrevoApi = configuredService === 'brevo-api' || configuredService === 'brevo_api';
+  const isBrevoSmart = configuredService === 'brevo';
+
+  let activeService = configuredService;
+  if (isExplicitBrevoSmtp) {
+    activeService = 'brevo-smtp';
+  } else if (isExplicitBrevoApi) {
+    activeService = 'brevo-api';
+  } else if (isBrevoSmart) {
+    // If user provided SMTP credentials or placed an xsmtpsib- key in BREVO_API_KEY, use Brevo SMTP
+    activeService = (hasSmtpCreds || isSmtpKeyInApiField) ? 'brevo-smtp' : 'brevo-api';
+  }
+
+  return {
+    service: activeService,
+    host: process.env.SMTP_HOST || (activeService === 'brevo-smtp' ? 'smtp-relay.brevo.com' : 'smtp.gmail.com'),
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
+    auth: {
+      user:
+        activeService === 'sendgrid'
+          ? 'apikey'
+          : process.env.SMTP_USER || process.env.EMAIL_USER || '',
+      pass:
+        activeService === 'sendgrid'
+          ? process.env.SENDGRID_API_KEY || ''
+          : process.env.SMTP_PASSWORD || (isBrevoSmart && isSmtpKeyInApiField ? rawApiKey : '') || process.env.EMAIL_PASSWORD || '',
+    },
+    from: {
+      name: process.env.EMAIL_FROM_NAME || 'Throne8',
+      address: process.env.SMTP_FROM_ADDRESS || process.env.EMAIL_FROM || process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER || '',
+    },
+    apiKey: activeService === 'brevo-api' ? rawApiKey : undefined,
+    maxRetries: 3,
+    retryDelay: 2000, // ms
+  };
 }
-
-// SAFE STARTUP DIAGNOSTICS (No secrets logged)
-const isApiKeyAnSmtpKey = rawApiKey.startsWith('xsmtpsib-');
-const isApiKeyARestKey = rawApiKey.startsWith('xkeysib-');
-console.log('📧 [EMAIL CONFIG LOADED]:', {
-  configuredService,
-  activeService: emailConfig.service,
-  deliveryMethod:
-    emailConfig.service === 'brevo-api'
-      ? 'Brevo REST API (HTTPS)'
-      : emailConfig.service === 'sendgrid'
-      ? 'SendGrid Web API (HTTPS)'
-      : `Nodemailer SMTP (${emailConfig.host}:${emailConfig.port})`,
-  host: emailConfig.service === 'brevo-api' || emailConfig.service === 'sendgrid' ? 'N/A' : emailConfig.host,
-  port: emailConfig.service === 'brevo-api' || emailConfig.service === 'sendgrid' ? 'N/A' : emailConfig.port,
-  from: `${emailConfig.from.name} <${emailConfig.from.address || 'MISSING'}>`,
-  hasSmtpUser: !!emailConfig.auth.user,
-  hasSmtpPass: !!emailConfig.auth.pass,
-  hasBrevoApiKey: !!rawApiKey,
-  brevoApiKeyType: isApiKeyAnSmtpKey ? 'SMTP key (xsmtpsib-...)' : isApiKeyARestKey ? 'REST API key (xkeysib-...)' : rawApiKey ? 'custom/other' : 'none',
-  hasSendGridApiKey: !!process.env.SENDGRID_API_KEY,
-});
 
 interface SMSConfig {
   provider: string;
@@ -132,16 +115,34 @@ interface SMSConfig {
   retryDelay: number;
 }
 
-const smsConfig: SMSConfig = {
-  provider: process.env.SMS_PROVIDER || 'twilio', // 'twilio', 'aws-sns'
-  twilio: {
-    accountSid: process.env.TWILIO_ACCOUNT_SID || '',
-    authToken: process.env.TWILIO_AUTH_TOKEN || '',
-    phoneNumber: process.env.TWILIO_PHONE_NUMBER || '',
-  },
-  maxRetries: 3,
-  retryDelay: 2000, // ms
-};
+function getSMSConfig(): SMSConfig {
+  return {
+    provider: process.env.SMS_PROVIDER || 'twilio', // 'twilio', 'aws-sns'
+    twilio: {
+      accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+      authToken: process.env.TWILIO_AUTH_TOKEN || '',
+      phoneNumber: process.env.TWILIO_PHONE_NUMBER || '',
+    },
+    maxRetries: 3,
+    retryDelay: 2000, // ms
+  };
+}
+
+let emailConfig: EmailConfig = getEmailConfig();
+let smsConfig: SMSConfig = getSMSConfig();
+
+function refreshNotificationConfigs(): void {
+  emailConfig = getEmailConfig();
+  smsConfig = getSMSConfig();
+  if (emailConfig.service === 'sendgrid' && process.env.SENDGRID_API_KEY) {
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  }
+}
+
+// Initialize SendGrid HTTP API client (bypasses SMTP, which Railway blocks)
+if (emailConfig.service === 'sendgrid' && process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+}
 
 // ==================== NOTIFICATION SERVICE CLASS ====================
 
@@ -244,8 +245,14 @@ class NotificationService {
    */
   private static async initializeEmailTransporter(): Promise<void> {
     try {
+      refreshNotificationConfigs();
+
       // DETAILED LOGGING
       LoggerUtil.info('Checking email credentials...', {
+        service: emailConfig.service,
+        host: emailConfig.host,
+        port: emailConfig.port,
+        from: emailConfig.from.address,
         SMTP_USER: process.env.SMTP_USER ? 'Set' : 'Missing',
         SMTP_PASSWORD: process.env.SMTP_PASSWORD ? 'Set' : 'Missing',
         EMAIL_USER: process.env.EMAIL_USER ? 'Set' : 'Missing',
@@ -1339,6 +1346,8 @@ class NotificationService {
     const startTime = Date.now();
 
     try {
+      refreshNotificationConfigs();
+
       // YE CHECK ADD KARO
       if (!this.initialized) {
         LoggerUtil.warn('NotificationService not initialized, initializing now...');
@@ -1499,9 +1508,14 @@ class NotificationService {
       // ==================== END SENDGRID BLOCK ====================
 
       if (!this.emailTransporter) {
-        LoggerUtil.warn('Email transporter not available', { to: options.to });
-        // Return mock success in development
-        if (process.env.NODE_ENV === 'development') {
+        LoggerUtil.warn('Email transporter not available, attempting re-initialization...', { to: options.to });
+        await this.initializeEmailTransporter();
+      }
+
+      if (!this.emailTransporter) {
+        LoggerUtil.warn('Email transporter still not available', { to: options.to });
+        // Return mock success in development / test environments
+        if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
           return { success: true, messageId: 'mock-dev-id', to: options.to, duration: Date.now() - startTime };
         }
         throw new Error('Email service not configured');
@@ -1596,6 +1610,13 @@ class NotificationService {
 
       throw error;
     }
+  }
+
+  /**
+   * Direct email send bypass (used by queue workers to avoid re-queueing)
+   */
+  static async sendEmailDirect(options: EmailOptions): Promise<SendResult> {
+    return this.sendEmail(options);
   }
 
   // ==================== SMS METHODS ====================

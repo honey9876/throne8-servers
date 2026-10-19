@@ -5,7 +5,7 @@
 import { Job } from 'bull';
 import mediaQueue from '../../shared/queues/media.queue';
 import { MediaJobData, MediaJobResult } from '../interfaces';
-import { mediaService } from '@/services';
+import { mediaService } from '../services';
 import logger from '@/shared/logger.util';
 import queueConfig from '@/config/cache/queue';
 

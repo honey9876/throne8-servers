@@ -30,6 +30,20 @@ class SeniorMentorApplicationRepository {
     return application.toObject();
   }
 
+
+  async updateProfilePhotoByUserId(
+    userId: string,
+    photo: { profilePhoto: string; profilePhotoKey: string }
+  ): Promise<any | null> {
+    const application = await SeniorMentorApplication.findOneAndUpdate(
+      { userId, isDeleted: false },
+      { $set: photo },
+      { new: true, runValidators: true }
+    );
+    if (!application) return null;
+    return application.toObject();
+  }
+
   async softDeleteBySeniorMentorId(seniorMentorId: string): Promise<boolean> {
     const application = await SeniorMentorApplication.findOne({
       seniorMentorId,

@@ -106,7 +106,8 @@ export const getAllDoubts = asyncHandler(
       search: search as string,
     };
 
-    const result = await doubtService.getGroupDoubts(groupId, params);
+    const userId = (req as AuthRequest).user?.id || (req as AuthRequest).user?.userId;
+    const result = await doubtService.getGroupDoubts(groupId, params, userId);
 
     return ResponseUtil.success(
       res,

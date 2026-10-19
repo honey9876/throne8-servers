@@ -24,8 +24,8 @@
  * @version 3.3.0
  */
 
-import { createClient, createCluster, RedisClientType, RedisClusterType } from 'redis';
 import { LoggerUtil } from './logger.util';
+import { getRedisClient as getIoredisClient, initRedis, closeRedis } from './cache/redisConnection';
 
 // ==================== CONFIGURATION ====================
 
@@ -54,16 +54,126 @@ const redisConfig: RedisConfig = {
         : [],
 };
 
-// ✅ NEW: max time any single Redis command is allowed to take before
-// we give up on it and fall through to the caller's error handling.
-// This is separate from connectionTimeout (which only guards the
-// initial handshake) — without this, a command sent on a connection
-// that *looks* open but is actually stale/dead can hang forever.
 const COMMAND_TIMEOUT_MS = parseInt(process.env['REDIS_COMMAND_TIMEOUT_MS'] || '4000');
 
-// ==================== REDIS CLIENT ====================
+// ==================== UNIFIED IOREDIS DELEGATE ====================
 
-let redisClient: RedisClientType | RedisClusterType | null = null;
+const getUnifiedClient = () => {
+    return {
+        async setEx(key: string, ttl: number, value: string) {
+            const client = getIoredisClient();
+            if (ttl > 0) {
+                return client.set(key, value, 'EX', ttl);
+            }
+            return client.set(key, value);
+        },
+        async set(key: string, value: string) {
+            return getIoredisClient().set(key, value);
+        },
+        async get(key: string) {
+            return getIoredisClient().get(key);
+        },
+        async del(...keys: string[]) {
+            const client = getIoredisClient();
+            const arr = Array.isArray(keys[0]) ? keys[0] : keys;
+            if (!arr.length) return 0;
+            return client.del(...arr);
+        },
+        async exists(key: string) {
+            return getIoredisClient().exists(key);
+        },
+        async ttl(key: string) {
+            return getIoredisClient().ttl(key);
+        },
+        async incr(key: string) {
+            return getIoredisClient().incr(key);
+        },
+        async decr(key: string) {
+            return getIoredisClient().decr(key);
+        },
+        async expire(key: string, ttl: number) {
+            return getIoredisClient().expire(key, ttl);
+        },
+        async mGet(keys: string[]) {
+            if (!keys.length) return [];
+            return getIoredisClient().mget(...keys);
+        },
+        async sAdd(key: string, members: string | string[]) {
+            const client = getIoredisClient();
+            const arr = Array.isArray(members) ? members : [members];
+            if (!arr.length) return 0;
+            return client.sadd(key, ...arr);
+        },
+        async sRem(key: string, members: string | string[]) {
+            const client = getIoredisClient();
+            const arr = Array.isArray(members) ? members : [members];
+            if (!arr.length) return 0;
+            return client.srem(key, ...arr);
+        },
+        async sMembers(key: string) {
+            return getIoredisClient().smembers(key);
+        },
+        async sIsMember(key: string, member: string) {
+            const res = await getIoredisClient().sismember(key, member);
+            return res === 1;
+        },
+        async sCard(key: string) {
+            return getIoredisClient().scard(key);
+        },
+        async scan(cursor: string | number, options?: { MATCH?: string; COUNT?: number }) {
+            const client = getIoredisClient();
+            const args: any[] = [String(cursor)];
+            if (options?.MATCH) args.push('MATCH', options.MATCH);
+            if (options?.COUNT) args.push('COUNT', options.COUNT);
+            const [nextCursor, keys] = await (client as any).scan(args[0], ...args.slice(1));
+            return { cursor: nextCursor, keys: keys || [] };
+        },
+        async lPush(key: string, value: string | string[]) {
+            const client = getIoredisClient();
+            const arr = Array.isArray(value) ? value : [value];
+            return (client as any).lpush(key, ...arr);
+        },
+        async lTrim(key: string, start: number, stop: number) {
+            return (getIoredisClient() as any).ltrim(key, start, stop);
+        },
+        async lRange(key: string, start: number, stop: number) {
+            return (getIoredisClient() as any).lrange(key, start, stop);
+        },
+        async xAdd(stream: string, id: string, message: Record<string, any>) {
+            const client = getIoredisClient();
+            const args: string[] = [];
+            for (const [k, v] of Object.entries(message)) {
+                args.push(k, String(v));
+            }
+            return (client as any).xadd(stream, id, ...args);
+        },
+        async ping() {
+            return getIoredisClient().ping();
+        },
+        async quit() {
+            return closeRedis();
+        },
+        on(event: string, handler: (...args: any[]) => void) {
+            try { return getIoredisClient().on(event, handler); } catch { return this as any; }
+        },
+        off(event: string, handler: (...args: any[]) => void) {
+            try { return getIoredisClient().off(event, handler); } catch { return this as any; }
+        },
+        once(event: string, handler: (...args: any[]) => void) {
+            try { return getIoredisClient().once(event, handler); } catch { return this as any; }
+        },
+        get isOpen() {
+            try {
+                const s = getIoredisClient().status;
+                return s === 'ready' || s === 'connect';
+            } catch {
+                return false;
+            }
+        }
+    };
+};
+
+const redisClient = getUnifiedClient();
 let isConnected: boolean = false;
 let useRedis: boolean = process.env['USE_REDIS'] !== 'false';
 let connectionAttempted: boolean = false;
@@ -81,6 +191,17 @@ function logRedisError(message: string, metadata?: any): void {
     if (now - lastRedisErrorLogTime >= 30000) {
         lastRedisErrorLogTime = now;
         LoggerUtil.error(message, metadata);
+    }
+}
+
+let lastFallbackLogTime = 0;
+function notifyMemoryFallback(operation: string, key: string): void {
+    const now = Date.now();
+    if (now - lastFallbackLogTime >= 5000) {
+        lastFallbackLogTime = now;
+        LoggerUtil.warn(
+            `🚨 [CRITICAL_CACHE_FALLBACK] CacheUtil running on IN-MEMORY FALLBACK (Redis disconnected). Operations affecting security or correctness (token blacklist, rate limiting, distributed locks) will NOT be shared across cluster instances! Operation: ${operation}, Key: ${key}`
+        );
     }
 }
 
@@ -155,192 +276,63 @@ class CacheUtil {
     // ==================== INITIALIZATION ====================
 
     /**
-     * Initialize Redis Cluster connection with timeout
+     * Initialize connection via unified ioredis connection pool
      */
     static async init(): Promise<boolean> {
+        const rawPrefix = process.env['REDIS_KEY_PREFIX'] || 'auth:';
+        redisConfig.keyPrefix = rawPrefix.endsWith(':') ? rawPrefix : `${rawPrefix}:`;
+        useRedis = process.env['USE_REDIS'] !== 'false';
+
         if (!useRedis) {
             LoggerUtil.info('⚠️ Redis disabled - running in fallback mode (in-memory cache)');
             return false;
         }
 
-        if (connectionAttempted) {
-            LoggerUtil.warn('Redis connection already attempted');
-            return isConnected;
+        if (connectionAttempted && isConnected) {
+            return true;
         }
 
         connectionAttempted = true;
 
-        return new Promise<boolean>((resolve) => {
-            let timeoutId: NodeJS.Timeout;
-            let connected = false;
+        try {
+            await initRedis();
+            const client = getIoredisClient();
+            await client.ping();
+            isConnected = true;
+            LoggerUtil.info('✅ CacheUtil attached to unified ioredis client');
+            return true;
+        } catch (error: any) {
+            LoggerUtil.warn('⚠️ CacheUtil failed to attach to unified Redis, running in fallback mode', { error: error.message });
+            isConnected = false;
+            return false;
+        }
+    }
 
-            const handleTimeout = (): void => {
-                if (!connected) {
-                    LoggerUtil.warn('⏱️ Redis connection timeout - falling back to in-memory cache', {
-                        timeout: redisConfig.connectionTimeout,
-                        host: redisConfig.host,
-                        port: redisConfig.port,
-                    });
+    private static connectionOverride: boolean | null = null;
 
-                    useRedis = false;
-                    isConnected = false;
-
-                    if (redisClient) {
-                        redisClient.quit().catch(() => { });
-                    }
-
-                    resolve(false);
-                }
-            };
-
-            timeoutId = setTimeout(handleTimeout, redisConfig.connectionTimeout);
-
-            try {
-                if (redisConfig.clusterMode) {
-                    redisClient = createCluster({
-                        rootNodes: redisConfig.clusterNodes.map(node => {
-                            const [host, port] = node.split(':');
-                            return {
-                                url: redisConfig.password
-                                    ? `redis://:${encodeURIComponent(redisConfig.password)}@${host}:${port}`
-                                    : `redis://${host}:${port}`,
-                                password: redisConfig.password,
-                            };
-                        }),
-                        defaults: {
-                            password: redisConfig.password,
-                            socket: {
-                                connectTimeout: redisConfig.connectionTimeout,
-                                keepAlive: 5000 as any,
-                                reconnectStrategy: (retries: number): number | false => {
-                                    if (retries > 3) {
-                                        LoggerUtil.warn('Max Redis reconnection attempts reached');
-                                        return false;
-                                    }
-                                    return Math.min(retries * 100, 3000);
-                                },
-                            }
-                        }
-                    });
-                } else {
-                    redisClient = createClient({
-                        socket: {
-                            host: redisConfig.host,
-                            port: redisConfig.port,
-                            connectTimeout: redisConfig.connectionTimeout,
-                            keepAlive: 5000 as any,
-                            reconnectStrategy: (retries: number): number | false => {
-                                if (retries > 3) {
-                                    LoggerUtil.warn('Max Redis reconnection attempts reached');
-                                    return false;
-                                }
-                                return Math.min(retries * 100, 3000);
-                            },
-                        },
-                        password: redisConfig.password,
-                    });
-                }
-
-                redisClient.on('error', (error: Error) => {
-                    logRedisError('Redis client error', {
-                        error: error.message,
-                        code: (error as any).code
-                    });
-
-                    if (!connected) {
-                        clearTimeout(timeoutId);
-                        useRedis = false;
-                        isConnected = false;
-                        resolve(false);
-                    } else {
-                        // ✅ NEW: on a post-connect error, don't just
-                        // flip isConnected=false silently — every
-                        // subsequent call already checks isConnected()
-                        // and falls back to memory cache, but we also
-                        // want commands already in-flight to be caught
-                        // by withTimeout() rather than hang.
-                        isConnected = false;
-                    }
-                });
-
-                redisClient.on('connect', () => {
-                    LoggerUtil.info('Redis connecting...', {
-                        host: redisConfig.host,
-                        port: redisConfig.port,
-                    });
-                });
-
-                redisClient.on('ready', () => {
-                    connected = true;
-                    isConnected = true;
-                    clearTimeout(timeoutId);
-
-                    LoggerUtil.info('✅ Redis connected and ready', {
-                        host: redisConfig.host,
-                        port: redisConfig.port,
-                    });
-
-                    resolve(true);
-                });
-
-                redisClient.on('reconnecting', () => {
-                    LoggerUtil.warn('Redis reconnecting...');
-                    isConnected = false;
-                });
-
-                redisClient.on('end', () => {
-                    LoggerUtil.warn('Redis connection closed');
-                    isConnected = false;
-                });
-
-                redisClient.connect().then(() => {
-                    if (!connected) {
-                        connected = true;
-                        isConnected = true;
-                        clearTimeout(timeoutId);
-
-                        LoggerUtil.info('✅ Redis cluster connected and ready', {
-                            host: redisConfig.host,
-                            port: redisConfig.port,
-                        });
-
-                        resolve(true);
-                    }
-                }).catch((error: Error) => {
-                    if (!connected) {
-                        clearTimeout(timeoutId);
-                        logRedisError('Redis connection failed', {
-                            error: error.message,
-                            code: (error as any).code,
-                        });
-
-                        useRedis = false;
-                        isConnected = false;
-                        resolve(false);
-                    }
-                });
-
-            } catch (error: unknown) {
-                clearTimeout(timeoutId);
-                logRedisError('Redis initialization failed', {
-                    error: (error as Error).message,
-                    stack: (error as Error).stack,
-                });
-
-                useRedis = false;
-                isConnected = false;
-                resolve(false);
-            }
-        });
+    /**
+     * Override connection status for test simulation
+     */
+    static setConnectionOverride(val: boolean | null): void {
+        this.connectionOverride = val;
     }
 
     /**
-     * Check if Redis cluster is connected
+     * Check if Redis is connected
      */
     static isConnected(): boolean {
-        // @ts-ignore
-        const isClientOpen = redisClient?.isOpen ?? (redisClient !== null);
-        return useRedis && isConnected && isClientOpen;
+        if (this.connectionOverride !== null) return this.connectionOverride;
+        if (!useRedis) return false;
+        try {
+            const client = getIoredisClient();
+            if (client.status === 'wait') {
+                client.connect().catch(() => {});
+                return true;
+            }
+            return client.status === 'ready' || client.status === 'connect';
+        } catch {
+            return false;
+        }
     }
 
     // ==================== HEALTH / PING ====================
@@ -397,6 +389,7 @@ class CacheUtil {
                 LoggerUtil.debug('Cache set (Redis)', { key, ttl });
                 return true;
             } else {
+                notifyMemoryFallback('set', key);
                 memoryCache.set(fullKey, {
                     value: serializedValue,
                     expiresAt: ttl > 0 ? Date.now() + (ttl * 1000) : null,
@@ -413,6 +406,7 @@ class CacheUtil {
             if ((error as Error).message?.includes('timed out')) {
                 isConnected = false;
                 LoggerUtil.warn('Cache set timed out — marking Redis unhealthy, falling back to memory', { key });
+                notifyMemoryFallback('set:timeout', key);
                 const fullKey = `${redisConfig.keyPrefix}${key}`;
                 const serializedValue = typeof value === 'string' ? value : JSON.stringify(value);
                 memoryCache.set(fullKey, {
@@ -452,6 +446,7 @@ class CacheUtil {
                 LoggerUtil.debug('Cache miss (Redis)', { key });
                 return null;
             } else {
+                notifyMemoryFallback('get', key);
                 const cached = memoryCache.get(fullKey);
                 if (!cached) {
                     LoggerUtil.debug('Cache miss (memory)', { key });
@@ -775,9 +770,9 @@ class CacheUtil {
                         : JSON.stringify(keyValuePairs[key]);
 
                     if (ttl > 0) {
-                        return (redisClient as RedisClientType).setEx(fullKey, ttl, value);
+                        return (redisClient as any).setEx(fullKey, ttl, value);
                     } else {
-                        return (redisClient as RedisClientType).set(fullKey, value);
+                        return (redisClient as any).set(fullKey, value);
                     }
                 });
 
@@ -819,11 +814,8 @@ class CacheUtil {
     /**
      * Get Redis cluster client instance (use with caution)
      */
-    static getClient(): RedisClientType {
-        if (!this.isConnected() || !redisClient) {
-            throw new Error('Redis client not available - use CacheUtil methods instead');
-        }
-        return redisClient as RedisClientType;
+    static getClient(): any {
+        return getIoredisClient();
     }
 
     // ==================== PIPELINE ====================
@@ -858,7 +850,7 @@ class CacheUtil {
                 if (CacheUtil.isConnected()) {
                     const promises = commands.map(cmd => {
                         const fullKey = `${redisConfig.keyPrefix}${cmd.args[0]}`;
-                        const client = redisClient as RedisClientType;
+                        const client = redisClient as any;
 
                         switch (cmd.method) {
                             case 'incr':
@@ -1653,8 +1645,8 @@ export const initializeRedisClient = async (): Promise<boolean> => {
     return await CacheUtil.init();
 };
 
-export const getRedisClient = (): RedisClientType => {
-    return CacheUtil.getClient();
+export const getRedisClient = (): any => {
+    return getIoredisClient();
 };
 
 // ==================== GRACEFUL SHUTDOWN ====================

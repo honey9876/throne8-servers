@@ -1,4 +1,4 @@
-﻿// src/models/mongodb/WhoViewedProfile.ts
+// src/models/mongodb/WhoViewedProfile.ts
 import { Schema, model, Document, Model, Types, Query, QueryOptions,  } from 'mongoose';  //ToObjectOptions
 import { v4 as uuidv4 } from 'uuid';
 import logger, { LogCategory, PublicLogMetadata } from '@/shared/logger.util';
@@ -274,7 +274,7 @@ WhoViewedProfileSchema.statics.findByViewId = async function (
 ): Promise<IWhoViewedProfile | null> {
   const query = this.findOne({ viewId }).hint({ viewId: 1 }).lean();
   if (projection) query.select(projection);
-  return query.exec();
+  return query.exec() as unknown as IWhoViewedProfile | null;
 };
 
 WhoViewedProfileSchema.statics.findUserViewsPaginated = async function (

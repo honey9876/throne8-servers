@@ -271,10 +271,20 @@ export interface ICompany extends Document {
   subIndustry?: string;
   companyType: CompanyType;
   companySize?: CompanySize;
+  organizationType?: OrganizationType;
+  operatingStatus?: OperatingStatus;
   foundedYear?: number;
   email: string;
   phone: IPhone;
   website?: string;
+  contact?: {
+    email: string;
+    phone: {
+      countryCode?: string;
+      number: string;
+    };
+    website?: string;
+  };
   headquarters: IHeadquarters;
   descriptions: IDescriptions;
   media: IMedia;
@@ -315,9 +325,9 @@ export interface IStatsUpdate {
 }
 
 interface ICompanyMethods {
-  softDelete(): Promise<Document & ICompany>;
-  incrementStat(field: 'followersCount' | 'postsCount' | 'employeesCount'): Promise<Document & ICompany>;
-  decrementStat(field: 'followersCount' | 'postsCount' | 'employeesCount'): Promise<Document & ICompany>;
+  softDelete(): Promise<any>;
+  incrementStat(field: 'followersCount' | 'postsCount' | 'employeesCount'): Promise<any>;
+  decrementStat(field: 'followersCount' | 'postsCount' | 'employeesCount'): Promise<any>;
 }
 
 interface ICompanyModel extends Model<ICompany, Record<string, never>, ICompanyMethods> {
@@ -663,7 +673,7 @@ companySchema.index({ isVerified: 1, status: 1 });
 companySchema.index({ industry: 1, companySize: 1 });
 
 // ==================== PRE-VALIDATE MIDDLEWARE ====================
-companySchema.pre('validate', function (next) {
+companySchema.pre('validate', function (this: any, next) {
   if (this.headquarters) {
     const coords = (this.headquarters as any)?.coordinates?.coordinates;
     const isValid = Array.isArray(coords) &&
@@ -682,7 +692,7 @@ companySchema.pre('validate', function (next) {
 });
 
 // ==================== PRE-SAVE MIDDLEWARE ====================
-companySchema.pre('save', async function (next) {
+companySchema.pre('save', async function (this: any, next) {
   try {
     if (!this.companySlug && this.companyName) {
       this.companySlug = this.companyName
@@ -728,12 +738,16 @@ companySchema.pre('save', async function (next) {
 });
 
 // ==================== POST-SAVE MIDDLEWARE ====================
-companySchema.post('save', async function (doc) {
+companySchema.post('save', async function (doc: any) {
   try {
     await Promise.all([
       CacheUtil.del(`company:${doc.companyId}`),
       CacheUtil.del(`company:slug:${doc.companySlug}`),
     ]);
+    // Invalidate Item K standard public profile cache
+    import('@/shared/cache/feedCompanyCommentCache')
+      .then(({ CompanyCacheRepository }) => CompanyCacheRepository.invalidateCompany(doc.companyId, doc._id ? String(doc._id) : undefined))
+      .catch(() => {});
     logger.info('Document saved', { companyId: doc.companyId });
   } catch (error: any) {
     logger.error('Post-save cache invalidation failed', { companyId: doc.companyId, error });
@@ -741,15 +755,16 @@ companySchema.post('save', async function (doc) {
 });
 
 // ==================== INSTANCE METHODS ====================
-companySchema.methods.softDelete = async function (): Promise<Document & ICompany> {
+companySchema.methods.softDelete = async function (this: any): Promise<any> {
   this.audit.isDeleted = true;
   this.audit.deletedAt = new Date();
   return await this.save();
 };
 
 companySchema.methods.incrementStat = async function (
+  this: any,
   field: 'followersCount' | 'postsCount' | 'employeesCount'
-): Promise<Document & ICompany> {
+): Promise<any> {
   const CompanyModel = this.constructor as any;
   const updated = await CompanyModel.findByIdAndUpdate(
     this._id,
@@ -763,8 +778,9 @@ companySchema.methods.incrementStat = async function (
 };
 
 companySchema.methods.decrementStat = async function (
+  this: any,
   field: 'followersCount' | 'postsCount' | 'employeesCount'
-): Promise<Document & ICompany> {
+): Promise<any> {
   const CompanyModel = this.constructor as any;
   const updated = await CompanyModel.findByIdAndUpdate(
     this._id,

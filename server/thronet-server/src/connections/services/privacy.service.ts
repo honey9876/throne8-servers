@@ -745,15 +745,16 @@
 
 // src/services/privacyService.ts - Production-Ready for 1M+ Users
 
-import logger, { LogCategory } from '../utils/logger';
-import Connection from '../models/mongodb/Connection';
-import ConnectionBlock from '../models/mongodb/ConnectionBlock';
-import WhoViewedProfile from '../models/mongodb/WhoViewedProfile';
-import { createNeo4jSession } from '../config/neo4j';
-import { redisManager } from '../config/redis';
-import environmentConfig from '../config/environment';
-import { ErrorResponse, HttpStatus } from '../utils/response';
-import { ERROR_CODES } from '../utils/constants';
+import { LoggerUtil as logger, LogCategory } from '@/shared/logger.util';
+import Connection from '@/connections/models/Connection';
+import ConnectionBlock from '@/connections/models/ConnectionBlock';
+import WhoViewedProfile from '@/connections/models/WhoViewedProfile';
+import { createNeo4jSession } from '@/config/neo4j/neo4j';
+import redisManager from '@/config/cache/redis.config';
+import environmentConfig from '@/config/environment/environment';
+import { ErrorResponse, HttpStatus } from '@/shared/response.util';
+import constants from '@/shared/constants.util';
+const ERROR_CODES = constants.ERROR_CODES as Record<string, string>;
 import { Session } from 'neo4j-driver';
 
 export interface IPrivacySettings {
@@ -900,9 +901,24 @@ export class PrivacyService {
       if (!this.redisClient) return;
       
       if (pattern.includes('*')) {
-        const keys = await this.redisClient.keys(pattern);
+        let cursor = '0';
+        const keys: string[] = [];
+        do {
+          const [nextCursor, matchedKeys] = await this.redisClient.scan(
+            cursor,
+            'MATCH',
+            pattern,
+            'COUNT',
+            100
+          );
+          cursor = nextCursor;
+          if (matchedKeys && matchedKeys.length > 0) {
+            keys.push(...matchedKeys);
+          }
+        } while (cursor !== '0');
+
         if (keys.length > 0) {
-          await this.redisClient.del(...keys);
+          await Promise.all(keys.map((k: string) => this.redisClient.del(k)));
         }
       } else {
         await this.redisClient.del(pattern);

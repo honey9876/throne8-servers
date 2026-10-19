@@ -20,6 +20,7 @@ import redisConfig from '@/config/cache/redis.config';
 import CacheUtil from '@/shared/cache.util';
 import Group from '../models/Group.model';
 import GroupMember from '../models/GroupMember.model';
+import { StudyAnalyticsCacheRepository } from '@/shared/cache/studyCache';
 
 /**
  * ========================================
@@ -32,7 +33,7 @@ export const UserAnalytics = {
    * Get comprehensive user statistics
    */
   getUserStats: async (userId: string) => {
-    try {
+    return StudyAnalyticsCacheRepository.getUserStats(userId, async () => {
       LoggerUtil.info(`Fetching user statistics for: ${userId}`);
 
       const [
@@ -138,17 +139,14 @@ export const UserAnalytics = {
           categoryRank: ranking?.categoryRank || {},
         },
       };
-    } catch (error: any) {
-      LoggerUtil.error(`Error fetching user stats for ${userId}:`, error.message);
-      throw error;
-    }
+    });
   },
 
   /**
    * Get study patterns and trends
    */
   getStudyPatterns: async (userId: string, days: number = 30) => {
-    try {
+    return StudyAnalyticsCacheRepository.getStudyPatterns(userId, days, async () => {
       LoggerUtil.info(`Analyzing study patterns for: ${userId} (${days} days)`);
 
       const startDate = new Date();
@@ -247,10 +245,7 @@ export const UserAnalytics = {
           totalDaysAnalyzed: days,
         },
       };
-    } catch (error: any) {
-      LoggerUtil.error(`Error analyzing study patterns for ${userId}:`, error.message);
-      throw error;
-    }
+    });
   },
 
   /**

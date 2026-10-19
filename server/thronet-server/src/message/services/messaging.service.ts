@@ -33,6 +33,7 @@ import { conversationRepo, messageRepo } from '../repository/messaging.repositor
 // `messageRepo.attachReply()` / `messageRepo.editText()`, swap these calls out to keep
 // everything going through the repository layer.
 import Message from '../models/messaging.model';
+import { ChatCacheRepository } from '@/shared/cache/chatCache';
 
 // ==================== HELPERS ====================
 
@@ -156,6 +157,12 @@ class MessageService {
             conversationRepo.incrementUnreadForRecipients(conversationObjectId, senderUserId),
         ]);
 
+        // Invalidate conversation & unread caches for all members
+        const convForInvalidation = await conversationRepo.findByUUID(dto.conversationId);
+        if (convForInvalidation?.members) {
+            await ChatCacheRepository.invalidateUser(convForInvalidation.members);
+        }
+
         // Step 8: real-time emit to everyone in the conversation room
         const socketPayload: SocketNewMessage = {
             messageId: message.messageId,
@@ -232,6 +239,10 @@ class MessageService {
                 message.conversationId as Types.ObjectId,
                 message
             );
+        }
+
+        if (conv?.members) {
+            await ChatCacheRepository.invalidateUser(conv.members);
         }
 
         const socketPayload: SocketEditedMessage = {
@@ -354,6 +365,9 @@ class MessageService {
             conversationRepo.resetUnreadCount(conversationObjectId, readerUserId),
         ]);
 
+        // Invalidate reader's conversation & unread count cache
+        await ChatCacheRepository.invalidateUser(readerUserId);
+
         if (modifiedCount === 0) return;
 
         // Emit seen event to all conversation members
@@ -415,9 +429,15 @@ class MessageService {
     // ── 7. GET CONVERSATION LIST ────────────────────────────────────────────────
 
     async getConversations(userId: string): Promise<ConversationResponse[]> {
+        // Try cache first
+        const cached = await ChatCacheRepository.getConversations(userId);
+        if (cached) {
+            return cached as ConversationResponse[];
+        }
+
         const conversations = await conversationRepo.findByUserId(userId);
 
-        return conversations.map((conv) => {
+        const result: ConversationResponse[] = conversations.map((conv) => {
             const unreadCount = (conv.unreadCounts as Map<string, number>)?.get?.(userId) ?? 0;
 
             return {
@@ -440,6 +460,32 @@ class MessageService {
                 createdAt: new Date(conv.createdAt).toISOString(),
             };
         });
+
+        // Set conversation cache
+        await ChatCacheRepository.setConversations(userId, result);
+
+        // Sum total unread and set unread cache
+        const totalUnread = result.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
+        await ChatCacheRepository.setUnreadCount(userId, totalUnread);
+
+        return result;
+    }
+
+    async getUnreadCount(userId: string): Promise<number> {
+        const cached = await ChatCacheRepository.getUnreadCount(userId);
+        if (cached !== null) {
+            return cached;
+        }
+
+        const conversations = await conversationRepo.findByUserId(userId);
+        let total = 0;
+        for (const conv of conversations) {
+            const unread = (conv.unreadCounts as Map<string, number>)?.get?.(userId) ?? 0;
+            total += Math.max(0, unread);
+        }
+
+        await ChatCacheRepository.setUnreadCount(userId, total);
+        return total;
     }
 
     // ── 8. GET OR CREATE DIRECT CONVERSATION ────────────────────────────────────
@@ -557,13 +603,16 @@ class MessageService {
 
         await messageRepo.softDelete(messageId, userId);
 
-        // Notify conversation room
+        const conv = await conversationRepo.findByUUID(
+            message.conversationId.toString()
+        );
+        if (conv?.members) {
+            await ChatCacheRepository.invalidateUser(conv.members);
+        }
+
         try {
             const { getIO } = await import('../../socket');
             const io = getIO();
-            const conv = await conversationRepo.findByUUID(
-                message.conversationId.toString()
-            );
             io.to(`conversation:${conv?.conversationId}`).emit('message:deleted', {
                 messageId,
                 deletedAt: new Date().toISOString(),

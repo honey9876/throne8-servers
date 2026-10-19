@@ -254,7 +254,7 @@ class NotificationJob {
 
       for (const job of recentJobs) {
         try {
-          const company = job.company as unknown as ICompanyDocument;
+          const company = (job as any).company as unknown as ICompanyDocument;
 
           // Find users following companies in same industry with job notifications enabled
           const companiesInIndustry = await Company.find({

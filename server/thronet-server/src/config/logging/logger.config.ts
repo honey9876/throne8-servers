@@ -14,18 +14,30 @@ import * as fs from 'fs';
 // ==================== CONFIGURATION ====================
 
 const logLevel: string = process.env['LOG_LEVEL'] || 'info';
-const logFileEnabled: boolean = process.env['LOG_FILE_ENABLED'] === 'true';
-const logDir: string = process.env['LOG_DIR'] || path.join(__dirname, '../../../logs');
+const rawLogFileEnabled: boolean = process.env['LOG_FILE_ENABLED'] === 'true';
+const configuredLogDir: string = process.env['LOG_DIR'] || path.join(__dirname, '../../../logs');
 const environment: string = process.env['NODE_ENV'] || 'development';
 
 // ==================== ENSURE LOG DIRECTORY EXISTS ====================
+let logDir = configuredLogDir;
+let logFileEnabled = rawLogFileEnabled;
 
-if (logFileEnabled && !fs.existsSync(logDir)) {
+if (logFileEnabled) {
     try {
-        fs.mkdirSync(logDir, { recursive: true });
-        console.log(`✅ Log directory created: ${logDir}`);
-    } catch (error: any) {
-        console.error(`❌ Failed to create log directory: ${logDir}`, error);
+        if (!fs.existsSync(logDir)) {
+            fs.mkdirSync(logDir, { recursive: true });
+        }
+    } catch {
+        // Fallback to local logs directory if container path (/app/logs) is inaccessible
+        const fallbackDir = path.join(__dirname, '../../../logs');
+        try {
+            if (!fs.existsSync(fallbackDir)) {
+                fs.mkdirSync(fallbackDir, { recursive: true });
+            }
+            logDir = fallbackDir;
+        } catch {
+            logFileEnabled = false;
+        }
     }
 }
 

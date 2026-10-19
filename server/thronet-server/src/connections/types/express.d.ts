@@ -27,7 +27,7 @@ declare global {
       email?: string;
       isAdmin?: boolean;
       region?: string;
-      role: 'user' | 'admin';
+      role: 'user' | 'admin' | 'moderator' | 'super_admin';
       [key: string]: any;
     }
   }

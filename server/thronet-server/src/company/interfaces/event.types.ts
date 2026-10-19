@@ -6,7 +6,8 @@ import { Types } from 'mongoose';
 // Event enums and types
 export type EventType = 'Conference' | 'Workshop' | 'Seminar' | 'Webinar' | 'Meetup' | 'Training' | 'Other';
 export type EventMode = 'Online' | 'Offline' | 'Hybrid';
-export type EventStatus = 'Upcoming' | 'Ongoing' | 'Completed' | 'Cancelled';
+import { EventStatus } from './common.types';
+export { EventStatus };
 
 // Speaker embedded object
 export interface ISpeaker {

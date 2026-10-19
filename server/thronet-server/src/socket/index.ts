@@ -22,11 +22,10 @@ import { handleChatEvents } from '@/StudyGroup/socket/chatHandler';
 import { liveRoomHandler } from '@/StudyGroup/socket/liveRoomHandler';
 import { handlePresenceEvents } from '@/StudyGroup/socket/presenceHandler';
 import { setupStudyGroupSessionHandlers } from '@/StudyGroup/socket/socket';
-// upar baaki imports ke saath:
-
-import { AuthenticatedSocket } from './types';
 export type { AuthenticatedSocket } from './types';
+export { getIO, emitToUser, setIO } from './emitter';
 import { setIO } from './emitter';
+import { setupSocketAdapter, SocketPresenceRepository } from '@/shared/cache/socketCache';
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
 // app.ts jaisi logic: production me sirf CORS_ORIGIN / ALLOWED_ORIGINS wali list.
@@ -78,6 +77,11 @@ export const initializeSocketIO = (httpServer: HTTPServer): Server => {
     maxHttpBufferSize: 1e6, // 1 MB
   });
 
+  // Attach Redis adapter with kill switch and fail-open in-memory fallback
+  setupSocketAdapter(io).catch((err) => {
+    LoggerUtil.warn('setupSocketAdapter failed during startup', { error: err.message });
+  });
+
   // ── Optional handlers: sirf enabled features ke liye load honge ─────────────
   /* eslint-disable @typescript-eslint/no-var-requires */
   const connectionHandlers = FEATURES.connections
@@ -112,7 +116,7 @@ export const initializeSocketIO = (httpServer: HTTPServer): Server => {
   });
 
   // ── Connection ───────────────────────────────────────────────────────────────
-  io.on('connection', (socket: AuthenticatedSocket) => {
+  io.on('connection', (socket: any) => {
     const userId = socket.data.userId;
 
     // Guard — middleware ne unauthenticated sockets reject kar diye honge,
@@ -135,6 +139,35 @@ export const initializeSocketIO = (httpServer: HTTPServer): Server => {
     // Server-side join, taaki notifications delivery client pe depend na kare.
     socket.join(`user:${userId}`);
 
+    // Multi-tab/device safe presence registration in Redis SET
+    SocketPresenceRepository.registerSocket(userId, socket.id)
+      .then(({ isFirstSocket }) => {
+        if (isFirstSocket && presence) {
+          io.to(`user:${userId}:contacts`).emit('user-status-changed', {
+            userId,
+            isOnline: true,
+            lastActive: new Date(),
+          });
+          // Debounced cluster-wide MongoDB write (max once per 60s)
+          SocketPresenceRepository.acquireLastActiveLock(userId)
+            .then((acquired) => {
+              if (acquired) {
+                const { User } = require('@/auth/models');
+                User.findByIdAndUpdate(userId, { lastActive: new Date() }).catch(() => {});
+              }
+            })
+            .catch(() => {});
+        }
+      })
+      .catch((err) => {
+        LoggerUtil.warn('Presence registration failed (non-critical)', { error: err.message, userId });
+      });
+
+    // Heartbeat listener to refresh TTL
+    socket.on('presence:heartbeat', () => {
+      SocketPresenceRepository.heartbeat(userId, socket.id).catch(() => {});
+    });
+
     // ── Core handlers (hamesha on) ───────────────────────────────────────────
     setupNotificationHandlers(io, socket);
     setupMentorshipHandlers(io, socket);
@@ -146,21 +179,37 @@ export const initializeSocketIO = (httpServer: HTTPServer): Server => {
     setupStudyGroupSessionHandlers(io!, socket, userId);
 
     // ── Disconnect ───────────────────────────────────────────────────────────
-    socket.on('disconnect', (reason) => {
+    socket.on('disconnect', (reason: any) => {
       LoggerUtil.info('Socket disconnected', {
         socketId: socket.id,
         userId,
         reason,
       });
 
-      // Offline status broadcast sirf tab jab presence feature chalu ho
-      if (presence) {
-        io.to(`user:${userId}:contacts`).emit('user-status-changed', {
-          userId,
-          isOnline: false,
-          lastActive: new Date(),
+      // Deregister socket from Redis presence.
+      // User is offline ONLY when their last socket across all tabs/devices is gone.
+      SocketPresenceRepository.deregisterSocket(socket.id, userId)
+        .then(({ isLastSocket }) => {
+          if (isLastSocket && presence) {
+            io.to(`user:${userId}:contacts`).emit('user-status-changed', {
+              userId,
+              isOnline: false,
+              lastActive: new Date(),
+            });
+            // Debounced MongoDB write
+            SocketPresenceRepository.acquireLastActiveLock(userId)
+              .then((acquired) => {
+                if (acquired) {
+                  const { User } = require('@/auth/models');
+                  User.findByIdAndUpdate(userId, { lastActive: new Date() }).catch(() => {});
+                }
+              })
+              .catch(() => {});
+          }
+        })
+        .catch((err) => {
+          LoggerUtil.warn('Presence deregistration failed (non-critical)', { error: err.message, userId });
         });
-      }
     });
   });
 

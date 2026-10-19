@@ -26,16 +26,13 @@ class ActivityMediaService {
                 correlationId,
             });
 
-            const posts = await Post.find({
-                userId,
-                isDeleted: false,
-                'images.0': { $exists: true },
-            }).select('postId title images createdAt');
+            const doc = await Post.findOne({ userId });
+            const entries = (doc?.posts || []).filter(p => !p.isDeleted);
 
-            const allImages = posts.flatMap(post =>
-                post.images.map(image => ({
-                    ...image,
-                    postId: post.postId,
+            const allImages = entries.flatMap(post =>
+                (post.images || []).map((image: any) => ({
+                    ...(image.toObject ? image.toObject() : image),
+                    postId: post.entryId,
                     postTitle: post.title,
                 }))
             );
@@ -73,16 +70,13 @@ class ActivityMediaService {
                 correlationId,
             });
 
-            const posts = await Post.find({
-                userId,
-                isDeleted: false,
-                'videos.0': { $exists: true },
-            }).select('postId title videos createdAt');
+            const doc = await Post.findOne({ userId });
+            const entries = (doc?.posts || []).filter(p => !p.isDeleted);
 
-            const allVideos = posts.flatMap(post =>
-                post.videos.map(video => ({
-                    ...video,
-                    postId: post.postId,
+            const allVideos = entries.flatMap(post =>
+                (post.videos || []).map((video: any) => ({
+                    ...(video.toObject ? video.toObject() : video),
+                    postId: post.entryId,
                     postTitle: post.title,
                 }))
             );
@@ -120,16 +114,13 @@ class ActivityMediaService {
                 correlationId,
             });
 
-            const posts = await Post.find({
-                userId,
-                isDeleted: false,
-                'documents.0': { $exists: true },
-            }).select('postId title documents createdAt');
+            const doc = await Post.findOne({ userId });
+            const entries = (doc?.posts || []).filter(p => !p.isDeleted);
 
-            const allDocuments = posts.flatMap(post =>
-                post.documents.map(document => ({
-                    ...document,
-                    postId: post.postId,
+            const allDocuments = entries.flatMap(post =>
+                (post.documents || []).map((document: any) => ({
+                    ...(document.toObject ? document.toObject() : document),
+                    postId: post.entryId,
                     postTitle: post.title,
                 }))
             );
@@ -177,7 +168,7 @@ class ActivityMediaService {
                 ...images.images,
                 ...videos.videos,
                 ...documents.documents,
-            ].reduce((sum, media) => sum + (media.fileSize || 0), 0);
+            ].reduce((sum: number, media: any) => sum + (media.fileSize || 0), 0);
 
             LoggerUtil.info('All user media fetched successfully', {
                 userId,
@@ -222,34 +213,42 @@ class ActivityMediaService {
                 correlationId,
             });
 
-            const post = await Post.findOne({
-                postId,
-                isDeleted: false,
-            }).select('postId title images videos documents createdAt');
+            const doc = await Post.findOne({
+                'posts.entryId': postId,
+            });
 
+            if (!doc) {
+                throw new Error('Post not found');
+            }
+
+            const post = doc.posts.find(p => p.entryId === postId && !p.isDeleted);
             if (!post) {
                 throw new Error('Post not found');
             }
 
+            const images = post.images || [];
+            const videos = post.videos || [];
+            const documents = post.documents || [];
+
             LoggerUtil.info('Post media fetched successfully', {
                 postId,
-                imageCount: post.images.length,
-                videoCount: post.videos.length,
-                documentCount: post.documents.length,
+                imageCount: images.length,
+                videoCount: videos.length,
+                documentCount: documents.length,
                 correlationId,
             });
 
             return {
-                postId: post.postId,
+                postId: post.entryId,
                 postTitle: post.title,
-                images: post.images,
-                videos: post.videos,
-                documents: post.documents,
+                images,
+                videos,
+                documents,
                 stats: {
-                    totalImages: post.images.length,
-                    totalVideos: post.videos.length,
-                    totalDocuments: post.documents.length,
-                    totalMedia: post.images.length + post.videos.length + post.documents.length,
+                    totalImages: images.length,
+                    totalVideos: videos.length,
+                    totalDocuments: documents.length,
+                    totalMedia: images.length + videos.length + documents.length,
                 },
             };
 
@@ -276,46 +275,42 @@ class ActivityMediaService {
                 correlationId,
             });
 
-            const post = await Post.findOne({
-                userId,
-                isDeleted: false,
-                $or: [
-                    { 'images.mediaId': mediaId },
-                    { 'videos.mediaId': mediaId },
-                    { 'documents.mediaId': mediaId },
-                ],
-            });
+            const doc = await Post.findOne({ userId });
 
-            if (!post) {
+            if (!doc) {
                 throw new Error('Media not found');
             }
 
-            let media = null;
-            let mediaType = null;
+            let foundMedia: any = null;
+            let mediaType: string | null = null;
+            let parentPost: any = null;
 
-            // Search in images
-            media = post.images.find(img => img.mediaId === mediaId);
-            if (media) {
-                mediaType = 'image';
-            }
-
-            // Search in videos
-            if (!media) {
-                media = post.videos.find(vid => vid.mediaId === mediaId);
-                if (media) {
+            for (const p of doc.posts || []) {
+                if (p.isDeleted) continue;
+                const img = (p.images || []).find((m: any) => m.mediaId === mediaId);
+                if (img) {
+                    foundMedia = img;
+                    mediaType = 'image';
+                    parentPost = p;
+                    break;
+                }
+                const vid = (p.videos || []).find((m: any) => m.mediaId === mediaId);
+                if (vid) {
+                    foundMedia = vid;
                     mediaType = 'video';
+                    parentPost = p;
+                    break;
                 }
-            }
-
-            // Search in documents
-            if (!media) {
-                media = post.documents.find(doc => doc.mediaId === mediaId);
-                if (media) {
+                const d = (p.documents || []).find((m: any) => m.mediaId === mediaId);
+                if (d) {
+                    foundMedia = d;
                     mediaType = 'document';
+                    parentPost = p;
+                    break;
                 }
             }
 
-            if (!media) {
+            if (!foundMedia || !parentPost) {
                 throw new Error('Media not found');
             }
 
@@ -327,10 +322,10 @@ class ActivityMediaService {
             });
 
             return {
-                ...media,
+                ...(foundMedia.toObject ? foundMedia.toObject() : foundMedia),
                 mediaType,
-                postId: post.postId,
-                postTitle: post.title,
+                postId: parentPost.entryId,
+                postTitle: parentPost.title,
             };
 
         } catch (error: any) {

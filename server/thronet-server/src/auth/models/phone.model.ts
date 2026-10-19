@@ -1,4 +1,4 @@
-﻿import mongoose, { Document, Model, Schema } from 'mongoose';
+import mongoose, { Document, Model, Schema } from 'mongoose';
 import crypto from 'crypto';
 import { LoggerUtil as logger } from '@/shared/logger.util';
 import AuditLog from '@/auth/models/AuditLog.model';
@@ -10,6 +10,8 @@ export interface IOTPMetadata {
     ipAddress?: string;
     userAgent?: string;
     deviceId?: string;
+    resend?: boolean;
+    [key: string]: any;
 }
 
 export interface IPhoneOTPVerification extends Document {

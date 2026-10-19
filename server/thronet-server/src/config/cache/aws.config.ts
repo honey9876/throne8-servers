@@ -1,5 +1,13 @@
-//aws service of sharred services
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
+// AWS service of shared services
+// S3 is optional: media is served via Cloudinary, so a missing AWS config is not an error.
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  HeadBucketCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import config from '../env/env';
 import { logger } from '@/shared/logger.util';
@@ -25,15 +33,18 @@ class AWSService {
 
   private initialize(): void {
     try {
-      // Check if AWS credentials are configured
-      if (!config.AWS_ACCESS_KEY_ID || !config.AWS_SECRET_ACCESS_KEY || !config.AWS_REGION) {
-        logger.warn('⚠️  AWS S3 not configured. File uploads will be disabled.');
-        logger.warn('Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, and AWS_S3_BUCKET in .env');
+      // Not configured: skip silently (Cloudinary handles uploads)
+      if (
+        !config.AWS_ACCESS_KEY_ID ||
+        !config.AWS_SECRET_ACCESS_KEY ||
+        !config.AWS_REGION ||
+        !config.AWS_S3_BUCKET
+      ) {
         this.isConfigured = false;
+        logger.debug('AWS S3 not configured, skipping S3 initialization');
         return;
       }
 
-      // Initialize S3 client
       this.s3Client = new S3Client({
         region: config.AWS_REGION,
         credentials: {
@@ -43,13 +54,12 @@ class AWSService {
       });
 
       this.isConfigured = true;
-      logger.info('✅ AWS S3 initialized successfully');
+      logger.info('AWS S3 initialized successfully');
     } catch (error: any) {
       logger.error('Failed to initialize AWS S3:', error);
       this.isConfigured = false;
     }
   }
-
 
   /**
    * Check if AWS S3 is configured
@@ -76,23 +86,20 @@ class AWSService {
         throw new Error('S3 bucket not configured');
       }
 
-      // Generate unique file key
       const timestamp = Date.now();
       const folder = options.folder || 'uploads';
       const key = `${folder}/${timestamp}-${fileName}`;
 
-      // Upload command
       const command = new PutObjectCommand({
         Bucket: bucket,
         Key: key,
         Body: file,
         ContentType: options.contentType || 'application/octet-stream',
-        ACL: options.acl as any || 'private',
+        ACL: (options.acl as any) || 'private',
       });
 
       await this.s3Client.send(command);
 
-      // Construct URL
       const url = `https://${bucket}.s3.${config.AWS_REGION}.amazonaws.com/${key}`;
 
       logger.info(`File uploaded to S3: ${key}`);
@@ -132,12 +139,12 @@ class AWSService {
         throw new Error('S3 bucket not configured');
       }
 
-      const command = new DeleteObjectCommand({
-        Bucket: bucket,
-        Key: key,
-      });
-
-      await this.s3Client.send(command);
+      await this.s3Client.send(
+        new DeleteObjectCommand({
+          Bucket: bucket,
+          Key: key,
+        })
+      );
 
       logger.info(`File deleted from S3: ${key}`);
     } catch (error: any) {
@@ -198,12 +205,12 @@ class AWSService {
         return false;
       }
 
-      const command = new GetObjectCommand({
-        Bucket: bucket,
-        Key: key,
-      });
-
-      await this.s3Client.send(command);
+      await this.s3Client.send(
+        new HeadObjectCommand({
+          Bucket: bucket,
+          Key: key,
+        })
+      );
       return true;
     } catch (error: any) {
       return false;
@@ -224,12 +231,12 @@ class AWSService {
         throw new Error('S3 bucket not configured');
       }
 
-      const command = new GetObjectCommand({
-        Bucket: bucket,
-        Key: key,
-      });
-
-      const response = await this.s3Client.send(command);
+      const response = await this.s3Client.send(
+        new HeadObjectCommand({
+          Bucket: bucket,
+          Key: key,
+        })
+      );
 
       return {
         contentType: response.ContentType,
@@ -243,39 +250,25 @@ class AWSService {
     }
   }
 
-
   /**
    * Verify S3 connection
    */
   async verifyS3Connection(): Promise<boolean> {
-    // const client = getS3Client();
-    const client = this.s3Client;
-
-    if (!client) {
-      logger.warn('⚠️  S3 Client not initialized - skipping connection test');
+    if (!this.s3Client || !config.AWS_S3_BUCKET) {
+      logger.debug('S3 client not initialized, skipping connection test');
       return false;
     }
 
     try {
-      // Try to list buckets to verify connection
-      // const { HeadBucketCommand } = await import('@aws-sdk/client-s3');
-      // Dynamic import hata do, seedha use karo
-      await this.s3Client?.send(new HeadBucketCommand({ Bucket: config.AWS_S3_BUCKET }));
-      await client.send(
-        new HeadBucketCommand({
-          // Bucket: getS3Bucket(),
-          Bucket: config.AWS_S3_BUCKET,
-        })
-      );
+      await this.s3Client.send(new HeadBucketCommand({ Bucket: config.AWS_S3_BUCKET }));
 
-      logger.info('✅ AWS S3 connection verified');
+      logger.info('AWS S3 connection verified');
       return true;
     } catch (error: any) {
-      logger.error('❌ AWS S3 connection failed:', error);
+      logger.error('AWS S3 connection failed:', error);
       return false;
     }
-  };
-
+  }
 
   /**
    * Generate S3 file URL

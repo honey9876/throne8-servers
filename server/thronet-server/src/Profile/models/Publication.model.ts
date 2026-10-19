@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Publication Model - User Publications Management
  * Stores research papers, articles, books, conference papers
  * 
@@ -538,6 +538,10 @@ PublicationSchema.statics.getNextDisplayOrder = async function (userId: string):
 };
 
 // ==================== EXPORT ====================
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(PublicationSchema, 'userId');
 
 const Publication = mongoose.model<IPublication, IPublicationModel>('Publication', PublicationSchema);
 export default Publication;

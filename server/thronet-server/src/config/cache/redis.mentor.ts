@@ -19,18 +19,50 @@ export const initRedis = (): Redis => {
     }
 
     // Check if Redis is configured
-    if (!config.REDIS_HOST) {
+    if (!config.REDIS_HOST && !process.env['REDIS_URL']) {
       logger.warn('⚠️  Redis not configured. Using mock Redis.');
       return createMockRedis();
     }
 
+    let host = config.REDIS_HOST || '127.0.0.1';
+    let port = config.REDIS_PORT || 6379;
+    let username = process.env['REDIS_USERNAME'] || process.env['REDIS_USER'] || undefined;
+    let password = config.REDIS_PASSWORD || undefined;
+    let db = config.REDIS_DB || 0;
+    let tls: Record<string, any> | undefined = undefined;
+
+    const rawUrl = process.env['REDIS_URL'];
+    if (rawUrl && !rawUrl.includes('${')) {
+      try {
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol === 'rediss:') tls = {};
+        if (parsed.hostname) host = parsed.hostname;
+        if (parsed.port) port = parseInt(parsed.port, 10);
+        if (parsed.username) username = decodeURIComponent(parsed.username);
+        if (parsed.password) password = decodeURIComponent(parsed.password);
+        if (parsed.pathname && parsed.pathname.length > 1) {
+          const parsedDb = parseInt(parsed.pathname.slice(1), 10);
+          if (!isNaN(parsedDb)) db = parsedDb;
+        }
+      } catch {}
+    }
+
+    if (process.env['REDIS_TLS'] === 'true') {
+      tls = {};
+    }
+
+    const family = process.env['REDIS_FAMILY'] !== undefined ? parseInt(process.env['REDIS_FAMILY'], 10) : 0;
+
     // Create connection pool for high concurrency
     for (let i = 0; i < POOL_SIZE; i++) {
       const client = new Redis({
-        host: config.REDIS_HOST,
-        port: config.REDIS_PORT || 6379,
-        password: config.REDIS_PASSWORD,
-        db: config.REDIS_DB || 0,
+        host,
+        port,
+        ...(username ? { username } : {}),
+        password,
+        db,
+        family,
+        ...(tls ? { tls } : {}),
         connectTimeout: 10000,        // ✅ Connection timeout
         maxRetriesPerRequest: 3,
         enableReadyCheck: true,

@@ -50,17 +50,51 @@ class RedisConfigManager {
                 return { host, port: parseInt(port || '6379') };
             });
 
+        let host = process.env.REDIS_HOST || 'localhost';
+        let port = parseInt(process.env.REDIS_PORT || '6379');
+        let username = process.env.REDIS_USERNAME || process.env.REDIS_USER || undefined;
+        let password = process.env.REDIS_PASSWORD || undefined;
+        let db = parseInt(process.env.REDIS_DB || '0');
+        let tls: Record<string, any> | undefined = undefined;
+
+        const rawUrl = process.env.REDIS_URL;
+        if (rawUrl && !rawUrl.includes('${')) {
+            try {
+                const parsed = new URL(rawUrl);
+                if (parsed.protocol === 'rediss:') tls = {};
+                if (parsed.hostname) host = parsed.hostname;
+                if (parsed.port) port = parseInt(parsed.port, 10);
+                if (parsed.username) username = decodeURIComponent(parsed.username);
+                if (parsed.password) password = decodeURIComponent(parsed.password);
+                if (parsed.pathname && parsed.pathname.length > 1) {
+                    const parsedDb = parseInt(parsed.pathname.slice(1), 10);
+                    if (!isNaN(parsedDb)) db = parsedDb;
+                }
+            } catch {}
+        }
+
+        if (process.env.REDIS_TLS === 'true') {
+            tls = {};
+        }
+
+        const family = process.env.REDIS_FAMILY !== undefined ? parseInt(process.env.REDIS_FAMILY, 10) : 0;
+
         const redisOptions: RedisOptions = {
-            password: process.env.REDIS_PASSWORD || undefined,
-            db: parseInt(process.env.REDIS_DB || '0'),
+            host,
+            port,
+            ...(username ? { username } : {}),
+            password,
+            db,
+            family,
+            ...(tls ? { tls } : {}),
             // ==================== CONNECTION SETTINGS ====================
             enableReadyCheck: true,
             enableOfflineQueue: true,
             lazyConnect: false,
 
             // Timeouts
-            connectTimeout: parseInt(process.env.REDIS_CONNECTION_TIMEOUT || '60000'),
-            commandTimeout: parseInt(process.env.REDIS_COMMAND_TIMEOUT || '10000'),
+            connectTimeout: parseInt(process.env.REDIS_CONNECTION_TIMEOUT || process.env.REDIS_CONNECT_TIMEOUT_MS || '60000'),
+            commandTimeout: parseInt(process.env.REDIS_COMMAND_TIMEOUT || process.env.REDIS_COMMAND_TIMEOUT_MS || '30000'),
             keepAlive: 30000,
 
             maxRetriesPerRequest: parseInt(process.env.REDIS_MAX_RETRIES || '3'),
@@ -87,7 +121,7 @@ class RedisConfigManager {
             },
 
             // Network settings
-            family: 4,
+            // family: 4, // Commented out to support both IPv4 (local) and IPv6 (Railway internal network)
             noDelay: true,
             enableAutoPipelining: true,
 
@@ -116,8 +150,8 @@ class RedisConfigManager {
 
         const standaloneOptions: RedisOptions = {
             ...redisOptions,
-            host: process.env.REDIS_HOST || 'localhost',
-            port: parseInt(process.env.REDIS_PORT || '6379'),
+            host: redisOptions.host,
+            port: redisOptions.port,
         };
 
         logger.info(`⚙️ [REDIS CONFIG] ${clusterMode ? 'Cluster' : 'standalone'} configuration initialized`, {
@@ -206,6 +240,20 @@ class RedisConfigManager {
             await this.client.quit();
             this.client = null;
             logger.info('✅ [REDIS] Client disconnected gracefully');
+        }
+    }
+
+    /**
+     * Check Redis connection health
+     */
+    public async checkHealth(): Promise<{ status: string; latency?: number; connected: boolean; healthyConnections: number }> {
+        try {
+            const client = await this.getRedisClient();
+            const start = Date.now();
+            await client.ping();
+            return { status: 'healthy', latency: Date.now() - start, connected: true, healthyConnections: 1 };
+        } catch {
+            return { status: 'unhealthy', connected: false, healthyConnections: 0 };
         }
     }
 

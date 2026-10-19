@@ -39,6 +39,9 @@ class EmailConfiguration {
     const fromName = config.EMAIL_FROM_NAME || 'Throne8';
     const fromEmail = config.SMTP_FROM_ADDRESS || config.EMAIL_FROM || '';
 
+    const rawApiKey = (config.BREVO_API_KEY || process.env.BREVO_API_KEY || '').trim();
+    const isSmtpKeyInApiField = rawApiKey.startsWith('xsmtpsib-');
+
     // ── 1. Explicit Brevo SMTP ──────────────────────────────────────────
     if (rawService === 'brevo-smtp' || rawService === 'brevo_smtp') {
       return {
@@ -48,7 +51,7 @@ class EmailConfiguration {
         secure: config.SMTP_SECURE === 'true',
         auth: {
           user: config.SMTP_USER || '',
-          pass: config.SMTP_PASSWORD || '',
+          pass: config.SMTP_PASSWORD || (isSmtpKeyInApiField ? rawApiKey : ''),
         },
         apiKey: undefined,
         from: {
@@ -146,12 +149,12 @@ class EmailConfiguration {
         port: 587,
         secure: false, // true for 465, false for other ports
         auth: {
-          user: config.EMAIL_USER || '',
-          pass: config.EMAIL_PASSWORD || '',
+          user: config.EMAIL_USER || config.SMTP_USER || '',
+          pass: config.EMAIL_PASSWORD || config.SMTP_PASSWORD || '',
         },
         from: {
           name: fromName,
-          email: config.EMAIL_FROM || config.EMAIL_USER || '',
+          email: config.EMAIL_FROM || config.SMTP_FROM_ADDRESS || config.EMAIL_USER || config.SMTP_USER || '',
         },
         templates: {
           enabled: true,

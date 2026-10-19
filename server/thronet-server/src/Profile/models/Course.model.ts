@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Course Model - User Courses and Certifications
  * Stores courses, certificates, associated skills, and completion details
  * 
@@ -394,6 +394,10 @@ CourseSchema.statics.reorderCourses = async function (userId: string, courseIds:
 };
 
 // ==================== EXPORT ====================
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(CourseSchema, 'userId');
 
 const Course = mongoose.model<ICourse, ICourseModel>('Course', CourseSchema);
 export default Course;

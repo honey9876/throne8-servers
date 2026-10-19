@@ -8,7 +8,7 @@
  * @version 3.0.0
  */
 
-import { registry } from '@/kafka/schemas/index';
+import { registry } from '@/shared/kafka/schemas/index';
 import LoggerUtil from '@/shared/logger.util';
 
 // ==================== INTERFACES ====================

@@ -255,24 +255,6 @@ class EventService {
     }
   }
 
-  // =====================================================
-  // DELETE EVENT (ObjectId aayega middleware se)
-  // =====================================================
-  async deleteEvent(objectId: string): Promise<void> {
-    try {
-      const event = await eventRepository.findByObjectId(objectId);
-      if (!event) throw new Error('Event not found');
-
-      await eventRepository.deleteByObjectId(objectId);
-
-      await CacheUtil.del(`${this.CACHE_PREFIX}${objectId}`);
-      const companyId = this.extractCompanyId(event.company);
-      if (companyId) await CacheUtil.clearByPattern(`${this.CACHE_PREFIX}company:${companyId}:*`);
-    } catch (error: any) {
-      logger.error(`Error deleting event ${objectId}:`, error);
-      throw error;
-    }
-  }
 
   // =====================================================
   // SEARCH EVENTS

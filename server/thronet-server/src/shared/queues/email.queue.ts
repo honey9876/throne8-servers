@@ -1,138 +1,212 @@
-// // ============================================
-// // Email Queue Definition
-// // ============================================
+/**
+ * email.queue.ts
+ * BullMQ Email Queue Implementation
+ * 
+ * Rules:
+ * - Queue isolation: Uses dedicated Redis instance via getQueueConnectionConfig() (REDIS_QUEUE_URL)
+ * - Deduplication Policy:
+ *   - Only deduplicate when the caller explicitly passes an `idempotencyKey` or custom `jobId`.
+ *   - For OTP emails, include `otpRecordId` / `otpId` or creation timestamp/nonce so resends always generate a new job.
+ *   - For non-OTP emails without idempotency keys, generate a unique ID (UUID/random).
+ *   - NEVER use a 1-minute time bucket for non-OTP emails (it silently drops distinct emails).
+ * - Fallback: If queue is disabled (CACHE_QUEUE_EMAIL_ENABLED=false) or Redis fails, fall back to NotificationService.sendEmail.
+ */
 
-// import Queue from 'bull';
-// import { queueConfig } from '@/config/cache/queue';
-// import logger from '@/shared/logger.util';
-// import { EmailJobData, EmailJobResult } from '@/company/interfaces';
+import { Queue, QueueOptions, JobsOptions } from 'bullmq';
+import crypto from 'crypto';
+import { LoggerUtil } from '@/shared/logger.util';
+import { getQueueConnectionConfig, maskEmail } from './queueConnection';
+import NotificationService from '@/auth/services/notification.service';
 
-// // Create Email Queue
-// export const emailQueue = new Queue<EmailJobData>(
-//   queueConfig.bull.queues.email.name,
-//   {
-//     redis: queueConfig.bull.redis,
-//     defaultJobOptions: queueConfig.bull.defaultJobOptions,
-//     limiter: queueConfig.bull.queues.email.limiter,
-//   }
-// );
+export interface EmailJobPayload {
+  to: string | string[];
+  subject: string;
+  template?: string;
+  html?: string;
+  text?: string;
+  data?: Record<string, any>;
+  priority?: number;
+  delay?: number;
+  jobId?: string;
+  idempotencyKey?: string;
+  otpRecordId?: string;
+  expiresAt?: number;
+  [key: string]: any;
+}
 
-// // =====================================================
-// // Queue Event Handlers
-// // =====================================================
+export interface QueueEmailResult {
+  success: boolean;
+  jobId?: string;
+  queuedAt: string;
+  messageId?: string;
+}
 
-// emailQueue.on('error', (error) => {
-//   logger.error('Email Queue Error:', error.message, error.stack);
-// });
+const QUEUE_NAME = 'email-queue';
 
-// emailQueue.on('waiting', (jobId) => {
-//   logger.debug(`Email job ${jobId} is waiting`);
-// });
+const defaultJobOptions: JobsOptions = {
+  attempts: 3,
+  backoff: {
+    type: 'exponential',
+    delay: 1000,
+  },
+  removeOnComplete: {
+    age: 86400, // 24 hours
+    count: 10000,
+  },
+  removeOnFail: {
+    age: 7 * 86400, // 7 days retention
+  },
+};
 
-// emailQueue.on('active', (job) => {
-//   logger.info(`Processing email job ${job.id}`, {
-//     type: job.data.type,
-//     to: job.data.to,
-//   });
-// });
+let emailQueueInstance: Queue<EmailJobPayload> | null = null;
 
-// emailQueue.on('completed', (job, result: EmailJobResult) => {
-//   logger.info(`Email job ${job.id} completed`, {
-//     type: job.data.type,
-//     success: result.success,
-//     messageId: result.messageId,
-//   });
-// });
+export function getEmailQueue(): Queue<EmailJobPayload> {
+  if (!emailQueueInstance) {
+    const connection = getQueueConnectionConfig();
+    emailQueueInstance = new Queue<EmailJobPayload>(QUEUE_NAME, {
+      connection,
+      defaultJobOptions,
+    });
+  }
+  return emailQueueInstance;
+}
 
-// emailQueue.on('failed', (job, error) => {
-//   logger.error(`Email job ${job?.id} failed`, {
-//     type: job?.data?.type,
-//     error: error.message,
-//     attempts: job?.attemptsMade,
-//   });
-// });
+/**
+ * Generate jobId according to strict deduplication policy:
+ * 1. Caller explicit idempotencyKey -> 'idem:<key>'
+ * 2. Caller explicit jobId -> '<jobId>'
+ * 3. OTP emails with otpId/otpRecordId/nonce -> unique to that OTP record
+ * 4. General emails without explicit idempotency -> strictly unique ID
+ */
+export function generateEmailJobId(data: EmailJobPayload): string {
+  if (data.idempotencyKey) {
+    return `idem_${data.idempotencyKey}`;
+  }
+  if (data.jobId) {
+    return data.jobId;
+  }
+  // OTP emails: check for otpId / otpRecordId in data or payload
+  const otpId = data.otpRecordId || data.data?.otpId || data.data?.otpRecordId;
+  if (otpId) {
+    const toStr = Array.isArray(data.to) ? data.to.join(',') : data.to;
+    return `otp_${toStr}_${otpId}`;
+  }
+  if (data.data?.createdAt) {
+    const toStr = Array.isArray(data.to) ? data.to.join(',') : data.to;
+    return `otp_${toStr}_${data.data.createdAt}_${crypto.randomBytes(4).toString('hex')}`;
+  }
 
-// emailQueue.on('stalled', (job) => {
-//   logger.warn(`Email job ${job.id} stalled`);
-// });
+  // Non-OTP emails without idempotency key:
+  // Strictly unique identifier (NO 1-minute bucket) to prevent dropping distinct emails
+  return `email_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+}
 
-// // =====================================================
-// // Helper Functions
-// // =====================================================
+/**
+ * Enqueue email with fail-safe direct delivery fallback
+ */
+export async function enqueueEmail(data: EmailJobPayload): Promise<QueueEmailResult> {
+  const isQueueEnabled = process.env['CACHE_QUEUE_EMAIL_ENABLED'] !== 'false';
 
-// /**
-//  * Add email job to queue
-//  */
-// export async function addEmailJob(
-//   data: EmailJobData,
-//   options?: {
-//     priority?: number;
-//     delay?: number;
-//     attempts?: number;
-//   }
-// ): Promise<void> {
-//   try {
-//     await emailQueue.add(data, {
-//       priority: options?.priority || queueConfig.priorities.normal,
-//       delay: options?.delay,
-//       attempts: options?.attempts || 3,
-//     });
+  // Kill-switch fallback: send directly
+  if (!isQueueEnabled) {
+    LoggerUtil.info('[EmailQueue] Queue disabled by kill switch, sending directly', {
+      to: maskEmail(data.to),
+    });
+    const directResult = await NotificationService.sendEmail({
+      to: Array.isArray(data.to) ? data.to[0]! : data.to,
+      subject: data.subject,
+      template: data.template,
+      html: data.html,
+      text: data.text,
+      data: data.data,
+    });
+    return {
+      success: directResult.success,
+      queuedAt: new Date().toISOString(),
+      messageId: directResult.messageId,
+    };
+  }
 
-//     logger.info('Email job added to queue', {
-//       type: data.type,
-//       to: data.to,
-//     });
-//   } catch (error: any) {
-//     logger.error('Failed to add email job to queue', error);
-//     throw error;
-//   }
-// }
+  try {
+    const queue = getEmailQueue();
+    const computedJobId = generateEmailJobId(data);
 
-// /**
-//  * Get queue stats
-//  */
-// export async function getEmailQueueStats() {
-//   const [waiting, active, completed, failed, delayed] = await Promise.all([
-//     emailQueue.getWaitingCount(),
-//     emailQueue.getActiveCount(),
-//     emailQueue.getCompletedCount(),
-//     emailQueue.getFailedCount(),
-//     emailQueue.getDelayedCount(),
-//   ]);
+    // Calculate OTP expiry timestamp from creation time if expiryMinutes or expiresAt is provided
+    let expiresAt = data.expiresAt;
+    if (!expiresAt && data.data?.expiryMinutes) {
+      expiresAt = Date.now() + Number(data.data.expiryMinutes) * 60 * 1000;
+    }
 
-//   return {
-//     waiting,
-//     active,
-//     completed,
-//     failed,
-//     delayed,
-//     paused: await emailQueue.isPaused(),
-//   };
-// }
+    const payload: EmailJobPayload = {
+      ...data,
+      expiresAt,
+    };
 
-// /**
-//  * Clean old jobs
-//  */
-// export async function cleanEmailQueue() {
-//   await emailQueue.clean(3600000, 'completed'); // Remove completed jobs older than 1 hour
-//   await emailQueue.clean(86400000, 'failed'); // Remove failed jobs older than 24 hours
-//   logger.info('Email queue cleaned');
-// }
+    const job = await queue.add('send-email', payload, {
+      jobId: computedJobId,
+      priority: data.priority ?? 5,
+      delay: data.delay ?? 0,
+    });
 
-// /**
-//  * Pause queue
-//  */
-// export async function pauseEmailQueue() {
-//   await emailQueue.pause();
-//   logger.info('Email queue paused');
-// }
+    LoggerUtil.info('[EmailQueue] Email job enqueued successfully', {
+      jobId: job.id,
+      to: maskEmail(data.to),
+      subject: data.subject,
+      template: data.template,
+    });
 
-// /**
-//  * Resume queue
-//  */
-// export async function resumeEmailQueue() {
-//   await emailQueue.resume();
-//   logger.info('Email queue resumed');
-// }
+    return {
+      success: true,
+      jobId: job.id,
+      queuedAt: new Date().toISOString(),
+    };
+  } catch (error: any) {
+    LoggerUtil.error('[EmailQueue] Enqueue failed, falling back to direct send', {
+      error: error.message,
+      to: maskEmail(data.to),
+    });
 
-// export default emailQueue;
+    // Fallback: never drop an email if BullMQ Redis is down
+    try {
+      const directResult = await NotificationService.sendEmail({
+        to: Array.isArray(data.to) ? data.to[0]! : data.to,
+        subject: data.subject,
+        template: data.template,
+        html: data.html,
+        text: data.text,
+        data: data.data,
+      });
+      return {
+        success: directResult.success,
+        queuedAt: new Date().toISOString(),
+        messageId: directResult.messageId,
+      };
+    } catch (directErr: any) {
+      LoggerUtil.error('[EmailQueue] Direct send fallback also failed', {
+        error: directErr.message,
+      });
+      throw directErr;
+    }
+  }
+}
+
+export async function closeEmailQueue(): Promise<void> {
+  if (emailQueueInstance) {
+    await emailQueueInstance.close();
+    emailQueueInstance = null;
+  }
+}
+
+// For legacy code compatibility
+export const emailQueue = {
+  add: async (nameOrData: any, maybeData?: any) => {
+    const payload = maybeData || nameOrData;
+    return enqueueEmail(payload);
+  },
+  process: (_concurrencyOrHandler: any, _maybeHandler?: any) => {
+    // BullMQ processing is handled in worker.ts
+  },
+  close: closeEmailQueue,
+};
+
+export default emailQueue;

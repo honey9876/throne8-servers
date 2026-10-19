@@ -208,7 +208,7 @@ export const checkDuplicateApplicationController = withQualityContext('duplicate
   if (error) throw new ValidationError('Invalid duplicate application input', error.details);
 
   const { jobId } = value;
-  const userId = req.user!.userId;
+  const userId = req.user!.userId || req.user!.id || '';
   const sanitizedJobId = validId(sanitizeInput(jobId));
 
   const cacheKey = `duplicate_application:${userId}:${sanitizedJobId}`;
@@ -230,7 +230,7 @@ export const checkDuplicateApplicationController = withQualityContext('duplicate
     await CacheUtil.expire(rateLimitKey, RATE_LIMITS.DUPLICATE_APPLICATION.windowMs / 1000);
 
     const duplicateCheck = await qualityTrustService.checkDuplicateApplication({
-      userId: userId || req.user!.userId,
+      userId: userId || req.user?.userId || req.user?.id || '',
       jobId: sanitizedJobId.toString(),
       requestId: generateSecureId(),
     });

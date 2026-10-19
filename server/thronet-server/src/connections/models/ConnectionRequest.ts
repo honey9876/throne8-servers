@@ -513,11 +513,26 @@ ConnectionRequestSchema.statics.bulkUpdateStatus = async function (
     updateDoc.$set.isRead = true;
   }
 
+  const affectedDocs = await this.find(filter).select('fromUserId toUserId').lean().catch(() => []);
+
   const result = await this.updateMany(
     filter,
     updateDoc,
     { writeConcern: { w: 'majority' } }
   );
+
+  try {
+    const { ConnectionCacheRepository } = await import('@/shared/cache/connectionCache');
+    for (const doc of affectedDocs) {
+      if (status === 'cancelled') {
+        await ConnectionCacheRepository.handleRequestCancelled(String(doc.fromUserId), String(doc.toUserId));
+      } else if (status === 'declined') {
+        await ConnectionCacheRepository.handleRequestRejected(String(doc.fromUserId), String(doc.toUserId));
+      }
+    }
+  } catch {
+    // fail-safe
+  }
 
   logger.info('Bulk request status update completed', {
     data: {

@@ -1,19 +1,13 @@
 /**
  * audit.producer.ts
  * Redis Streams based Audit Event Producer
- * Drop-in replacement for Kafka-based AuditProducer
- *
- * Why Redis Streams (not Pub/Sub)?
- * - Messages persist even if consumer is down
- * - Audit logs kabhi lose nahi honge
- * - Consumer groups support (future scaling)
- * - Kafka jaise semantics, lekin zero extra infra
+ * Works with both node-redis (xAdd/lTrim) and ioredis (xadd/ltrim) clients.
  *
  * Stream key: "audit:events"
  * Max stream length: 10,000 entries (MAXLEN trimming)
  *
  * @module shared/kafka/producers/audit.producer
- * @version 4.0.0 (Redis Streams)
+ * @version 4.1.0 (Redis Streams, client-agnostic)
  */
 
 import CacheUtil from '@/shared/cache.util';
@@ -35,70 +29,100 @@ export interface AuditEvent {
 // ==================== CONSTANTS ====================
 
 const AUDIT_STREAM_KEY = 'audit:events';
-const AUDIT_STREAM_MAXLEN = 10_000; // Max entries in stream (auto-trimmed)
-const AUDIT_FALLBACK_KEY = 'audit:fallback:queue'; // In-memory fallback list
+const AUDIT_STREAM_MAXLEN = 10_000;
+const AUDIT_FALLBACK_KEY = 'audit:fallback:queue';
+const AUDIT_FALLBACK_MAXLEN = 1000;
+
+const keyPrefix = (): string => process.env['REDIS_KEY_PREFIX'] || 'auth:';
+
+// ==================== CLIENT COMPAT HELPERS ====================
+
+/**
+ * XADD with MAXLEN trimming for node-redis or ioredis.
+ */
+async function streamAdd(
+  client: any,
+  key: string,
+  fields: Record<string, string>
+): Promise<void> {
+  // node-redis v4+
+  if (typeof client.xAdd === 'function') {
+    await client.xAdd(key, '*', fields, {
+      TRIM: {
+        strategy: 'MAXLEN',
+        strategyModifier: '~',
+        threshold: AUDIT_STREAM_MAXLEN,
+      },
+    });
+    return;
+  }
+
+  // ioredis
+  if (typeof client.xadd === 'function') {
+    const flat: string[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      flat.push(k, v);
+    }
+    await client.xadd(key, 'MAXLEN', '~', AUDIT_STREAM_MAXLEN, '*', ...flat);
+    return;
+  }
+
+  throw new Error('Redis client does not support streams (no xAdd/xadd)');
+}
+
+/**
+ * LTRIM for node-redis or ioredis.
+ */
+async function listTrim(client: any, key: string, start: number, stop: number): Promise<void> {
+  if (typeof client.lTrim === 'function') {
+    await client.lTrim(key, start, stop);
+    return;
+  }
+  if (typeof client.ltrim === 'function') {
+    await client.ltrim(key, start, stop);
+    return;
+  }
+  throw new Error('Redis client does not support LTRIM (no lTrim/ltrim)');
+}
+
+function toFields(event: AuditEvent): Record<string, string> {
+  return {
+    eventId: String(event.eventId || ''),
+    userId: String(event.userId ?? 'anonymous'),
+    action: String(event.action || 'unknown'),
+    ipAddress: String(event.ipAddress || 'unknown'),
+    status: String(event.status || 'SUCCESS'),
+    severity: String(event.severity || 'LOW'),
+    timestamp: String(event.timestamp || new Date().toISOString()),
+    metadata: event.metadata ? JSON.stringify(event.metadata) : '{}',
+  };
+}
 
 // ==================== AUDIT PRODUCER CLASS ====================
 
 class AuditProducer {
-  /**
-   * connect() — No-op for Redis.
-   * Kept for API compatibility with old Kafka-based code.
-   * Redis connection is managed by CacheUtil globally.
-   */
+  /** No-op, Redis connection is managed by CacheUtil. Kept for API compatibility. */
   static async connect(): Promise<void> {
-    // No connection needed — CacheUtil handles Redis lifecycle
-    LoggerUtil.debug('[AuditProducer] connect() called — no-op (Redis managed by CacheUtil)');
+    LoggerUtil.debug('[AuditProducer] connect() called - no-op (Redis managed by CacheUtil)');
   }
 
-  /**
-   * disconnect() — No-op for Redis.
-   * Kept for API compatibility with old Kafka-based code.
-   */
+  /** No-op, kept for API compatibility. */
   static async disconnect(): Promise<void> {
-    // No disconnect needed
-    LoggerUtil.debug('[AuditProducer] disconnect() called — no-op (Redis managed by CacheUtil)');
+    LoggerUtil.debug('[AuditProducer] disconnect() called - no-op (Redis managed by CacheUtil)');
   }
 
   /**
-   * sendAuditEvent()
-   * Publishes an audit event to Redis Stream.
-   *
-   * Falls back to in-memory Redis list if stream write fails.
-   * All fields are stored as flat string key-value pairs
-   * (Redis Streams requirement).
-   *
-   * @param event AuditEvent
+   * Publishes an audit event to the Redis Stream.
+   * Falls back to a bounded Redis list if the stream write fails.
+   * Never throws: audit must not crash the main flow.
    */
   static async sendAuditEvent(event: AuditEvent): Promise<void> {
-    try {
-      // Redis Streams require flat string key-value fields. Ensure no undefined/null values
-      const fields: Record<string, string> = {
-        eventId: String(event.eventId || ''),
-        userId: String(event.userId ?? 'anonymous'),
-        action: String(event.action || 'unknown'),
-        ipAddress: String(event.ipAddress || 'unknown'),
-        status: String(event.status || 'SUCCESS'),
-        severity: String(event.severity || 'LOW'),
-        timestamp: String(event.timestamp || new Date().toISOString()),
-        metadata: event.metadata ? JSON.stringify(event.metadata) : '{}',
-      };
+    const fields = toFields(event);
 
+    try {
       if (CacheUtil.isConnected()) {
-        // Write to Redis Stream with auto-trimming at MAXLEN
         const client = CacheUtil.getClient();
-        await client.xAdd(
-          `${process.env['REDIS_KEY_PREFIX'] || 'auth:'}${AUDIT_STREAM_KEY}`,
-          '*', // Auto-generate stream entry ID
-          fields,
-          {
-            TRIM: {
-              strategy: 'MAXLEN',
-              strategyModifier: '~', // Approximate trimming (faster)
-              threshold: AUDIT_STREAM_MAXLEN,
-            },
-          }
-        );
+        await streamAdd(client, `${keyPrefix()}${AUDIT_STREAM_KEY}`, fields);
 
         LoggerUtil.debug('[AuditProducer] Event written to Redis Stream', {
           action: event.action,
@@ -106,8 +130,6 @@ class AuditProducer {
           severity: event.severity,
         });
       } else {
-        // Fallback: write to Redis list (simpler, no stream needed)
-        // Consumer can drain this list separately
         await this._fallbackWrite(fields);
       }
     } catch (error: any) {
@@ -117,20 +139,9 @@ class AuditProducer {
         userId: event.userId,
       });
 
-      // Last resort: try fallback list
       try {
-        await this._fallbackWrite({
-          eventId: String(event.eventId || ''),
-          userId: String(event.userId ?? 'anonymous'),
-          action: String(event.action || 'unknown'),
-          ipAddress: String(event.ipAddress || 'unknown'),
-          status: String(event.status || 'SUCCESS'),
-          severity: String(event.severity || 'LOW'),
-          timestamp: String(event.timestamp || new Date().toISOString()),
-          metadata: event.metadata ? JSON.stringify(event.metadata) : '{}',
-        });
+        await this._fallbackWrite(fields);
       } catch (fallbackError: any) {
-        // Silently swallow — audit must never crash the main flow
         LoggerUtil.error('[AuditProducer] Fallback write also failed (non-critical)', {
           error: fallbackError.message,
         });
@@ -139,23 +150,27 @@ class AuditProducer {
   }
 
   /**
-   * _fallbackWrite()
-   * Writes event as JSON to a Redis list as a last resort.
-   * Consumer can drain this separately.
+   * Writes the event as JSON to a bounded Redis list.
    * @private
    */
   private static async _fallbackWrite(fields: Record<string, string>): Promise<void> {
     const serialized = JSON.stringify({ ...fields, _fallback: true });
     await CacheUtil.lpush(AUDIT_FALLBACK_KEY, serialized);
 
-    // Keep fallback list bounded (max 1000 entries)
-    const client = CacheUtil.getClient();
-    if (CacheUtil.isConnected()) {
-      await client.lTrim(
-        `${process.env['REDIS_KEY_PREFIX'] || 'auth:'}${AUDIT_FALLBACK_KEY}`,
-        0,
-        999
-      );
+    // Trimming is best-effort: a trim failure must not make the write look failed
+    try {
+      if (CacheUtil.isConnected()) {
+        await listTrim(
+          CacheUtil.getClient(),
+          `${keyPrefix()}${AUDIT_FALLBACK_KEY}`,
+          0,
+          AUDIT_FALLBACK_MAXLEN - 1
+        );
+      }
+    } catch (trimError: any) {
+      LoggerUtil.warn('[AuditProducer] Fallback list trim failed (non-critical)', {
+        error: trimError.message,
+      });
     }
 
     LoggerUtil.warn('[AuditProducer] Event written to fallback list', {
@@ -165,16 +180,3 @@ class AuditProducer {
 }
 
 export default AuditProducer;
-
-
-
-
-
-
-
-
-
-
-
-
-

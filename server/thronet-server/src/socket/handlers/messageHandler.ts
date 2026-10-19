@@ -61,8 +61,13 @@ export const setupMessageHandlers = (io: Server, socket: AuthenticatedSocket) =>
      */
     socket.on(
         'message:typing',
-        (data: { conversationId: string; isTyping: boolean }) => {
+        async (data: { conversationId: string; isTyping: boolean }) => {
             if (!data?.conversationId) return;
+
+            try {
+                const { ChatCacheRepository } = await import('@/shared/cache/chatCache');
+                await ChatCacheRepository.setTyping(data.conversationId, userId, !!data.isTyping);
+            } catch (_) { }
 
             socket.to(`conversation:${data.conversationId}`).emit('message:typing', {
                 conversationId: data.conversationId,

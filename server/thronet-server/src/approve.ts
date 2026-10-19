@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { randomUUID } from 'crypto';
-
-const MONGODB_URI = 'mongodb+srv://throne8pvtltd_db_user:Thronet2026Prodapp@throne8-application.cdl2zj5.mongodb.net/thronet_production?retryWrites=true&w=majority&appName=Throne8-Application';
+import 'dotenv/config';
+const MONGODB_URI = process.env.MONGODB_URI as string;
 
 // Schemas
 const applicationSchema = new mongoose.Schema({},{ strict: false });

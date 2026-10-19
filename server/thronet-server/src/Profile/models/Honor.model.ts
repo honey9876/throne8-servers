@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Honor Model - User Honors & Awards Management
  * Stores awards, recognitions, achievements with verification
  * 
@@ -517,6 +517,10 @@ HonorSchema.statics.getNextDisplayOrder = async function (userId: string): Promi
 };
 
 // ==================== EXPORT ====================
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(HonorSchema, 'userId');
 
 const Honor = mongoose.model<IHonor, IHonorModel>('Honor', HonorSchema);
 export default Honor;

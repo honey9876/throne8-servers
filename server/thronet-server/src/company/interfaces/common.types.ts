@@ -95,19 +95,7 @@ export enum EventStatus {
   SCHEDULED = 'Scheduled',
 }
 
-export enum JobStatus {
-  OPEN = 'Open',
-  CLOSED = 'Closed',
-  ON_HOLD = 'On Hold',
-}
-
-export enum ApplicationStatus {
-  APPLIED = 'Applied',
-  SHORTLISTED = 'Shortlisted',
-  REJECTED = 'Rejected',
-  ACCEPTED = 'Accepted',
-  PENDING = 'PENDING',
-}
+export { JobStatus, ApplicationStatus } from '@/Job-Service/models/Job.model';
 
 export enum AdminRole {
   SUPER_ADMIN = 'SuperAdmin',

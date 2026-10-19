@@ -23,6 +23,7 @@ import {
 import { AppError, NotFoundError } from '@/shared/errors/app.error';
 import { LoggerUtil } from '@/shared/logger.util';
 import { SessionStatus } from '../interfaces/IStudySession';
+import { LeaderboardCacheRepository } from '@/shared/cache/studyCache';
 
 // FIX: Proper type for populated ranking
 interface PopulatedRankingUser {
@@ -75,6 +76,19 @@ class RankingService {
 
       // pre-save rankScore calculate karega
       await ranking.save();
+
+      // Sync Redis leaderboard sorted sets accelerator
+      try {
+        await LeaderboardCacheRepository.updateUserScore(
+          userId,
+          ranking.rankScore,
+          ranking.category as string,
+          ranking.weeklyHours,
+          ranking.monthlyHours
+        );
+      } catch (cacheErr: any) {
+        LoggerUtil.warn('Failed to update leaderboard cache on ranking change', { userId, error: cacheErr.message });
+      }
 
       LoggerUtil.info(`Updated ranking metrics for user: ${userId}`);
       return ranking;
@@ -159,6 +173,15 @@ class RankingService {
         this.recalculateCategoryRanks(),
         this.recalculateCityRanks(),
       ]);
+
+      // Rebuild Redis leaderboard sorted sets from authoritative MongoDB truth
+      try {
+        await LeaderboardCacheRepository.rebuildAllLeaderboards();
+      } catch (cacheErr: any) {
+        LoggerUtil.warn('Failed to rebuild leaderboard sorted sets after recalculation', {
+          error: cacheErr.message,
+        });
+      }
 
       const timeTaken = Date.now() - startTime;
       LoggerUtil.info(
@@ -249,11 +272,22 @@ class RankingService {
 
     const user = ranking.userId;
 
+    // Check Redis leaderboard sorted set accelerator
+    let globalRank = ranking.globalRank;
+    try {
+      const cachedRank = await LeaderboardCacheRepository.getUserGlobalRank(userId);
+      if (cachedRank && cachedRank.rank > 0) {
+        globalRank = cachedRank.rank;
+      }
+    } catch {
+      // Fallback to MongoDB ranking.globalRank
+    }
+
     return {
       userId: user._id,
       userName: user.name,
       userAvatar: user.avatar,
-      globalRank: ranking.globalRank,
+      globalRank,
       categoryRank: ranking.categoryRank,
       groupRank: ranking.groupRank,
       cityRank: ranking.cityRank,

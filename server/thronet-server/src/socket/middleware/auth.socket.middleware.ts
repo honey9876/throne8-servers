@@ -1,3 +1,4 @@
+import { getAccessTokenFromCookieHeader } from '@/shared/utils/authCookies.util';
 import { Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { ErrorResponse, HttpStatus } from '@/shared/response.util';
@@ -16,9 +17,11 @@ interface DecodedToken {
 export const socketAuthMiddleware = async (socket: Socket, next: (err?: any) => void) => {
     try {
         // ✅ Extract token from handshake auth or query
+        // (falls back to the httpOnly access cookie sent with the handshake)
         const token =
             socket.handshake.auth?.token ||
-            socket.handshake.headers?.authorization?.replace('Bearer ', '');
+            socket.handshake.headers?.authorization?.replace('Bearer ', '') ||
+            getAccessTokenFromCookieHeader(socket.handshake.headers?.cookie);
 
         if (!token) {
             return next(new ErrorResponse('Authentication token required', HttpStatus.UNAUTHORIZED));

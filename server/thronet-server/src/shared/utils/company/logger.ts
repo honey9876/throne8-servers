@@ -8,9 +8,18 @@ const LOG_DIR = process.env.LOG_DIR || './logs';
 const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
 
 // Create logs directory if it doesn't exist
-const logsPath = path.resolve(LOG_DIR);
-if (!fs.existsSync(logsPath)) {
-  fs.mkdirSync(logsPath, { recursive: true });
+let logsPath = path.resolve(LOG_DIR);
+try {
+  if (!fs.existsSync(logsPath)) {
+    fs.mkdirSync(logsPath, { recursive: true });
+  }
+} catch {
+  logsPath = path.resolve('./logs');
+  if (!fs.existsSync(logsPath)) {
+    try {
+      fs.mkdirSync(logsPath, { recursive: true });
+    } catch {}
+  }
 }
 
 // Define log format

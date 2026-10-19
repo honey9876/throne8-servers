@@ -1,17 +1,9 @@
 import { Response, NextFunction, Request } from 'express';
-import followService from '../services/Compnayfollow.service';
+import followService from '../services/companyfollow.service';
 import { ErrorResponse, HttpStatus, SuccessResponse } from '@/shared/response.util';
 import { asyncHandler } from '@/shared/utils/helpers.util';
 
-interface AuthRequest extends Request {
-    user?: {
-        id: string;
-        userId?: string;
-        isAdmin: boolean;
-        email: string;
-        role: 'user' | 'admin';
-    };
-}
+type AuthRequest = Request;
 
 class companyfollowController {
 

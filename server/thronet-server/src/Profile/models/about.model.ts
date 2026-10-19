@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { LoggerUtil } from '@/shared/logger.util';
 
@@ -225,6 +225,10 @@ AboutSchema.statics.findActiveById = async function (
         throw error;
     }
 };
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(AboutSchema, 'userId');
 
 const About = mongoose.model<IAbout, IAboutModel>('About', AboutSchema);
 export default About;

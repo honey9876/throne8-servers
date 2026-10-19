@@ -15,6 +15,7 @@ import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 import rateLimitMiddleware from '@/shared/middlewares/rateLimit.middleware';
 import LoggerUtil from '@/shared/logger.util';
 import ResponseUtil from '@/shared/response.util';
+import { setAuthCookies, shouldExposeTokensInBody } from '../../shared/utils/authCookies.util';
 import { User, Session } from '@/shared/models/index.models';
 import passport from '@/config/oauth/passport.config';
 import { csrfProtection } from '@/config/security/csrf.config';
@@ -527,7 +528,68 @@ const registerSchema = Joi.object({
     deviceName: Joi.string().optional().allow(''),
     os: Joi.string().optional().allow(''),
     browser: Joi.string().optional().allow(''),
+
+    // Verification token from pre-registration email verification
+    verificationToken: Joi.string()
+        .required()
+        .messages({
+            'string.empty': 'Verification token cannot be empty',
+            'any.required': 'Verification token is required. Please verify your email first.',
+        }),
 });
+
+const sendRegistrationOtpSchema = Joi.object({
+    email: Joi.string()
+        .email()
+        .lowercase()
+        .trim()
+        .required()
+        .messages({
+            'string.email': 'Invalid email format',
+            'string.empty': 'Email cannot be empty',
+            'any.required': 'Email is required',
+        }),
+    firstName: Joi.string().optional().allow(''),
+});
+
+const verifyRegistrationOtpSchema = Joi.object({
+    email: Joi.string()
+        .email()
+        .lowercase()
+        .trim()
+        .required()
+        .messages({
+            'string.email': 'Invalid email format',
+            'string.empty': 'Email cannot be empty',
+            'any.required': 'Email is required',
+        }),
+    otp: Joi.string()
+        .length(6)
+        .pattern(/^\d{6}$/)
+        .required()
+        .messages({
+            'string.length': 'OTP must be exactly 6 digits',
+            'string.pattern.base': 'OTP must contain only numbers',
+            'string.empty': 'OTP cannot be empty',
+            'any.required': 'OTP is required',
+        }),
+});
+
+const validateSendRegistrationOtp = (req: Request, res: Response, next: NextFunction) => {
+    const { error } = sendRegistrationOtpSchema.validate(req.body, { abortEarly: false, stripUnknown: true });
+    if (error) {
+        return ResponseUtil.validationError(res, error.details.map((d) => d.message), 'Validation failed');
+    }
+    next();
+};
+
+const validateVerifyRegistrationOtp = (req: Request, res: Response, next: NextFunction) => {
+    const { error } = verifyRegistrationOtpSchema.validate(req.body, { abortEarly: false, stripUnknown: true });
+    if (error) {
+        return ResponseUtil.validationError(res, error.details.map((d) => d.message), 'Validation failed');
+    }
+    next();
+};
 
 const validateRegistration = (req: Request, res: Response, next: NextFunction) => {
     const { error, value } = registerSchema.validate(req.body, {
@@ -799,6 +861,39 @@ router.get('/health', (_req: Request, res: Response) => {
 });
 
 /**
+ * @route POST /api/v1/auth/register/send-otp
+ */
+router.post(
+    '/register/send-otp',
+    sanitizeInput,
+    rateLimitMiddleware(),
+    validateSendRegistrationOtp,
+    handle((req, res) => AuthController.sendRegistrationOTP(req, res))
+);
+
+/**
+ * @route POST /api/v1/auth/register/resend-otp
+ */
+router.post(
+    '/register/resend-otp',
+    sanitizeInput,
+    rateLimitMiddleware(),
+    validateSendRegistrationOtp,
+    handle((req, res) => AuthController.sendRegistrationOTP(req, res))
+);
+
+/**
+ * @route POST /api/v1/auth/register/verify-otp
+ */
+router.post(
+    '/register/verify-otp',
+    sanitizeInput,
+    rateLimitMiddleware(),
+    validateVerifyRegistrationOtp,
+    handle((req, res) => AuthController.verifyRegistrationOTP(req, res))
+);
+
+/**
  * @route POST /api/v1/auth/register
  */
 router.post(
@@ -895,8 +990,11 @@ router.get(
 
             // Note: tokens query string mein jaate hain (frontend /auth/callback page yahin se padhta hai)
             const redirectUrl = new URL(`${process.env.FRONTEND_URL}/auth/callback`);
-            redirectUrl.searchParams.set('accessToken', accessToken);
-            redirectUrl.searchParams.set('refreshToken', refreshToken);
+            setAuthCookies(res, { accessToken, refreshToken });
+            if (shouldExposeTokensInBody(req)) {
+                redirectUrl.searchParams.set('accessToken', accessToken);
+                redirectUrl.searchParams.set('refreshToken', refreshToken);
+            }
             redirectUrl.searchParams.set('userId', user.userId);
             redirectUrl.searchParams.set('email', user.email);
             redirectUrl.searchParams.set('role', user.role || 'user');
@@ -934,8 +1032,11 @@ router.get(
             const { accessToken, refreshToken } = await issueOAuthTokens(req, user);
 
             const redirectUrl = new URL(`${process.env.FRONTEND_URL}/auth/callback`);
-            redirectUrl.searchParams.set('accessToken', accessToken);
-            redirectUrl.searchParams.set('refreshToken', refreshToken);
+            setAuthCookies(res, { accessToken, refreshToken });
+            if (shouldExposeTokensInBody(req)) {
+                redirectUrl.searchParams.set('accessToken', accessToken);
+                redirectUrl.searchParams.set('refreshToken', refreshToken);
+            }
             redirectUrl.searchParams.set('userId', user.userId);
             redirectUrl.searchParams.set('email', user.email);
             redirectUrl.searchParams.set('role', user.role || 'user');
@@ -1037,6 +1138,7 @@ router.delete(
  */
 router.post(
     '/logout',
+    AuthController.logoutWithRefreshCookie as any, // handles "access cookie already expired"
     AuthMiddleware.authenticate as any,
     validateLogout,
     AuthController.logout as any

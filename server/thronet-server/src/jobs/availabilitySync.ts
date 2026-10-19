@@ -3,6 +3,7 @@
 import { Availability, SessionMentor } from '@/Mentorship/models';
 import { logger } from '@/shared/logger.util';
 import { schedule } from 'node-cron';
+import { invalidateMentorAvailabilityCache } from '@/shared/cache/mentorshipCache';
 
 class AvailabilitySyncJob {
   /**
@@ -89,9 +90,19 @@ class AvailabilitySyncJob {
           }
         }
       }
+
+      if (Array.isArray(availability.slots)) {
+        const slot = availability.slots.find((s) => s.startTime === startTime);
+        if (slot) {
+          slot.isBooked = true;
+          slot.sessionId = session._id ? session._id.toString() : session.sessionId;
+        }
+      }
     }
 
+    availability.increment();
     await availability.save();
+    await invalidateMentorAvailabilityCache(mentorId);
     logger.info(`Synced availability for mentor ${mentorId}`);
   }
 

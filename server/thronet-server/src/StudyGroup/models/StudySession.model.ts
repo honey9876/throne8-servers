@@ -127,6 +127,44 @@ studySessionSchema.pre('save', function (this: any, next) {
   next();
 });
 
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { StudyAnalyticsCacheRepository } from '@/shared/cache/studyCache';
+studySessionSchema.post('save', async function (doc: any) {
+  if (doc?.user) {
+    try {
+      await StudyAnalyticsCacheRepository.invalidateUserAnalytics(String(doc.user));
+    } catch {}
+  }
+});
+studySessionSchema.pre(
+  ['updateOne', 'updateMany', 'findOneAndUpdate', 'deleteOne', 'deleteMany', 'findOneAndDelete'] as any,
+  async function (this: any) {
+    try {
+      const filter = this.getFilter ? this.getFilter() : {};
+      let uid = filter.user || filter.userId;
+      if (!uid && (filter._id || filter.sessionId)) {
+        const doc = await this.model.findOne(filter).select('user userId').lean();
+        if (doc) this._targetUserId = doc.user || doc.userId;
+      } else if (uid) {
+        this._targetUserId = uid;
+      }
+    } catch {}
+  }
+);
+
+studySessionSchema.post(
+  ['updateOne', 'updateMany', 'findOneAndUpdate', 'deleteOne', 'deleteMany', 'findOneAndDelete'] as any,
+  async function (this: any, res: any) {
+    try {
+      const filter = this.getFilter ? this.getFilter() : {};
+      const uid = this._targetUserId || filter.user || filter.userId || (res && (res.user || res.userId));
+      if (uid) {
+        await StudyAnalyticsCacheRepository.invalidateUserAnalytics(String(uid));
+      }
+    } catch {}
+  }
+);
+
 const StudySession = mongoose.model<IStudySession>('StudyGroup_StudySession', studySessionSchema);
 
 export default StudySession;

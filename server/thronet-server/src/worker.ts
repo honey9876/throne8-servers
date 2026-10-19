@@ -140,9 +140,11 @@ async function waitForRedis(
             }
 
             logger.info(`Connecting to Redis (attempt ${attempt + 1}/${maxRetries})`);
+            const { initRedis } = await import('@/shared/cache/redisConnection');
+            const ioredisOk = await initRedis();
             const connected = await CacheUtil.init();
 
-            if (connected) {
+            if (connected || ioredisOk) {
                 logger.info('Redis connected');
                 return;
             }

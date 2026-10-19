@@ -68,19 +68,7 @@ import { asyncHandler } from '@/shared/utils/helpers.util';
  * This ensures req.user is properly typed throughout the controller
  * Updated to match authentication middleware's actual user object structure
  */
-interface AuthRequest extends Request {
-    user?: {
-        id: string;
-        userId?: string;
-        isAdmin: boolean;
-        region?: string;
-        email: string;
-        role: 'user' | 'admin';
-        deviceId?: string | null;
-        sessionId?: string | null;
-    };
-    correlationId?: string;
-}
+type AuthRequest = Request;
 
 /**
  * Connection Controller

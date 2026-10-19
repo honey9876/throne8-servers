@@ -34,12 +34,16 @@ class PasswordController {
         } catch (error: unknown) {
             const msg = (error as Error).message;
 
-            await AuditProducer.sendAuditEvent({
-                eventId: uuidv4(), userId: (req as any).user?.userId || null,
-                action: 'PASSWORD_CHANGE_OTP_FAILED', ipAddress: req.ip || '0.0.0.0',
-                status: Constants.AUDIT_STATUS.ERROR as 'ERROR', severity: Constants.AUDIT_SEVERITIES.MEDIUM as 'MEDIUM',
-                timestamp: new Date().toISOString(), metadata: { error: msg, correlationId },
-            });
+            try {
+                await AuditProducer.sendAuditEvent({
+                    eventId: uuidv4(), userId: (req as any).user?.userId || null,
+                    action: 'PASSWORD_CHANGE_OTP_FAILED', ipAddress: req.ip || '0.0.0.0',
+                    status: Constants.AUDIT_STATUS.ERROR as 'ERROR', severity: Constants.AUDIT_SEVERITIES.MEDIUM as 'MEDIUM',
+                    timestamp: new Date().toISOString(), metadata: { error: msg, correlationId },
+                });
+            } catch (auditErr: unknown) {
+                LoggerUtil.error('Failed to send audit event for password change OTP failure (non-critical)', { error: (auditErr as Error).message, correlationId });
+            }
 
             if (msg.includes('Invalid current password')) return ResponseUtil.unauthorized(res, 'Current password is incorrect');
             if (msg.includes('rate limit') || msg.includes('Too many')) return ResponseUtil.tooManyRequests(res, msg, { retryAfter: 900 });
@@ -72,17 +76,36 @@ class PasswordController {
         } catch (error: unknown) {
             const msg = (error as Error).message;
 
-            await AuditProducer.sendAuditEvent({
-                eventId: uuidv4(), userId: (req as any).user?.userId || null,
-                action: 'PASSWORD_CHANGE_FAILED', ipAddress: req.ip || '0.0.0.0',
-                status: Constants.AUDIT_STATUS.ERROR as 'ERROR', 
-                severity: Constants.AUDIT_SEVERITIES.HIGH as 'HIGH',
-                timestamp: new Date().toISOString(), metadata: { error: msg, correlationId },
-            });
+            try {
+                await AuditProducer.sendAuditEvent({
+                    eventId: uuidv4(), userId: (req as any).user?.userId || null,
+                    action: 'PASSWORD_CHANGE_FAILED', ipAddress: req.ip || '0.0.0.0',
+                    status: Constants.AUDIT_STATUS.ERROR as 'ERROR',
+                    severity: Constants.AUDIT_SEVERITIES.HIGH as 'HIGH',
+                    timestamp: new Date().toISOString(), metadata: { error: msg, correlationId },
+                });
+            } catch (auditErr: unknown) {
+                LoggerUtil.error('Failed to send audit event for password change failure (non-critical)', { error: (auditErr as Error).message, correlationId });
+            }
 
-            if (msg.includes('Invalid or expired OTP')) return ResponseUtil.unauthorized(res, 'Invalid or expired verification code');
-            if (msg.includes('password strength')) return ResponseUtil.validationError(res, [msg], 'Password too weak');
-            if (msg.includes('recently used')) return ResponseUtil.validationError(res, ['Cannot reuse recent passwords'], 'Password policy violation');
+            if (msg.includes('recently used') || msg.includes('reuse') || msg.includes('last 5 passwords')) {
+                return ResponseUtil.badRequest(res, 'Cannot reuse any of your last 5 passwords', ['Cannot reuse recent passwords']);
+            }
+            if (msg.includes('password strength') || msg.includes('too weak') || msg.includes('choose a stronger password') || msg.includes('similar to a commonly used') || msg.includes('common password')) {
+                return ResponseUtil.badRequest(res, msg || 'Password is too weak. Please choose a stronger password.', [msg]);
+            }
+            if (msg.includes('No pending OTP') || msg.includes('revoked') || msg.includes('expired')) {
+                return ResponseUtil.badRequest(res, msg);
+            }
+            if (msg.includes('Invalid OTP') || msg.includes('Invalid or expired')) {
+                return ResponseUtil.unauthorized(res, msg.includes('Invalid OTP') ? 'Invalid verification code' : msg);
+            }
+            if (msg.includes('Maximum verification attempts') || msg.includes('Too many')) {
+                return ResponseUtil.tooManyRequests(res, msg, { retryAfter: 900 });
+            }
+            if (msg.includes('already verified')) {
+                return ResponseUtil.badRequest(res, msg);
+            }
 
             return ResponseUtil.internalError(res, process.env.NODE_ENV === 'production' ? 'Failed to change password. Please try again.' : msg, error as Error);
         }
@@ -107,12 +130,16 @@ class PasswordController {
         } catch (error: unknown) {
             const msg = (error as Error).message;
 
-            await AuditProducer.sendAuditEvent({
-                eventId: uuidv4(), userId: null,
-                action: 'PASSWORD_RESET_REQUEST_FAILED', ipAddress: req.ip || '0.0.0.0',
-                status: Constants.AUDIT_STATUS.ERROR as 'ERROR', severity: Constants.AUDIT_SEVERITIES.MEDIUM as 'MEDIUM',
-                timestamp: new Date().toISOString(), metadata: { email: req.body.email, error: msg, correlationId },
-            });
+            try {
+                await AuditProducer.sendAuditEvent({
+                    eventId: uuidv4(), userId: null,
+                    action: 'PASSWORD_RESET_REQUEST_FAILED', ipAddress: req.ip || '0.0.0.0',
+                    status: Constants.AUDIT_STATUS.ERROR as 'ERROR', severity: Constants.AUDIT_SEVERITIES.MEDIUM as 'MEDIUM',
+                    timestamp: new Date().toISOString(), metadata: { email: req.body.email, error: msg, correlationId },
+                });
+            } catch (auditErr: unknown) {
+                LoggerUtil.error('Failed to send audit event for password reset request failure (non-critical)', { error: (auditErr as Error).message, correlationId });
+            }
 
             if (msg.includes('rate limit') || msg.includes('Too many')) return ResponseUtil.tooManyRequests(res, msg, { retryAfter: 900 });
 
@@ -143,16 +170,35 @@ class PasswordController {
         } catch (error: unknown) {
             const msg = (error as Error).message;
 
-            await AuditProducer.sendAuditEvent({
-                eventId: uuidv4(), userId: null,
-                action: 'PASSWORD_RESET_FAILED', ipAddress: req.ip || '0.0.0.0',
-                status: Constants.AUDIT_STATUS.ERROR as 'ERROR', severity: Constants.AUDIT_SEVERITIES.HIGH as 'HIGH',
-                timestamp: new Date().toISOString(), metadata: { email: req.body.email, error: msg, correlationId },
-            });
+            try {
+                await AuditProducer.sendAuditEvent({
+                    eventId: uuidv4(), userId: null,
+                    action: 'PASSWORD_RESET_FAILED', ipAddress: req.ip || '0.0.0.0',
+                    status: Constants.AUDIT_STATUS.ERROR as 'ERROR', severity: Constants.AUDIT_SEVERITIES.HIGH as 'HIGH',
+                    timestamp: new Date().toISOString(), metadata: { email: req.body.email, error: msg, correlationId },
+                });
+            } catch (auditErr: unknown) {
+                LoggerUtil.error('Failed to send audit event for password reset failure (non-critical)', { error: (auditErr as Error).message, correlationId });
+            }
 
-            if (msg.includes('Invalid or expired')) return ResponseUtil.unauthorized(res, 'Invalid or expired reset code');
-            if (msg.includes('password strength')) return ResponseUtil.validationError(res, [msg], 'Password too weak');
-            if (msg.includes('recently used')) return ResponseUtil.validationError(res, ['Cannot reuse recent passwords'], 'Password policy violation');
+            if (msg.includes('recently used') || msg.includes('reuse') || msg.includes('last 5 passwords')) {
+                return ResponseUtil.badRequest(res, 'Cannot reuse any of your last 5 passwords', ['Cannot reuse recent passwords']);
+            }
+            if (msg.includes('password strength') || msg.includes('too weak') || msg.includes('choose a stronger password') || msg.includes('similar to a commonly used') || msg.includes('common password')) {
+                return ResponseUtil.badRequest(res, msg || 'Password is too weak. Please choose a stronger password.', [msg]);
+            }
+            if (msg.includes('No pending OTP') || msg.includes('revoked') || msg.includes('expired')) {
+                return ResponseUtil.badRequest(res, msg);
+            }
+            if (msg.includes('Invalid OTP') || msg.includes('Invalid or expired')) {
+                return ResponseUtil.unauthorized(res, msg.includes('Invalid OTP') ? 'Invalid reset code' : msg);
+            }
+            if (msg.includes('Maximum verification attempts') || msg.includes('Too many')) {
+                return ResponseUtil.tooManyRequests(res, msg, { retryAfter: 900 });
+            }
+            if (msg.includes('already verified')) {
+                return ResponseUtil.badRequest(res, msg);
+            }
 
             return ResponseUtil.internalError(res, process.env.NODE_ENV === 'production' ? 'Failed to reset password. Please try again.' : msg, error as Error);
         }

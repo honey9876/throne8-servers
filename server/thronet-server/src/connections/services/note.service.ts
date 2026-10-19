@@ -622,11 +622,13 @@ import {
   INoteSearchOptions,
   NoteStatus,
   IPaginatedNotes
-} from '../models/mongodb/ConnectionNote';
-import cacheService from './shared/cacheService';
-import logger, { LogCategory } from '../utils/logger';
-import { ErrorResponse, HttpStatus } from '../utils/response';
-import { ERROR_CODES } from '../utils/constants';
+} from '@/connections/models/ConnectionNote';
+import CacheUtil from '@/shared/cache.util';
+const cacheService = CacheUtil;
+import { LoggerUtil as logger, LogCategory } from '@/shared/logger.util';
+import { ErrorResponse, HttpStatus } from '@/shared/response.util';
+import constants from '@/shared/constants.util';
+const ERROR_CODES = constants.ERROR_CODES as Record<string, string>;
 
 class NoteService {
   private readonly CACHE_PREFIX = 'note:';

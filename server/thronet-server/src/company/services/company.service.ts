@@ -69,17 +69,6 @@ class CompanyService {
     return `${prefix}${sanitized}`;
   }
 
-  private async invalidateCompanyCache(objectId: string): Promise<void> {
-    try {
-      await CacheUtil.del(`${this.CACHE_PREFIX}${objectId}`);
-    } catch {
-      // ignore
-    }
-  }
-
-  private async invalidateListCache(): Promise<void> {
-    // list cache invalidation
-  }
 
   // ─────────────────────────────────────────────
   // CREATE

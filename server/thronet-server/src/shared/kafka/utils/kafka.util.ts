@@ -9,7 +9,7 @@
 import { Kafka, Admin, ITopicConfig } from 'kafkajs';
 import kafkaConfig from '@/config/kafka.config';
 import { LoggerUtil } from '@/shared/logger.util';
-import topics, { TopicConfig } from '@/kafka/config/topic.config';
+import topics, { TopicConfig } from '@/shared/kafka/config/topic.config';
 
 // ==================== KAFKA UTILITY CLASS ====================
 

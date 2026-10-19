@@ -150,7 +150,6 @@ const PortfolioSchema = new Schema<PortfolioDocument>(
 
 // Indexes
 PortfolioSchema.index({ userId: 1, status: 1 });
-PortfolioSchema.index({ sessionId: 1 });
 PortfolioSchema.index({ portfolioType: 1, status: 1 });
 
 // Virtuals

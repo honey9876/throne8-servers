@@ -1,7 +1,8 @@
-﻿import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import crypto from 'crypto';
 import { LoggerUtil } from '@/shared/logger.util';
 import UserEmitter from '@/shared/events/emitters/user.emitter';
+import { invalidateSessionCache, invalidateAllSessionCacheByScan } from '@/shared/cache/authCache';
 
 const logger = LoggerUtil;
 
@@ -473,6 +474,122 @@ sessionSchema.pre('save', function (next) {
     if (this.expiresAt && new Date(this.expiresAt) < new Date()) this.isActive = false;
     next();
 });
+
+// Cache invalidation on direct document save
+sessionSchema.post('save', async function (doc: any) {
+    try {
+        const sid = doc?._id?.toString();
+        if (sid) {
+            await invalidateSessionCache(sid);
+        }
+    } catch (error: any) {
+        logger.warn(`[sessionSchema] Post-save cache invalidation error: ${error.message}`);
+    }
+});
+
+const SINGLE_DOC_SESSION_MUTATIONS = [
+    'updateOne',
+    'findOneAndUpdate',
+    'deleteOne',
+    'findOneAndDelete',
+    'replaceOne',
+    'findOneAndReplace',
+];
+
+const MULTI_DOC_SESSION_MUTATIONS = [
+    'updateMany',
+    'deleteMany',
+];
+
+const SESSION_MUTATION_METHODS = [
+    ...SINGLE_DOC_SESSION_MUTATIONS,
+    ...MULTI_DOC_SESSION_MUTATIONS,
+] as any;
+
+// Pre-hook for update/delete/replace operations:
+// Captures affected session IDs BEFORE the mutation runs.
+sessionSchema.pre(
+    SESSION_MUTATION_METHODS,
+    async function (this: any) {
+        try {
+            const filter = this.getFilter() || {};
+            const op = this.op;
+
+            const isObjectFilter =
+                (filter._id !== undefined && typeof filter._id === 'object' && filter._id !== null && !(filter._id instanceof mongoose.Types.ObjectId)) ||
+                (filter.userId !== undefined && typeof filter.userId === 'object' && filter.userId !== null);
+
+            // Fast-path: only if filter directly targets session _id as primitive string or ObjectId in single-doc op
+            const isDirectId =
+                filter._id &&
+                ((typeof filter._id === 'string' && !filter._id.startsWith('$')) ||
+                    filter._id instanceof mongoose.Types.ObjectId);
+
+            if (!isObjectFilter && isDirectId && SINGLE_DOC_SESSION_MUTATIONS.includes(op)) {
+                this._preUpdateSessionIds = [filter._id.toString()];
+                return;
+            }
+
+            // Single-document operations affect at most 1 document (only if not an object operator):
+            if (!isObjectFilter && SINGLE_DOC_SESSION_MUTATIONS.includes(op)) {
+                const doc = await this.model
+                    .findOne(filter)
+                    .select('_id userId')
+                    .lean()
+                    .exec();
+
+                if (doc && doc._id) {
+                    this._preUpdateSessionIds = [doc._id.toString()];
+                } else {
+                    this._preUpdateSessionIds = [];
+                }
+                return;
+            }
+
+            // Multi-document path (updateMany, deleteMany OR when filter._id/filter.userId is an object operator like $in)
+            const affectedDocs = await this.model
+                .find(filter)
+                .select('_id userId')
+                .limit(501)
+                .lean()
+                .exec();
+
+            this._preUpdateSessionIds = affectedDocs
+                .slice(0, 500)
+                .map((d: any) => d._id?.toString())
+                .filter(Boolean);
+
+            // If matches exceed 500 or filter is empty/broad, flag for full SCAN fallback
+            if (affectedDocs.length > 500 || Object.keys(filter).length === 0) {
+                this._preUpdateNeedsScan = true;
+            }
+        } catch (err: any) {
+            this._preUpdateNeedsScan = true;
+        }
+    }
+);
+
+// Post-hook for update/delete/replace operations:
+// Invalidates the captured session IDs (even if the mutation changed status/isActive or deleted doc).
+sessionSchema.post(
+    SESSION_MUTATION_METHODS,
+    async function (this: any) {
+        try {
+            const sessionIds: string[] = this._preUpdateSessionIds || [];
+            if (sessionIds.length > 0) {
+                await Promise.all(sessionIds.map((sid: string) => invalidateSessionCache(sid)));
+            }
+            if (
+                this._preUpdateNeedsScan ||
+                (sessionIds.length === 0 && Object.keys(this.getFilter() || {}).length === 0)
+            ) {
+                await invalidateAllSessionCacheByScan();
+            }
+        } catch (err: any) {
+            logger.warn(`[sessionSchema] Post-mutation cache invalidation error: ${err.message}`);
+        }
+    }
+);
 
 const Session = mongoose.model<ISession, ISessionModel>('Session', sessionSchema);
 export default Session;

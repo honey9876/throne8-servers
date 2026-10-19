@@ -1,4 +1,4 @@
-﻿console.log('🔍 passport.config.ts LOADING START');
+console.log('🔍 passport.config.ts LOADING START');
 import { v4 as uuidv4 } from 'uuid';
 import passport from 'passport';
 import { User } from '@/auth/models';
@@ -41,7 +41,7 @@ if (isValidCredential(googleClientId) && isValidCredential(googleClientSecret) &
                     await user.save();
                 }
                 (user as any).isNewUser = false;
-                return done(null, user);
+                return done(null, user as unknown as Express.User);
             }
 
             const nameParts = profile.displayName?.split(' ') || [];
@@ -82,7 +82,7 @@ if (isValidCredential(googleClientId) && isValidCredential(googleClientSecret) &
                 timestamp: new Date(),
             });
 
-            return done(null, user);
+            return done(null, user as unknown as Express.User);
 
         } catch (error: any) {
             return done(error, false);
@@ -159,7 +159,7 @@ if (isValidCredential(githubClientId) && isValidCredential(githubClientSecret) &
 
             await user.save();
             (user as any).isNewUser = true;
-            return done(null, user);
+            return done(null, user as unknown as Express.User);
 
         } catch (error: any) {
             return done(error, false);

@@ -1,11 +1,15 @@
+// server/thronet-server/src/StudyGroup/services/email.service.ts
+
 /**
  * ====================================
  * EMAIL SERVICE (PRODUCTION-READY)
  * ====================================
- * Handles all email sending with Nodemailer
+ * Brevo REST API (HTTPS) ya Nodemailer SMTP se email bhejta hai.
+ * Railway pe SMTP ports block hote hain, isliye EMAIL_SERVICE=brevo-api use karo.
  */
 
 import nodemailer, { Transporter } from 'nodemailer';
+import axios from 'axios';
 import { LoggerUtil } from '@/shared/logger.util';
 import {
   getWelcomeEmailTemplate,
@@ -27,23 +31,48 @@ interface EmailPayload {
 class EmailService {
   private transporter: Transporter | null = null;
   private isEmailEnabled: boolean = false;
+  private useBrevoApi: boolean = false;
+  private brevoApiKey: string = '';
 
   constructor() {
     this.initializeTransporter();
   }
 
   /**
-   * Initialize email transporter
+   * Initialize email transport (Brevo API ya SMTP)
    */
   private initializeTransporter() {
     try {
       const emailEnabled = process.env.ENABLE_EMAIL === 'true';
-      
+
       if (!emailEnabled) {
         LoggerUtil.warn('⚠️ Email service is disabled');
         return;
       }
 
+      // ---------- Brevo REST API ----------
+      const service = (process.env.EMAIL_SERVICE || '').toLowerCase().trim();
+      const apiKey = process.env.BREVO_API_KEY || '';
+      const wantsApi =
+        service === 'brevo-api' ||
+        service === 'brevo_api' ||
+        (service === 'brevo' && apiKey.startsWith('xkeysib-'));
+
+      if (wantsApi) {
+        if (!apiKey || apiKey.startsWith('xsmtpsib-')) {
+          LoggerUtil.warn(
+            '⚠️ BREVO_API_KEY missing ya SMTP key hai (xsmtpsib-). Brevo API key (xkeysib-...) chahiye. Email service disabled.'
+          );
+          return;
+        }
+        this.useBrevoApi = true;
+        this.brevoApiKey = apiKey;
+        this.isEmailEnabled = true;
+        LoggerUtil.info('✅ Email service initialized (Brevo REST API)');
+        return;
+      }
+
+      // ---------- SMTP (Nodemailer) ----------
       const smtpHost = process.env.SMTP_HOST;
       const smtpPort = parseInt(process.env.SMTP_PORT || '587');
       const smtpUser = process.env.SMTP_USER;
@@ -62,10 +91,13 @@ class EmailService {
           user: smtpUser,
           pass: smtpPassword,
         },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 10000,
       });
 
       this.isEmailEnabled = true;
-      LoggerUtil.info('✅ Email service initialized successfully');
+      LoggerUtil.info('✅ Email service initialized successfully (SMTP)');
     } catch (error: any) {
       LoggerUtil.error(`❌ Failed to initialize email service: ${error.message}`);
     }
@@ -75,14 +107,59 @@ class EmailService {
    * Send email
    */
   private async sendEmail(payload: EmailPayload): Promise<boolean> {
-    if (!this.isEmailEnabled || !this.transporter) {
+    if (!this.isEmailEnabled) {
       LoggerUtil.warn('⚠️ Email service not available. Skipping email send.');
       return false;
     }
 
+    const fromName = process.env.EMAIL_FROM_NAME || 'Study Group';
+    const fromEmail =
+      process.env.SMTP_FROM_ADDRESS ||
+      process.env.EMAIL_FROM ||
+      process.env.SMTP_USER ||
+      '';
+
     try {
+      // ==================== BREVO API ====================
+      if (this.useBrevoApi) {
+        if (!fromEmail) {
+          LoggerUtil.error('❌ Email "from" address not configured (SMTP_FROM_ADDRESS / EMAIL_FROM).');
+          return false;
+        }
+
+        const res = await axios.post(
+          'https://api.brevo.com/v3/smtp/email',
+          {
+            sender: { name: fromName, email: fromEmail },
+            to: [{ email: payload.to }],
+            subject: payload.subject,
+            htmlContent: payload.html,
+            ...(payload.text ? { textContent: payload.text } : {}),
+          },
+          {
+            headers: {
+              'api-key': this.brevoApiKey,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            timeout: 10000,
+          }
+        );
+
+        LoggerUtil.info(
+          `✅ Email sent successfully to ${payload.to}: ${res.data?.messageId}`
+        );
+        return true;
+      }
+
+      // ==================== SMTP ====================
+      if (!this.transporter) {
+        LoggerUtil.warn('⚠️ Email transporter not available. Skipping email send.');
+        return false;
+      }
+
       const mailOptions = {
-        from: `${process.env.EMAIL_FROM_NAME || 'Study Group'} <${process.env.EMAIL_FROM || process.env.SMTP_USER}>`,
+        from: `${fromName} <${fromEmail}>`,
         to: payload.to,
         subject: payload.subject,
         html: payload.html,
@@ -94,7 +171,10 @@ class EmailService {
       LoggerUtil.info(`✅ Email sent successfully to ${payload.to}: ${info.messageId}`);
       return true;
     } catch (error: any) {
-      LoggerUtil.error(`❌ Failed to send email to ${payload.to}: ${error.message}`);
+      const detail = error?.response?.data
+        ? JSON.stringify(error.response.data)
+        : error.message;
+      LoggerUtil.error(`❌ Failed to send email to ${payload.to}: ${detail}`);
       return false;
     }
   }

@@ -71,4 +71,5 @@ class BlockController {
     }
 }
 
+export { BlockController, BlockController as blockController };
 export default BlockController;

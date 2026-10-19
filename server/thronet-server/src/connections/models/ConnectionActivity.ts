@@ -1,4 +1,4 @@
-﻿// src/models/mongodb/ConnectionActivity.ts
+// src/models/mongodb/ConnectionActivity.ts
 
 import { Schema, model, Document, Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -168,7 +168,7 @@ ConnectionActivitySchema.statics.getUserActivities = async function (
     .skip(skip)
     .limit(limit)
     .lean()
-    .exec();
+    .exec() as unknown as IConnectionActivity[];
 };
 
 ConnectionActivitySchema.statics.getConnectionActivities = async function (
@@ -182,7 +182,7 @@ ConnectionActivitySchema.statics.getConnectionActivities = async function (
     .sort({ timestamp: -1 })
     .limit(limit)
     .lean()
-    .exec();
+    .exec() as unknown as IConnectionActivity[];
 };
 
 ConnectionActivitySchema.statics.getActivityStats = async function (

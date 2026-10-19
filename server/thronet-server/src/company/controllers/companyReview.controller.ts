@@ -13,7 +13,7 @@ class CompanyReviewController {
   async createReview(req: AuthRequest, res: Response): Promise<void> {
     try {
       const data: CreateReviewDTO = req.body;
-      data.reviewer = req.user!.userId;
+      data.reviewer = req.user!.userId || req.user!.id || '';
 
       const review = await companyReviewService.createReview(data);
       ResponseUtil.created(res, review, 'Review created successfully');
@@ -193,7 +193,7 @@ class CompanyReviewController {
     try {
       const objectId = (req as any).resolvedObjectId;
       const { content } = req.body;
-      const respondentId = req.user!.userId;
+      const respondentId = req.user!.userId || req.user!.id || '';
 
       const review = await companyReviewService.addCompanyResponse(objectId, respondentId, content);
       ResponseUtil.success(res, review, 'Company response added successfully');

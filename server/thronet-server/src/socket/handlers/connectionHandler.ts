@@ -109,17 +109,36 @@ export const emitConnectionDeclined = (
 
 // Company admin apni company ka room join kare
 export const emitCompanyAnalyticsUpdate = (
-    io: Server,
-    companyObjectId: string,
-    data: Record<string, unknown>
+    ioOrCompanyId: Server | string,
+    companyObjectIdOrData: string | Record<string, unknown>,
+    data?: Record<string, unknown>
 ) => {
-    io.to(`company:${companyObjectId}`).emit('analytics:update', {
-        ...data,
-        timestamp: new Date()
-    });
+    try {
+        let io: Server;
+        let companyId: string;
+        let payload: Record<string, unknown>;
 
-    logger.info('Analytics update emitted', {
-        category: LogCategory.CONNECTION,
-        data: { companyObjectId }
-    });
+        if (typeof ioOrCompanyId === 'string') {
+            const { getIO } = require('@/socket');
+            io = getIO();
+            companyId = ioOrCompanyId;
+            payload = (companyObjectIdOrData as Record<string, unknown>) || {};
+        } else {
+            io = ioOrCompanyId;
+            companyId = companyObjectIdOrData as string;
+            payload = data || {};
+        }
+
+        io.to(`company:${companyId}`).emit('analytics:update', {
+            ...payload,
+            timestamp: new Date()
+        });
+
+        logger.info('Analytics update emitted', {
+            category: LogCategory.CONNECTION,
+            data: { companyObjectId: companyId }
+        });
+    } catch {
+        // fail-safe
+    }
 };

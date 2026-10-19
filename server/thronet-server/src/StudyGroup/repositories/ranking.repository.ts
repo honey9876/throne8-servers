@@ -187,7 +187,7 @@ export class RankingRepository extends BaseRepository<IRanking> {
     try {
       return await this.model
         .find({ rankScore: { $gt: 0 }, ...filter })
-        .sort({ rankScore: -1 })
+        .sort({ rankScore: -1, userId: -1 })
         .select('_id userId')
         .lean()
         .exec() as unknown as { _id: string; userId?: string }[];

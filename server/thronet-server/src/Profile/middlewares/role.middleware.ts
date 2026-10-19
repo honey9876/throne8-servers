@@ -1,4 +1,4 @@
-/**
+    /**
  * role.middleware.ts
  * Role-based access control middleware
  */
@@ -18,7 +18,7 @@ interface UserPayload {
  * Require specific role
  */
 export const requireRole = (requiredRole: string) => {
-    return (req: Request & { user?: UserPayload }, res: Response, next: NextFunction) => {
+    return (req: Request, res: Response, next: NextFunction) => {
         const userRole = req.user?.role;
 
         if (!userRole) {

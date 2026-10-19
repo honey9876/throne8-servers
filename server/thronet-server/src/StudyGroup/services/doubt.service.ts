@@ -1,5 +1,6 @@
 // services/doubt.service.ts
 
+import mongoose from "mongoose";
 import doubtRepository from "../repositories/doubt.repository";
 import answerRepository from "../repositories/answer.repository";
 import groupMemberRepository from "../repositories/groupMember.repository";
@@ -16,6 +17,7 @@ import {
   DoubtQueryParams,
 } from "../types/doubt.types";
 import { MemberStatus } from "../interfaces/IGroupMember";
+import { DoubtCacheRepository } from "@/shared/cache/feedCompanyCommentCache";
 
 class DoubtService {
   async createDoubt(
@@ -40,6 +42,9 @@ class DoubtService {
       postedBy: userId,
     } as Partial<IDoubt>);
 
+    // Invalidate group doubt feed
+    DoubtCacheRepository.invalidateDoubt(doubt.doubtId, groupId).catch(() => {});
+
     // await doubt.populate('postedBy', 'name email avatar');
     return doubt;
   }
@@ -58,7 +63,7 @@ class DoubtService {
     return doubt;
   }
 
-  async getGroupDoubts(groupId: string, params: DoubtQueryParams) {
+  async getGroupDoubts(groupId: string, params: DoubtQueryParams, userId?: string) {
     const {
       category,
       isSolved,
@@ -68,6 +73,39 @@ class DoubtService {
       sort = "recent",
       search,
     } = params;
+
+    // Verify group privacy: private groups require active membership before serving cached or uncached data
+    const Group = (await import('../models/Group.model')).default;
+    const GroupMember = (await import('../models/GroupMember.model')).default;
+    const groupQuery: any[] = [{ groupId }];
+    if (mongoose.Types.ObjectId.isValid(groupId)) {
+      groupQuery.push({ _id: groupId });
+    }
+    const groupDoc = await Group.findOne({ $or: groupQuery }).lean() as any;
+    if (groupDoc && (groupDoc.visibility === 'private' || groupDoc.visibility === 'PRIVATE')) {
+      if (!userId) {
+        throw new ForbiddenError('Private group doubts require active group membership');
+      }
+      const isMember = await GroupMember.findOne({
+        userId,
+        groupId: groupDoc.groupId || groupId,
+        status: 'active',
+      }).lean();
+      if (!isMember) {
+        throw new ForbiddenError('You are not a member of this private group');
+      }
+    }
+
+    // Check cache for non-search feed queries
+    const isSearchQuery = Boolean(search);
+    if (!isSearchQuery) {
+      try {
+        const cached = await DoubtCacheRepository.getCachedFeed(groupId, params);
+        if (cached) return cached;
+      } catch {
+        // Fallback to MongoDB
+      }
+    }
 
     const filter: any = { group: groupId, isDeleted: false };
     if (category) filter.category = category;
@@ -100,7 +138,7 @@ class DoubtService {
       doubtRepository.count(filter),
     ]);
 
-    return {
+    const result = {
       doubts,
       pagination: {
         page,
@@ -111,6 +149,12 @@ class DoubtService {
         hasPrevPage: page > 1,
       },
     };
+
+    if (!isSearchQuery) {
+      DoubtCacheRepository.setCachedFeed(groupId, params, result).catch(() => {});
+    }
+
+    return result;
   }
 
   async getMyDoubts(userId: string, params: DoubtQueryParams) {
@@ -149,6 +193,7 @@ class DoubtService {
 
     Object.assign(doubt, data);
     await doubt.save();
+    DoubtCacheRepository.invalidateDoubt(doubtId, doubt.group).catch(() => {});
     await doubt.populate("postedBy", "name email avatar");
     return doubt;
   }
@@ -166,6 +211,7 @@ class DoubtService {
 
     await doubt.softDelete();
     await answerRepository.softDeleteByDoubt(doubtId);
+    DoubtCacheRepository.invalidateDoubt(doubtId, doubt.group).catch(() => {});
     return { message: "Doubt deleted successfully" };
   }
 
@@ -199,6 +245,7 @@ class DoubtService {
     doubt.solvedAt = new Date();
     doubt.bestAnswer = bestAnswerId;
     await doubt.save();
+    DoubtCacheRepository.invalidateDoubt(doubtId, doubt.group).catch(() => {});
 
     await doubt.populate("postedBy", "name email avatar");
     await doubt.populate("bestAnswer");
@@ -284,6 +331,8 @@ class DoubtService {
       content,
       links: links || [],
     } as Partial<IAnswer>);
+
+    DoubtCacheRepository.invalidateDoubt(doubtId, doubt.group).catch(() => {});
 
     // await answer.populate("answeredBy", "name email avatar");
     return answer;

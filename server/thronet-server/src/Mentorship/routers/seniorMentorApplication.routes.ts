@@ -4,7 +4,9 @@ import seniorMentorApplicationController from '../controllers/seniorMentorApplic
 import AuthMiddleware from '@/shared/middlewares/auth.middleware';
 import { validate } from '@/shared/middlewares/validation.middleware';
 import SeniorMentorApplicationValidator from '../validations/seniorMentorApplication.validator';
-import { uploadFields } from '@/shared/upload/upload';
+import { uploadFields, uploadSingle } from '@/shared/upload/upload';
+
+
 
 const router = Router();
 export const publicSeniorMentorRouter = Router();
@@ -100,6 +102,20 @@ router.delete(
   '/me',
   AuthMiddleware.authenticate as any,
   seniorMentorApplicationController.withdrawMyApplication as any
+);
+
+/**
+ * @route   PUT /api/v1/mentorship/senior-mentor-applications/me/profile-photo
+ * @desc    Update ONLY the profile photo of the current user's application
+ *          (allowed even after verification)
+ * @access  Private
+ * @body    multipart/form-data -> profilePhoto: File
+ */
+router.put(
+  '/me/profile-photo',
+  AuthMiddleware.authenticate as any,
+  uploadSingle('profilePhoto'),
+  seniorMentorApplicationController.updateMyProfilePhoto as any
 );
 
 /**

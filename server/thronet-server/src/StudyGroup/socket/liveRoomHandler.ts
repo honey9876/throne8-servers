@@ -4,19 +4,12 @@
  * ====================================
  * server/thronet-server/src/StudyGroup/socket/liveRoomHandler.ts
  *
- * Fixes applied:
- *  1. WebRTC signaling is now peer-to-peer (user:{targetUserId} room),
- *     NOT room-wide broadcast
- *  2. Group membership verified before joining a room
- *  3. Room participant limit enforced (MAX_ROOM_SIZE)
- *  4. All event handlers validate input before acting
- *  5. ✅ NEW: group-session (mentorship) membership check — previously
- *     `isMember` only recognised StudyGroup rooms and 1:1 mentorship
- *     booking rooms. A group-session roomId (== GroupSession.sessionId)
- *     matched neither, so even an ACCEPTED participant was always
- *     rejected with "You are not a member of this group". Mirrors the
- *     same in_progress + role check `isMentorshipSessionMember` already
- *     does for 1:1 sessions.
+ * Item L: Redis-backed Live Room participant sets and study session timer state.
+ *  1. WebRTC signaling is peer-to-peer (user:{targetUserId} room), NOT room-wide broadcast,
+ *     and does NOT touch Redis storage.
+ *  2. Group membership verified before joining a room.
+ *  3. Room participant limit enforced atomically in Redis (MAX_ROOM_SIZE).
+ *  4. Study session timer state persisted in Redis across multi-instance nodes and restarts.
  */
 
 import mongoose from 'mongoose';
@@ -37,126 +30,164 @@ import GroupMember from '../models/GroupMember.model';
 import LiveRoom from '../models/LiveRoom.model';
 import { LoggerUtil } from '@/shared/logger.util';
 import { SessionMentor, Mentor, GroupSession, SeniorSession } from '@/Mentorship/models';
+import { SocketLiveRoomRepository, RoomSessionState } from '@/shared/cache/socketCache';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const MAX_ROOM_SIZE = 16; // WebRTC mesh: 16 peers = 120 connections — hard limit
+const MAX_ROOM_SIZE = 16; // WebRTC mesh: 16 peers = 120 connections - hard limit
 
-// ─── Global State for Study Sessions ──────────────────────────────────────────
-export interface RoomSession {
-  active: boolean;
-  startedAt: number | null;
-  accumulatedTime: number; // in milliseconds
+const NOT_STARTED_REASON = 'Session has not been started yet (or it has already ended)';
+
+// Re-export RoomSession for backward compatibility
+export type RoomSession = RoomSessionState;
+
+interface MembershipResult {
+  ok: boolean;
+  reason?: string;
 }
-const roomSessions = new Map<string, RoomSession>();
 
 // ─── Helper: verify mentor/mentee membership on a mentorship session room ─────
-async function isMentorshipSessionMember(userId: string, roomId: string): Promise<boolean> {
+// roomId === booking._id (string)
+async function isMentorshipSessionMember(userId: string, roomId: string): Promise<MembershipResult> {
   try {
+    if (!mongoose.isValidObjectId(roomId)) return { ok: false };
+
     const session = await SessionMentor.findOne({ 'bookings._id': roomId }).lean();
-    if (!session) return false;
+    if (!session) return { ok: false };
 
     const booking = (session.bookings || []).find((b: any) => b._id.toString() === roomId);
-    if (!booking) return false;
+    if (!booking) return { ok: false };
 
-     // Only allow while the specific booking is actually in progress —
-    // blocks joining a room for a session that hasn't started or already ended.
-    if ((booking.status as string) !== 'in_progress') return false;
-
+    // Membership: mentee of this booking, or the mentor of the session
+    let isMember = false;
     const menteeId = booking.menteeId || booking.bookedBy;
-    if (menteeId && userId === menteeId.toString()) return true;
+    if (menteeId && userId === menteeId.toString()) {
+      isMember = true;
+    } else {
+      const mentor = await Mentor.findOne({ mentorId: session.mentorId, isDeleted: false }).lean();
+      isMember = !!mentor && mentor.userId.toString() === userId;
+    }
+    if (!isMember) return { ok: false };
 
-    const mentor = await Mentor.findOne({ mentorId: session.mentorId, isDeleted: false }).lean();
-    return !!mentor && mentor.userId.toString() === userId;
+    // Only allow while the specific booking is actually in progress
+    if ((booking.status as string) !== 'in_progress') {
+      return { ok: false, reason: NOT_STARTED_REASON };
+    }
+
+    return { ok: true };
   } catch (error: any) {
     LoggerUtil.warn(`isMentorshipSessionMember check failed: ${error.message}`);
-    return false;
+    return { ok: false };
   }
 }
 
 // ─── Helper: verify mentor/mentee membership on a Senior Mentor 1:1 session room ─────
-async function isSeniorOneToOneSessionMember(userId: string, roomId: string): Promise<boolean> {
+async function isSeniorOneToOneSessionMember(userId: string, roomId: string): Promise<MembershipResult> {
   try {
-    // For a Senior Mentor booking, roomId is the nested booking's _id
-    const session = await SeniorSession.findOne({ 'bookings._id': roomId }).lean() as any;
-    if (!session) return false;
+    if (!mongoose.isValidObjectId(roomId)) return { ok: false };
+
+    const session = (await SeniorSession.findOne({ 'bookings._id': roomId }).lean()) as any;
+    if (!session) return { ok: false };
 
     // Strictly one-to-one sessions only
     const sessionTypeStr = session.sessionType as string | undefined;
     if (sessionTypeStr && sessionTypeStr !== 'one_to_one' && sessionTypeStr !== '1_on_1') {
-      return false;
+      return { ok: false };
     }
 
     const booking = (session.bookings || []).find((b: any) => b._id.toString() === roomId);
-    if (!booking) return false;
+    if (!booking) return { ok: false };
 
-    // Verify booking is eligible for live call according to existing lifecycle
-    if ((booking.status as string) !== 'in_progress') return false;
-
-    // Authorize associated Mentee/Junior
+    let isMember = false;
     const menteeId = (booking.menteeId || booking.bookedBy)?.toString();
-    if (menteeId && userId === menteeId) return true;
+    if (menteeId && userId === menteeId) {
+      isMember = true;
+    } else if (session.mentorId && session.mentorId.toString() === userId) {
+      isMember = true;
+    } else {
+      const mentor = await Mentor.findOne({ mentorId: session.mentorId, isDeleted: false }).lean();
+      isMember = !!mentor && mentor.userId?.toString() === userId;
+    }
+    if (!isMember) return { ok: false };
 
-    // Authorize Senior Mentor who owns the session
-    if (session.mentorId && session.mentorId.toString() === userId) return true;
+    if ((booking.status as string) !== 'in_progress') {
+      return { ok: false, reason: NOT_STARTED_REASON };
+    }
 
-    // Authorize via linked standard mentor profile alias if applicable
-    const mentor = await Mentor.findOne({ mentorId: session.mentorId, isDeleted: false }).lean();
-    if (mentor && mentor.userId?.toString() === userId) return true;
-
-    return false;
+    return { ok: true };
   } catch (error: any) {
     LoggerUtil.warn(`isSeniorOneToOneSessionMember check failed: ${error.message}`);
-    return false;
+    return { ok: false };
   }
 }
 
 // ─── Helper: verify room access and determine max capacity ────────────────────
-async function getRoomAccess(userId: string, roomId: string): Promise<{ allowed: boolean, maxCapacity: number, errorReason?: string }> {
+async function getRoomAccess(
+  userId: string,
+  roomId: string
+): Promise<{ allowed: boolean; maxCapacity: number; errorReason?: string }> {
   // Allow mock group ID '1' for frontend UI testing
-  if (roomId === '1' || roomId === 1 as any) return { allowed: true, maxCapacity: MAX_ROOM_SIZE };
+  if (roomId === '1' || (roomId as any) === 1) return { allowed: true, maxCapacity: MAX_ROOM_SIZE };
 
   if (!userId || !roomId) {
     LoggerUtil.warn(`Missing userId or roomId in getRoomAccess check`);
     return { allowed: false, maxCapacity: 0, errorReason: 'Missing user ID or room ID' };
   }
 
+  // Best "why was I rejected" message collected while we try each room type.
+  let denyReason: string | undefined;
+
   // 1. StudyGroup room
+  //
+  // ⚠️ FIX: mentorship 1:1 roomId is a booking._id, which is ALSO a valid ObjectId.
+  // Earlier, any ObjectId roomId that wasn't a LiveRoom returned "Live room not found"
+  // immediately, so mentorship rooms never reached the mentorship checks below.
+  // Now a missing LiveRoom just means "this is not a study-group room" → fall through.
   try {
-    let targetGroupId = roomId;
+    let studyGroupId: any = null;
+
     if (mongoose.isValidObjectId(roomId)) {
       const liveRoom = await LiveRoom.findById(roomId).lean();
-      if (!liveRoom) {
-        return { allowed: false, maxCapacity: 0, errorReason: 'Live room not found' };
+      if (liveRoom) {
+        if (!liveRoom.isActive) {
+          return { allowed: false, maxCapacity: 0, errorReason: 'This live room has ended' };
+        }
+        studyGroupId = liveRoom.group;
       }
-      if (!liveRoom.isActive) {
-        return { allowed: false, maxCapacity: 0, errorReason: 'This live room has ended' };
-      }
-      targetGroupId = liveRoom.group;
+      // liveRoom === null → not a study-group live room, try mentorship checks
+    } else {
+      // Non-ObjectId roomId: treated as a groupId directly (legacy behaviour)
+      studyGroupId = roomId;
     }
 
-    const member = await GroupMember.findOne({
-      userId: userId,
-      groupId: targetGroupId,
-      status: 'active',
-    }).lean();
-    if (member) return { allowed: true, maxCapacity: MAX_ROOM_SIZE };
+    if (studyGroupId) {
+      const member = await GroupMember.findOne({
+        userId: userId,
+        groupId: studyGroupId,
+        status: 'active',
+      }).lean();
+      if (member) return { allowed: true, maxCapacity: MAX_ROOM_SIZE };
+      denyReason = 'You are not a member of this group';
+    }
   } catch (error: any) {
     LoggerUtil.warn(`StudyGroup check failed: ${error.message}`);
   }
 
-  // 2. Mentorship 1:1 room (bookingId is used as roomId)
+  // 2. Mentorship 1:1 room
   try {
     const mentorship1on1 = await isMentorshipSessionMember(userId, roomId);
-    if (mentorship1on1) return { allowed: true, maxCapacity: 2 };
+    if (mentorship1on1.ok) return { allowed: true, maxCapacity: 2 };
+    if (mentorship1on1.reason) denyReason = mentorship1on1.reason;
   } catch (error: any) {
     LoggerUtil.warn(`1:1 Mentorship check failed: ${error.message}`);
   }
 
-  // 3. Mentorship Group Session room (GroupSession.sessionId is used as roomId)
+  // 3. Mentorship Group Session room
   try {
     const session = await GroupSession.findOne({ sessionId: roomId }).lean();
     if (session) {
-      if ((session as any).status !== 'in_progress') return { allowed: false, maxCapacity: 0 };
+      if ((session as any).status !== 'in_progress') {
+        return { allowed: false, maxCapacity: 0, errorReason: NOT_STARTED_REASON };
+      }
 
       let isAllowed = false;
       const participant = ((session as any).participants || []).find(
@@ -172,7 +203,6 @@ async function getRoomAccess(userId: string, roomId: string): Promise<{ allowed:
       }
 
       if (isAllowed) {
-        // Capacity is max mentees + 1 mentor
         return { allowed: true, maxCapacity: session.maxParticipants + 1 };
       }
     }
@@ -180,22 +210,26 @@ async function getRoomAccess(userId: string, roomId: string): Promise<{ allowed:
     LoggerUtil.warn(`Group Session check failed: ${error.message}`);
   }
 
-  // 4. Senior Mentor 1:1 room (bookingId is used as roomId; strictly 1:1 max capacity 2)
+  // 4. Senior Mentor 1:1 room
   try {
-    const senior1on1Allowed = await isSeniorOneToOneSessionMember(userId, roomId);
-    if (senior1on1Allowed) return { allowed: true, maxCapacity: 2 };
+    const senior1on1 = await isSeniorOneToOneSessionMember(userId, roomId);
+    if (senior1on1.ok) return { allowed: true, maxCapacity: 2 };
+    if (senior1on1.reason) denyReason = senior1on1.reason;
   } catch (error: any) {
     LoggerUtil.warn(`Senior Mentor 1:1 check failed: ${error.message}`);
   }
 
-  return { allowed: false, maxCapacity: 0 };
+  LoggerUtil.warn(`Room access denied: user ${userId} → room ${roomId} (${denyReason || 'no match'})`);
+  return {
+    allowed: false,
+    maxCapacity: 0,
+    errorReason: denyReason || 'You are not allowed to join this room',
+  };
 }
-
-
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void => {
-  const userId   = (socket.data as any).userId || (socket as any).userId;
+  const userId = (socket.data as any).userId || (socket as any).userId;
   const userName = (socket.data as any).userName || (socket as any).userName || 'Unknown';
 
   // ── Join live room ─────────────────────────────────────────────────────────
@@ -204,7 +238,6 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
       const { roomId } = data;
       if (!roomId) return;
 
-      // roomId can be live room ObjectId or groupId
       const { allowed, maxCapacity, errorReason } = await getRoomAccess(userId, roomId);
       if (!allowed) {
         socket.emit('error', {
@@ -214,12 +247,19 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
         return;
       }
 
-      // Enforce room size limit
-      const currentSockets = await io.in(`live-room:${roomId}`).fetchSockets();
-      if (currentSockets.length >= maxCapacity) {
+      // Enforce room size limit and track participant in Redis
+      const joinResult = await SocketLiveRoomRepository.addParticipant(
+        roomId,
+        userId,
+        socket.id,
+        { userName },
+        maxCapacity
+      );
+
+      if (!joinResult.success) {
         socket.emit('error', {
           event: 'join-live-room',
-          message: `Live room is full (max ${maxCapacity} participants)`,
+          message: joinResult.errorReason || `Live room is full (max ${maxCapacity} participants)`,
         });
         return;
       }
@@ -227,15 +267,11 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
       socket.join(`live-room:${roomId}`);
       LoggerUtil.info(`User ${userId} joined live room ${roomId}`);
 
-      const currentSocketsAfterJoin = await io.in(`live-room:${roomId}`).fetchSockets();
-      if (currentSocketsAfterJoin.length === 1) {
-        // Start session automatically for the first user
-        if (!roomSessions.has(roomId)) {
-          roomSessions.set(roomId, {
-            active: true,
-            startedAt: Date.now(),
-            accumulatedTime: 0
-          });
+      // Start study session automatically for the first user
+      let session = await SocketLiveRoomRepository.getRoomSession(roomId);
+      if (joinResult.isFirst) {
+        if (!session) {
+          session = await SocketLiveRoomRepository.startRoomSession(roomId);
           LoggerUtil.info(`Started study session automatically for room ${roomId}`);
         }
       }
@@ -247,24 +283,21 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
         timestamp: new Date(),
       });
 
-      // Send current participant list back to the joiner
-      const socketsInRoom = await io.in(`live-room:${roomId}`).fetchSockets();
-      const participants = socketsInRoom
-        .map((s: any) => ({
-          userId:   s.data.userId,
-          userName: s.data.userName ?? 'Unknown',
-          socketId: s.id,
-        }))
-        .filter((p) => p.userId);
+      // Send current participant list back to the joiner from Redis
+      const participants = await SocketLiveRoomRepository.getRoomParticipants(roomId);
 
       socket.emit('room-participants-list', {
         roomId,
         participants,
         count: participants.length,
+        session: session || null,
       });
-
     } catch (error: any) {
       LoggerUtil.error('Error joining live room', { error: error.message, userId });
+      socket.emit('error', {
+        event: 'join-live-room',
+        message: 'Could not join the room. Please try again.',
+      });
     }
   });
 
@@ -276,9 +309,8 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
     socket.leave(`live-room:${roomId}`);
     LoggerUtil.info(`User ${userId} left live room ${roomId}`);
 
-    const remainingSockets = await io.in(`live-room:${roomId}`).fetchSockets();
-    if (remainingSockets.length === 0) {
-      roomSessions.delete(roomId);
+    const { isRoomEmpty } = await SocketLiveRoomRepository.removeParticipant(roomId, socket.id);
+    if (isRoomEmpty) {
       LoggerUtil.info(`Cleared study session for empty room ${roomId}`);
     }
 
@@ -289,13 +321,20 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
     });
   });
 
+  // ── Heartbeat for live room presence ──────────────────────────────────────
+  socket.on('liveroom:heartbeat', async (data: { roomId: string }) => {
+    if (data?.roomId) {
+      await SocketLiveRoomRepository.heartbeat(data.roomId, socket.id);
+    }
+  });
+
   // ── Camera toggle ──────────────────────────────────────────────────────────
-  socket.on('toggle-camera', (data: ToggleCameraPayload) => {
+  socket.on('toggle-camera', async (data: ToggleCameraPayload) => {
     const { roomId, cameraOn } = data;
     if (!roomId) return;
 
-    // Store state in socket data for new users who join later
     (socket.data as any).camOn = cameraOn;
+    await SocketLiveRoomRepository.updateParticipantState(roomId, socket.id, { camOn: cameraOn });
 
     socket.to(`live-room:${roomId}`).emit('user-camera-toggle', {
       userId,
@@ -305,12 +344,12 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
   });
 
   // ── Mic toggle ─────────────────────────────────────────────────────────────
-  socket.on('toggle-mic', (data: ToggleMicPayload) => {
+  socket.on('toggle-mic', async (data: ToggleMicPayload) => {
     const { roomId, micOn } = data;
     if (!roomId) return;
 
-    // Store state in socket data for new users who join later
     (socket.data as any).micOn = micOn;
+    await SocketLiveRoomRepository.updateParticipantState(roomId, socket.id, { micOn });
 
     socket.to(`live-room:${roomId}`).emit('user-mic-toggle', {
       userId,
@@ -332,32 +371,20 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
   });
 
   // ── Disconnect cleanup ─────────────────────────────────────────────────────
-  // socket.io removes the socket from all rooms automatically on disconnect,
-  // but it does NOT emit 'leave-live-room' for us — so without this, other
-  // peers never learn this user actually left (stale UI/session state).
-   // 'disconnecting' use karo, 'disconnect' nahi: disconnect tak socket.rooms khali ho jata hai,
-  // isliye purana handler kabhi kuch emit nahi karta tha.
   socket.on('disconnecting', async () => {
     try {
-      // await se pehle sync capture karo
-      const rooms = Array.from(socket.rooms || []).filter((r) =>
-        r.startsWith('live-room:')
-      );
+      const rooms = Array.from(socket.rooms || []).filter((r) => r.startsWith('live-room:'));
       for (const room of rooms) {
         const roomId = room.replace('live-room:', '');
-        // Is waqt ye socket abhi room me hai, isliye filter karna zaroori hai
-        const remaining = (await io.in(room).fetchSockets()).filter(
-          (s) => s.id !== socket.id
-        );
+        const { isRoomEmpty } = await SocketLiveRoomRepository.removeParticipant(roomId, socket.id);
 
-        if (remaining.length === 0) {
-          roomSessions.delete(roomId);
+        if (isRoomEmpty) {
           LoggerUtil.info(`Cleared study session for empty room ${roomId} (disconnect)`);
         }
 
-        // Same user ka naya socket (rejoin) room me hai to "left" mat bhejo,
-        // warna peers naya working connection tod denge.
-        const stillPresent = remaining.some((s: any) => s.data?.userId === userId);
+        // Check if user still has another socket in the room
+        const remainingParticipants = await SocketLiveRoomRepository.getRoomParticipants(roomId);
+        const stillPresent = remainingParticipants.some((p) => p.userId === userId);
         if (stillPresent) continue;
 
         socket.to(room).emit('user-left-room', {
@@ -377,31 +404,22 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
       const { roomId } = data;
       if (!roomId) return;
 
-      const socketsInRoom = await io.in(`live-room:${roomId}`).fetchSockets();
-      const participants = socketsInRoom
-        .map((s: any) => ({
-          userId:   s.data.userId,
-          userName: s.data.userName ?? 'Unknown',
-          socketId: s.id,
-          camOn: s.data.camOn || false,
-          micOn: s.data.micOn || false,
-        }))
-        .filter((p) => p.userId);
+      const participants = await SocketLiveRoomRepository.getRoomParticipants(roomId);
+      const session = await SocketLiveRoomRepository.getRoomSession(roomId);
 
       socket.emit('room-participants-list', {
         roomId,
         participants,
         count: participants.length,
-        session: roomSessions.get(roomId) || null,
+        session: session || null,
       });
-
     } catch (error: any) {
       LoggerUtil.error('Error fetching room participants', { error: error.message, userId });
     }
   });
 
   // ── Session toggle ───────────────────────────────────────────────────────────
-  socket.on('toggle-session', async (data: { roomId: string, active: boolean }) => {
+  socket.on('toggle-session', async (data: { roomId: string; active: boolean }) => {
     const { roomId, active } = data;
     if (!roomId) return;
 
@@ -410,70 +428,51 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
       userId,
       groupId: roomId,
       role: { $in: ['leader', 'moderator'] },
-      status: 'active'
+      status: 'active',
     }).lean();
 
     if (!member) {
-      socket.emit('error', { event: 'toggle-session', message: 'Only leaders and moderators can toggle the study session' });
+      socket.emit('error', {
+        event: 'toggle-session',
+        message: 'Only leaders and moderators can toggle the study session',
+      });
       return;
     }
 
-    let session = roomSessions.get(roomId);
-    if (!session) {
-      session = {
-        active,
-        startedAt: active ? Date.now() : null,
-        accumulatedTime: 0
-      };
-      roomSessions.set(roomId, session);
-    } else {
-      if (session.active !== active) {
-        if (active) {
-          // Resume
-          session.active = true;
-          session.startedAt = Date.now();
-        } else {
-          // Pause
-          session.active = false;
-          if (session.startedAt) {
-            session.accumulatedTime += Date.now() - session.startedAt;
-            session.startedAt = null;
-          }
-        }
-      }
-    }
+    const session = await SocketLiveRoomRepository.toggleRoomSession(roomId, active);
 
     // Broadcast the new session state to everyone in the room
     io.in(`live-room:${roomId}`).emit('session-toggled', {
       roomId,
-      session
+      session,
     });
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // WebRTC SIGNALING — peer-to-peer, NOT room-wide broadcast
-  //
-  // Each signal (offer / answer / ICE candidate) must reach ONLY the intended
-  // peer. We use their personal room (user:{targetUserId}) which is joined
-  // server-side on connection (see socket/index.ts).
+  // WebRTC SIGNALING - peer-to-peer, NOT room-wide broadcast
+  // WebRTC signaling does NOT touch Redis storage. It is routed peer-to-peer
+  // via Socket.IO events to user:{targetUserId}.
   // ─────────────────────────────────────────────────────────────────────────
 
   const validateSignaling = async (senderId: string, targetId: string, roomId: string): Promise<boolean> => {
-    // 1. sender is authorized for the provided roomId
     const { allowed } = await getRoomAccess(senderId, roomId);
     if (!allowed) {
       LoggerUtil.warn(`Signaling blocked: sender ${senderId} not allowed in room ${roomId}`);
       return false;
     }
 
-    // 2. target user is an active participant of the SAME live room
-    const targetSockets = await io.in(`live-room:${roomId}`).fetchSockets();
-    const isTargetInRoom = targetSockets.some(
-      (s: any) => s.data?.userId === targetId || (s as any).userId === targetId
-    );
+    const participants = await SocketLiveRoomRepository.getRoomParticipants(roomId);
+    const isTargetInRoom = participants.some((p) => p.userId === targetId);
     if (!isTargetInRoom) {
-       LoggerUtil.warn(`Signaling blocked: target ${targetId} not in room ${roomId}`);
-       return false;
+      // Fallback check in local room sockets
+      const targetSockets = await io.in(`live-room:${roomId}`).fetchSockets();
+      const isTargetInLocal = targetSockets.some(
+        (s: any) => s.data?.userId === targetId || (s as any).userId === targetId
+      );
+      if (!isTargetInLocal) {
+        LoggerUtil.warn(`Signaling blocked: target ${targetId} not in room ${roomId}`);
+        return false;
+      }
     }
 
     return true;
@@ -487,7 +486,6 @@ export const liveRoomHandler = (io: Server, socket: AuthenticatedSocket): void =
 
     LoggerUtil.debug(`WebRTC offer from ${userId} to ${targetUserId}`);
 
-    // Send ONLY to the target user's personal room
     io.to(`user:${targetUserId}`).emit('webrtc-offer-received', {
       fromUserId: userId,
       roomId,

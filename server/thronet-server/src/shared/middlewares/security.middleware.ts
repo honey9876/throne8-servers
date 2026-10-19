@@ -4,12 +4,10 @@
  * CSRF token generation + protection + Postman friendly
  */
 
-import csrf from 'csurf';
 import type { Request, Response, NextFunction } from 'express';
 import LoggerUtil from '../logger.util';
 import ResponseUtil from '../response.util';
-// import securityConfig from '@/config/security/';
-import securityConfig from '@/config/security/rateLimit.config';
+import { csrfProtection } from '@/config/security/csrf.config';
 
 // ==================== SECURITY MIDDLEWARE ====================
 
@@ -41,18 +39,11 @@ const securityMiddleware = (req: Request, res: Response, next: NextFunction): vo
     // lekin validation nahi karni — isliye sirf initialize karenge
     if (req.path === '/api/v1/auth/csrf-token') {
         LoggerUtil.info('Generating CSRF token - middleware applied for token creation', { path: req.path });
-
-        if (securityConfig.csrf.enabled) {
-            const csrfProtection = csrf({ cookie: securityConfig.csrf.cookie });
-            // Sirf middleware chalao, validation error nahi handle karna yahan
-            csrfProtection(req, res, () => {
-                // csrfToken() ab available hai
-                next();
-            });
-            return;
-        } else {
-            return next(); // CSRF disabled hai toh direct next
-        }
+        csrfProtection(req, res, () => {
+            // csrfToken() ab available hai
+            next();
+        });
+        return;
     }
 
     // Baaki public paths pe CSRF validation bilkul mat lagao
@@ -62,21 +53,15 @@ const securityMiddleware = (req: Request, res: Response, next: NextFunction): vo
     }
 
     // Protected routes pe full CSRF validation
-    if (securityConfig.csrf.enabled) {
-        const csrfProtection = csrf({ cookie: securityConfig.csrf.cookie });
-        csrfProtection(req, res, (err: any) => {
-            if (err) {
-                LoggerUtil.error('CSRF validation failed', { error: err.message, ipAddress });
-                res.status(403).json(ResponseUtil.forbidden('Invalid or missing CSRF token'));
-            } else {
-                LoggerUtil.info('CSRF token validated successfully', { path: req.path });
-                next();
-            }
-        });
-        return;
-    }
-
-    next();
+    csrfProtection(req, res, (err: any) => {
+        if (err) {
+            LoggerUtil.error('CSRF validation failed', { error: err.message, ipAddress });
+            ResponseUtil.forbidden(res, 'Invalid or missing CSRF token');
+        } else {
+            LoggerUtil.info('CSRF token validated successfully', { path: req.path });
+            next();
+        }
+    });
 };
 
 export default securityMiddleware;

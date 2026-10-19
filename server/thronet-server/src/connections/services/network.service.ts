@@ -1005,9 +1005,24 @@ class EnhancedCacheManager {
       
       // Clear Redis cache
       const redisClient = await this.getRedisClient();
-      const keys = await redisClient.keys(`*${pattern}*`);
+      let cursor = '0';
+      const keys: string[] = [];
+      do {
+        const [nextCursor, matchedKeys] = await redisClient.scan(
+          cursor,
+          'MATCH',
+          `*${pattern}*`,
+          'COUNT',
+          100
+        );
+        cursor = nextCursor;
+        if (matchedKeys && matchedKeys.length > 0) {
+          keys.push(...matchedKeys);
+        }
+      } while (cursor !== '0');
+
       if (keys.length > 0) {
-        await redisClient.del(...keys);
+        await Promise.all(keys.map((k: string) => redisClient.del(k)));
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

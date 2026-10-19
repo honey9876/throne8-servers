@@ -28,17 +28,10 @@ interface AuditData {
     metadata?: Record<string, any>;
 }
 
-export interface AuthUser {
-    userId: string;
-    id: string;
-    email: string;
-    role: string;
-    deviceId: string | null;
-    sessionId: string | null;
-}
+export type AuthUser = Express.User;
 
 interface AuthenticatedRequest extends Request {
-    user?: AuthUser;
+    user?: Express.User;
     correlationId?: string;
 }
 

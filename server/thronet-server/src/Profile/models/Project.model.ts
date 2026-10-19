@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Project Model - User Projects with Media, Skills, Team Members
  * 
  * @module models/Project.model
@@ -453,6 +453,10 @@ ProjectSchema.statics.getNextDisplayOrder = async function (userId: string): Pro
 };
 
 // ==================== EXPORT ====================
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(ProjectSchema, 'userId');
 
 const Project = mongoose.model<IProject, IProjectModel>('Project', ProjectSchema);
 export default Project;

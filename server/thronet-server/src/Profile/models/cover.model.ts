@@ -1,4 +1,4 @@
-﻿/**
+/**
  * CoverPhoto Model - User Cover/Banner Picture Management
  * @module models/CoverPhoto.model
  * @version 1.0.0
@@ -199,6 +199,10 @@ CoverPhotoSchema.statics.setActiveCover = async function (coverId: string, userI
         throw error;
     }
 };
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(CoverPhotoSchema, 'userId');
 
 const CoverPhoto = mongoose.model<ICoverPhoto, ICoverPhotoModel>('CoverPhoto', CoverPhotoSchema);
 export default CoverPhoto;

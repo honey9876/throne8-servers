@@ -1,4 +1,4 @@
-﻿// thronet-server/src/connections/models/ConnectionBlock.ts
+// thronet-server/src/connections/models/ConnectionBlock.ts
 import mongoose, { Document, Schema, Model, Types } from 'mongoose';
 
 export enum BlockReason {
@@ -14,6 +14,25 @@ export enum BlockReason {
     SCAM_FRAUD = 'scam_fraud',
     COPYRIGHT_VIOLATION = 'copyright_violation',
     OTHER = 'other',
+}
+
+export enum BlockType {
+    FULL = 'full',
+    PROFILE_ONLY = 'profile_only',
+    MESSAGING_ONLY = 'messaging_only',
+}
+
+export enum BlockSeverity {
+    LOW = 'low',
+    MEDIUM = 'medium',
+    HIGH = 'high',
+    CRITICAL = 'critical',
+}
+
+export enum BlockStatus {
+    ACTIVE = 'active',
+    INACTIVE = 'inactive',
+    EXPIRED = 'expired',
 }
 
 export interface IConnectionBlock extends Document {
@@ -61,6 +80,33 @@ ConnectionBlockSchema.methods.unblock = function (this: IConnectionBlock) {
 ConnectionBlockSchema.statics.isBlocked = function (blockerId: string, blockedId: string) {
     return this.exists({ blockerId, blockedId, isActive: true }).then((r: any) => !!r);
 };
+
+// ── Cache Sync Hook on Block ──────────────────────────────────
+import { ConnectionCacheRepository } from '@/shared/cache/connectionCache';
+ConnectionBlockSchema.post('save', async function (doc: any) {
+    try {
+        if (doc?.blockerId && doc?.blockedId) {
+            if (doc.isActive) {
+                await ConnectionCacheRepository.handleUserBlock(String(doc.blockerId), String(doc.blockedId));
+            } else {
+                await ConnectionCacheRepository.handleUserUnblock(String(doc.blockerId), String(doc.blockedId));
+            }
+        }
+    } catch {
+        // fail-safe
+    }
+});
+
+ConnectionBlockSchema.post(['deleteOne', 'deleteMany', 'findOneAndDelete'] as any, async function (this: any) {
+    try {
+        const filter = this.getFilter() || {};
+        if (filter.blockerId && filter.blockedId) {
+            await ConnectionCacheRepository.handleUserUnblock(String(filter.blockerId), String(filter.blockedId));
+        }
+    } catch {
+        // fail-safe
+    }
+});
 
 const ConnectionBlock = mongoose.model<IConnectionBlock, IConnectionBlockModel>(
     'ConnectionBlock',

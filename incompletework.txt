@@ -1,0 +1,119 @@
+# REDIS OPTIMIZATION: PERMANENT RULES (apply to every task)
+1. MongoDB is the source of truth. Redis is a cache/accelerator, except for ephemeral data (presence, typing, rate limits).
+2. If Redis is down/slow/corrupt, fall back to MongoDB. For security-critical checks (JWT blacklist) choose fail-open vs fail-closed explicitly, document why, and make it an env flag.
+3. Never share data across users unless it is truly public. Every private key contains userId (or viewerId). Never cache passwords, tokens, OTPs, Aadhaar data, or other users' email/phone.
+4. Do not change any API response shape, status code, or error message.
+5. No TODOs, placeholders, commented-out code, `any` casts to silence errors, or empty catch blocks. Minimal diffs; no unrelated refactors.
+6. Every write path (controllers, services, Mongoose hooks incl. findOneAndUpdate/updateMany/bulkWrite, admin routes, cron jobs, scripts, socket handlers) must invalidate or update its cache. List them explicitly.
+7. Every Redis key has a TTL (with ±10% jitter), a namespaced versioned name (`app:v1:<domain>:<id>`), bounded length, and sanitized input. Use SCAN, never KEYS.
+8. Every cache domain has an env kill switch (`CACHE_<DOMAIN>_ENABLED`). All TTLs come from validated env config.
+9. Every Redis call is wrapped with timeout + try/catch + logging + fallback. No PII/secrets in logs or key names (hash emails).
+10. Must work with multiple Node instances (PM2/cluster/docker).
+11. After each task: `tsc --noEmit`, lint, full tests, and build must pass with no new warnings. Then STOP and report; wait for my "continue".
+12. If anything is ambiguous or risky, ask me instead of guessing.
+Implement ONLY this item: <ITEM>.
+
+Follow this loop:
+1. Read every code path that reads AND writes this data. List all write paths.
+2. Design: key names, value shape, TTL, invalidation triggers, fallback, concurrent-write behaviour.
+3. Implement.
+4. Tests: hit, miss, Redis down, invalidation after EVERY write path, concurrent requests, user A never gets user B's data, TTL expiry.
+5. Run tsc, lint, full tests, build. Fix everything.
+6. Review your own diff as a hostile security reviewer: cross-user leakage, auth still enforced on cache hits, unbounded key growth, stale data, race conditions, serialization, log leaks.
+7. Report: files changed, keys added, invalidation map, tests added, remaining risks. STOP and wait for "continue".
+
+Item-specific rules:
+A Redis lock (SET NX PX with unique token, release via Lua) is only an optimization. A MongoDB unique index or transaction must remain the final guard against double-booking. Handle timezones correctly. Invalidate availability on booking, cancel, reschedule, and slot edits.
+
+Never cache content a user isn't authorized to see (private groups, blocked authors, deleted/moderated content). For reaction counters, only use Redis counters if sync to MongoDB is reliable and idempotent per user-per-post; otherwise use short-TTL read caching and keep writes in MongoDB.
+
+Add @socket.io/redis-adapter with separate pub/sub connections. Keep socket authentication unchanged. Presence uses TTL heartbeat keys and a SET of socket IDs per user (multi-tab/device safe). Move in-memory Maps to Redis only where multi-instance correctness needs it, with cleanup on disconnect and TTLs for crashes.
+
+Cache skills/industries/degrees/categories with a 24h TTL, invalidate on admin edit, and warm up on boot.
+
+
+
+
+
+
+
+
+
+
+# REDIS OPTIMIZATION: PERMANENT RULES (apply to every task)
+1. MongoDB is the source of truth. Redis is a cache/accelerator, except for ephemeral data (presence, typing, rate limits).
+2. If Redis is down/slow/corrupt, fall back to MongoDB. For security-critical checks (JWT blacklist) choose fail-open vs fail-closed explicitly, document why, and make it an env flag.
+3. Never share data across users unless it is truly public. Every private key contains userId (or viewerId). Never cache passwords, tokens, OTPs, Aadhaar data, or other users' email/phone.
+4. Do not change any API response shape, status code, or error message.
+5. No TODOs, placeholders, commented-out code, `any` casts to silence errors, or empty catch blocks. Minimal diffs; no unrelated refactors.
+6. Every write path (controllers, services, Mongoose hooks incl. findOneAndUpdate/updateMany/bulkWrite, admin routes, cron jobs, scripts, socket handlers) must invalidate or update its cache. List them explicitly.
+7. Every Redis key has a TTL (with ±10% jitter), a namespaced versioned name (`app:v1:<domain>:<id>`), bounded length, and sanitized input. Use SCAN, never KEYS.
+8. Every cache domain has an env kill switch (`CACHE_<DOMAIN>_ENABLED`). All TTLs come from validated env config.
+9. Every Redis call is wrapped with timeout + try/catch + logging + fallback. No PII/secrets in logs or key names (hash emails).
+10. Must work with multiple Node instances (PM2/cluster/docker).
+11. After each task: `tsc --noEmit`, lint, full tests, and build must pass with no new warnings. Then STOP and report; wait for my "continue".
+12. If anything is ambiguous or risky, ask me instead of guessing.
+Implement ONLY this item: <ITEM>.
+
+Follow this loop:
+1. Read every code path that reads AND writes this data. List all write paths.
+2. Design: key names, value shape, TTL, invalidation triggers, fallback, concurrent-write behaviour.
+3. Implement.
+4. Tests: hit, miss, Redis down, invalidation after EVERY write path, concurrent requests, user A never gets user B's data, TTL expiry.
+5. Run tsc, lint, full tests, build. Fix everything.
+6. Review your own diff as a hostile security reviewer: cross-user leakage, auth still enforced on cache hits, unbounded key growth, stale data, race conditions, serialization, log leaks.
+7. Report: files changed, keys added, invalidation map, tests added, remaining risks. STOP and wait for "continue".
+
+Item-specific rules:
+
+Cache only userId, role, status, accountStatus. TTL ≤ 5 min. Invalidate immediately on ban/suspend/deactivate/delete, role change, credential/email change, password change, logout-all. A banned user must lose access immediately, not after TTL. Keep JWT signature/expiry verification and the blacklist check on every request, untouched.
+
+First find everything that depends on exact lastActivity (idle timeout, device list, security checks). Debounce the write (SET NX EX guard so MongoDB is updated at most once per N minutes per session) instead of inventing a flush job. Session expiry/revocation checks must remain authoritative. Document the new semantics.
+
+first check have you implimented this above task fully if not complete it and then complte the final  audit
+
+FINAL AUDIT. Do not add features.
+
+1. Run tsc --noEmit, lint, full tests, build.
+2. Grep for leftover KEYS, console.log, TODO, commented-out code, duplicate Redis clients, and Redis keys without TTL.
+3. Produce a table of every Redis key pattern: owner file, TTL, invalidation triggers, public/private, size estimate.
+4. Create an autocannon/k6 benchmark script and report before/after numbers for: an authenticated endpoint, profile, notifications unread-count, chat list, leaderboard, and the OTP endpoint.
+5. Produce a rollout plan (feature flags, order, monitoring, rollback) and list everything deliberately NOT changed and why.# REDIS OPTIMIZATION: PERMANENT RULES (apply to every task)
+1. MongoDB is the source of truth. Redis is a cache/accelerator, except for ephemeral data (presence, typing, rate limits).
+2. If Redis is down/slow/corrupt, fall back to MongoDB. For security-critical checks (JWT blacklist) choose fail-open vs fail-closed explicitly, document why, and make it an env flag.
+3. Never share data across users unless it is truly public. Every private key contains userId (or viewerId). Never cache passwords, tokens, OTPs, Aadhaar data, or other users' email/phone.
+4. Do not change any API response shape, status code, or error message.
+5. No TODOs, placeholders, commented-out code, `any` casts to silence errors, or empty catch blocks. Minimal diffs; no unrelated refactors.
+6. Every write path (controllers, services, Mongoose hooks incl. findOneAndUpdate/updateMany/bulkWrite, admin routes, cron jobs, scripts, socket handlers) must invalidate or update its cache. List them explicitly.
+7. Every Redis key has a TTL (with ±10% jitter), a namespaced versioned name (`app:v1:<domain>:<id>`), bounded length, and sanitized input. Use SCAN, never KEYS.
+8. Every cache domain has an env kill switch (`CACHE_<DOMAIN>_ENABLED`). All TTLs come from validated env config.
+9. Every Redis call is wrapped with timeout + try/catch + logging + fallback. No PII/secrets in logs or key names (hash emails).
+10. Must work with multiple Node instances (PM2/cluster/docker).
+11. After each task: `tsc --noEmit`, lint, full tests, and build must pass with no new warnings. Then STOP and report; wait for my "continue".
+12. If anything is ambiguous or risky, ask me instead of guessing.
+Implement ONLY this item: <ITEM>.
+
+Follow this loop:
+1. Read every code path that reads AND writes this data. List all write paths.
+2. Design: key names, value shape, TTL, invalidation triggers, fallback, concurrent-write behaviour.
+3. Implement.
+4. Tests: hit, miss, Redis down, invalidation after EVERY write path, concurrent requests, user A never gets user B's data, TTL expiry.
+5. Run tsc, lint, full tests, build. Fix everything.
+6. Review your own diff as a hostile security reviewer: cross-user leakage, auth still enforced on cache hits, unbounded key growth, stale data, race conditions, serialization, log leaks.
+7. Report: files changed, keys added, invalidation map, tests added, remaining risks. STOP and wait for "continue".
+
+Item-specific rules:
+
+Cache only userId, role, status, accountStatus. TTL ≤ 5 min. Invalidate immediately on ban/suspend/deactivate/delete, role change, credential/email change, password change, logout-all. A banned user must lose access immediately, not after TTL. Keep JWT signature/expiry verification and the blacklist check on every request, untouched.
+
+First find everything that depends on exact lastActivity (idle timeout, device list, security checks). Debounce the write (SET NX EX guard so MongoDB is updated at most once per N minutes per session) instead of inventing a flush job. Session expiry/revocation checks must remain authoritative. Document the new semantics.
+
+first check have you implimented this above task fully if not complete it and then complte the final  audit
+
+FINAL AUDIT. Do not add features.
+
+1. Run tsc --noEmit, lint, full tests, build.
+2. Grep for leftover KEYS, console.log, TODO, commented-out code, duplicate Redis clients, and Redis keys without TTL.
+3. Produce a table of every Redis key pattern: owner file, TTL, invalidation triggers, public/private, size estimate.
+4. Create an autocannon/k6 benchmark script and report before/after numbers for: an authenticated endpoint, profile, notifications unread-count, chat list, leaderboard, and the OTP endpoint.
+5. Produce a rollout plan (feature flags, order, monitoring, rollback) and list everything deliberately NOT changed and why.

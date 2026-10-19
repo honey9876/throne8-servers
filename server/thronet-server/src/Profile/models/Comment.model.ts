@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Comment Model - Activity System
  * @module models/Comment.model
  * @version 1.0.0
@@ -150,6 +150,24 @@ CommentSchema.statics.getUserCommentStats = async function (userId: string) {
         averageCommentsPerPost: uniquePosts > 0 ? (totalComments / uniquePosts).toFixed(2) : 0,
     };
 };
+
+CommentSchema.post('save', async function (doc: any) {
+    if (doc?.postId) {
+        try {
+            const { CommentCacheRepository } = await import('@/shared/cache/feedCompanyCommentCache');
+            await CommentCacheRepository.invalidatePostComments(doc.postId);
+        } catch {}
+    }
+});
+
+CommentSchema.post(['deleteOne', 'findOneAndDelete'], async function (doc: any) {
+    if (doc?.postId) {
+        try {
+            const { CommentCacheRepository } = await import('@/shared/cache/feedCompanyCommentCache');
+            await CommentCacheRepository.invalidatePostComments(doc.postId);
+        } catch {}
+    }
+});
 
 const Comment = mongoose.model<IComment, ICommentModel>('Comment', CommentSchema);
 export default Comment;

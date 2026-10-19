@@ -242,7 +242,6 @@ const ResumeSchema = new Schema<ResumeDocument>(
 
 // Indexes
 ResumeSchema.index({ userId: 1, isLatest: 1, isDeleted: 1 });
-ResumeSchema.index({ sessionId: 1 });
 ResumeSchema.index({ 'analysis.atsScore': 1 });
 
 // Virtuals
@@ -330,6 +329,7 @@ ResumeSchema.statics.getResumeStats = async function (userId: string) {
   };
 };
 
-export default mongoose.model<ResumeDocument , ResumeModel>('Resume', ResumeSchema);
+export default (mongoose.models['Resume'] as ResumeModel) ||
+  mongoose.model<ResumeDocument, ResumeModel>('Resume', ResumeSchema);
 
 

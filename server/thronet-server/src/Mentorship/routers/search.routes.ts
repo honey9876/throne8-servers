@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { searchController } from '@/shared/controllers/index.controllers';
 import { rateLimitSearch } from '@/Mentorship/middlewares/rateLimit.middleware';
+import { getFieldSuggestions } from '@/Mentorship/controllers/fieldSuggestions.controller';
+
 
 const router = Router();
 
@@ -73,5 +75,12 @@ router.post(
   rateLimitSearch,
   searchController.clearFilters
 );
+
+/**
+ * @route   GET /api/search/field-suggestions
+ * @desc    Real-data autocomplete for mentor form fields
+ * @query   field (company|college|degree|branch|role|skills), q, limit
+ */
+router.get('/field-suggestions', rateLimitSearch, getFieldSuggestions);
 
 export default router;

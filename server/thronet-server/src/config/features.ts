@@ -18,6 +18,9 @@ export const FEATURES = {
   messaging: readFlag('ENABLE_MESSAGING', false),
   studyGroup: readFlag('ENABLE_STUDY_GROUP', false),
   jobService: readFlag('ENABLE_JOB_SERVICE', false),
+
+  // Resume Builder — default ON (merged from resume12)
+  resumeBuilder: readFlag('ENABLE_RESUME_BUILDER', true),
 } as const;
 
 export type FeatureName = keyof typeof FEATURES;

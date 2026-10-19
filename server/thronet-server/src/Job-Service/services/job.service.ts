@@ -26,7 +26,7 @@ import { NotFoundError, ValidationError } from '@/shared/errors/app.error';
 import constants from '@/shared/constants.util';
 import pagination from '@/shared/utils/company/pagination';
 import { IJob, StatsService } from '../models/Job.model';
-import { ApplicationStatus, JobFilterQuery, JobListResponse, JobResponseDTO, JobStatus } from '@/company/interfaces';
+import { ApplicationStatus, ApplyJobDTO, JobFilterQuery, JobListResponse, JobLocationType, JobResponseDTO, JobStatus } from '@/company/interfaces';
 
 
 /**
@@ -279,7 +279,7 @@ export const listJobs = async ({
   requestId,
 }: {
   filters: any;
-  requestId: string;
+  requestId?: string;
 }) => {
   const startTime = Date.now();
 
@@ -444,7 +444,7 @@ export const getJobsByCompany = async (companyId: string, filters?: JobFilterQue
     const skip = (safePage - 1) * safePageSize;
     const [jobs, total] = await Promise.all([
       Job.findJobsByCompany(companyId, { ...filters, skip, limit: safePageSize }),
-      Job.countDocuments({ company: companyId, isActive: true }),
+      Job.countDocuments({ companyId, isActive: true }),
     ]);
 
     const meta = pagination.getMeta(total, safePage, safePageSize);
@@ -473,9 +473,9 @@ export const getJobsByCompany = async (companyId: string, filters?: JobFilterQue
 // =====================================================
 // SEARCH JOBS
 // =====================================================
-export const searchJobs = async (filters: JobFilterQuery ): Promise<JobListResponse> => {
+export const searchJobs = async (filters: JobFilterQuery): Promise<any> => {
   try {
-    return listJobs(filters);
+    return listJobs({ filters, requestId: filters.requestId });
   } catch (error : any) {
     logger.error('Error searching jobs:', error);
     throw error;
@@ -514,7 +514,7 @@ export const getOpenJobs = async (filters?: JobFilterQuery): Promise<JobListResp
     };
 
     // Longer cache for open jobs (more stable data)
-    CacheUtil.set(cacheKey, response, Number(constants.CACHE_TTLS.OPEN_JOBS)).catch((err) =>
+    CacheUtil.set(cacheKey, response, Number(constants.CACHE_TTLS.JOB_LIST)).catch((err) =>
       logger.error('Cache set error:', err)
     );
 
@@ -543,7 +543,7 @@ export const getClosedJobs = async (filters?: JobFilterQuery): Promise<JobListRe
     const meta = pagination.getMeta(total, safePage, safePageSize);
 
     return {
-      jobs: jobs.map((job) => this.formatJobResponse(job)),
+      jobs: jobs.map((job: any) => formatJobResponse(job)),
       total,
       page: meta.page,
       pageSize: meta.pageSize,
@@ -578,7 +578,7 @@ export const applyToJob = async (data: ApplyJobDTO): Promise<boolean> => {
             employee: new mongoose.Types.ObjectId(data.employeeId),
             resume: data.resume,
             coverLetter: data.coverLetter,
-            status: ApplicationStatus.PENDING,
+            status: ApplicationStatus.APPLIED,
             appliedAt: new Date(),
           },
         },
@@ -765,35 +765,42 @@ export const updateJobStatus = async (id: string, status: JobStatus): Promise<bo
 // =====================================================
 // FORMAT JOB RESPONSE
 // =====================================================
-const formatJobResponse = (job: IJob): JobResponseDTO => {
-  const companyData = job.company as unknown as {
-    _id?: string;
-    name?: string;
-    logo?: string;
-  };
+const formatJobResponse = (job: any): JobResponseDTO => {
+  const companyData = typeof job.company === 'object' && job.company !== null
+    ? job.company
+    : {};
+
+  const companyId = job.companyId || (companyData._id ? companyData._id.toString() : (job.company ? job.company.toString() : ''));
+  const locationType: JobLocationType = job.location?.isRemote
+    ? 'Remote'
+    : (job.location?.type || 'On-site');
 
   return {
-    _id: job._id.toString(),
-    title: job.title,
-    slug: job.slug,
-    description: job.description,
+    _id: job._id ? job._id.toString() : (job.jobId || ''),
+    title: job.title || '',
+    slug: job.slug || '',
+    description: job.description || '',
     company: {
-      _id: companyData._id?.toString() || job.company.toString(),
-      name: companyData.name || '',
+      _id: companyId,
+      name: companyData.name || job.companyName || '',
       logo: companyData.logo,
     },
     department: job.department,
-    type: job.type,
-    experienceLevel: job.experience.level,
-    salary: job.salary,
-    location: job.location,
-    skills: job.skills,
-    benefits: job.benefits,
-    applicationsCount: job.stats.applicationsCount,
+    type: job.jobType || job.type,
+    experienceLevel: job.experience?.level || job.experienceLevel,
+    salary: job.salary ? {
+      min: job.salary.min,
+      max: job.salary.max,
+      currency: job.salary.currency,
+    } : undefined,
+    location: locationType,
+    skills: Array.isArray(job.skills) ? job.skills.map((s: any) => typeof s === 'string' ? s : s.name) : [],
+    benefits: Array.isArray(job.benefits) ? job.benefits : (job.benefits?.perks || []),
+    applicationsCount: job.stats?.applicationsCount || job.applicationsCount || 0,
     status: job.status,
-    postedDate: job.postedDate,
-    closingDate: job.closingDate,
+    postedDate: job.dates?.posted || job.postedDate || job.createdAt,
+    closingDate: job.dates?.closing || job.closingDate,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
   };
-}
+};

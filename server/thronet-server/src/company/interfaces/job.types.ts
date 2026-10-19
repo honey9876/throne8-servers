@@ -11,13 +11,8 @@ export enum JobType {
   INTERNSHIP = 'Internship',
 }
 
-export enum ExperienceLevel {
-  ENTRY = 'Entry',
-  MID = 'Mid',
-  SENIOR = 'Senior',
-  LEAD = 'Lead',
-  EXECUTIVE = 'Executive',
-}
+import { ExperienceLevel } from '@/Job-Service/models/Job.model';
+export { ExperienceLevel };
 
 // =====================================================
 // SORT OPTIONS (Strongly Typed)
@@ -76,7 +71,7 @@ export interface UpdateJobDTO {
 // =====================================================
 export interface JobFilterQuery {
 
-  requestId: string;
+  requestId?: string;
   // Pagination
   page?: number;
   pageSize?: number;

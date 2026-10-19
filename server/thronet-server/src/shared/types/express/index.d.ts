@@ -25,14 +25,14 @@ declare global {
   namespace Express {
     interface User {
       id: string;
-      userId: string;
-      _id: string;
-      isAdmin: boolean;
-      region?: string;
-      role: 'user' | 'admin';
+      _id?: string;
+      userId?: string;
       email: string;
-      deviceId: string | null;
-      sessionId: string | null;
+      role: 'user' | 'admin' | 'moderator' | 'super_admin';
+      isAdmin?: boolean;
+      region?: string;
+      deviceId?: string | null;
+      sessionId?: string | null;
     }
 
     interface Request {

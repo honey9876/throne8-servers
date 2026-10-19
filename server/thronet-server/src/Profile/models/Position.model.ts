@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Position Model - User Work Experience Positions
  * Stores job positions, employment history
  * 
@@ -417,6 +417,10 @@ PositionSchema.statics.getCurrentPosition = async function (userId: string): Pro
 };
 
 // ==================== EXPORT ====================
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(PositionSchema, 'userId');
 
 const Position = mongoose.model<IPosition, IPositionModel>('Position', PositionSchema);
 export default Position;

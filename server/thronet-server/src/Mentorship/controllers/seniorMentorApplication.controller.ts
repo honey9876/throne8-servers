@@ -158,6 +158,35 @@ class SeniorMentorApplicationController {
   }
 
   /**
+   * @route   PUT /api/v1/mentorship/senior-mentor-applications/me/profile-photo
+   * @access  Private (application owner only)
+   *
+   * Application na ho to 404 deta hai; frontend isko "user senior mentor
+   * nahi hai" maan kar chup-chaap skip karta hai.
+   */
+  async updateMyProfilePhoto(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.file) {
+        ResponseHandler.badRequest(res, 'Profile photo is required');
+        return;
+      }
+
+      const application = await seniorMentorApplicationService.updateProfilePhoto(
+        req.user!.id,
+        req.file
+      );
+      ResponseHandler.success(res, 'Profile photo updated successfully', application);
+    } catch (error: any) {
+      if (isNotFoundError(error)) {
+        res.status(404).json({ success: false, message: 'No senior mentor application found' });
+        return;
+      }
+      logger.error('Error updating senior mentor profile photo:', error);
+      next(error);
+    }
+  }
+
+  /**
    * @route   GET /api/v1/mentorship/senior-mentor-applications/:id/profile
    * @access  Private
    */

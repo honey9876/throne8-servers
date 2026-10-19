@@ -1,4 +1,4 @@
-﻿import { LoggerUtil } from '@/shared/logger.util';
+import { LoggerUtil } from '@/shared/logger.util';
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -231,6 +231,10 @@ ProfilePhotoSchema.statics.setActivePhoto = async function (photoId: string, use
 };
 
 // ==================== EXPORT ====================
+
+// ── Cache Invalidation Hook ──────────────────────────────────
+import { attachProfileCacheInvalidationHooks } from '@/shared/cache/profileCache';
+attachProfileCacheInvalidationHooks(ProfilePhotoSchema, 'userId');
 
 const ProfilePhoto = mongoose.model<IProfilePhoto, IProfilePhotoModel>('ProfilePhoto', ProfilePhotoSchema);
 export default ProfilePhoto;

@@ -20,7 +20,7 @@ import postQueue from '../../shared/queues/post.queue';
 // =====================================================
 // Store Queue Instances (PREVENTS GARBAGE COLLECTION!)
 // =====================================================
-const activeQueues: Queue[] = [
+const activeQueues: any[] = [
   emailQueue,
   notificationQueue,
   analyticsQueue,
@@ -71,15 +71,15 @@ export function startAllWorkers(): void {
 // =====================================================
 function setupQueueListeners(): void {
   activeQueues.forEach((queue) => {
-    queue.on('error', (error) => {
+    queue.on('error', (error: any) => {
       logger.error(`❌ Queue ${queue.name} error:`, error);
     });
 
-    queue.on('failed', (job, err) => {
+    queue.on('failed', (job: any, err: any) => {
       logger.error(`❌ Job ${job.id} in ${queue.name} failed:`, err.message);
     });
 
-    queue.on('completed', (job) => {
+    queue.on('completed', (job: any) => {
       logger.debug(`✅ Job ${job.id} in ${queue.name} completed`);
     });
   });

@@ -109,7 +109,7 @@ class EmployeeController {
     try {
       const { companyId, employeeId } = req.params;
       const { isAdvocate } = req.body;
-      const requestingUserId = req.user?.id;
+      const requestingUserId = req.user?.id || (req.user as any)?.userId || '';
 
       const employee = await employeeService.assignAdvocacy(
         companyId,
