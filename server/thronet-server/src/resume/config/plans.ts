@@ -90,8 +90,8 @@ export const RESUME_PLAN_LIST: ResumePlan[] = [
   {
     id: "resume-ai-5",
     name: "Resume AI Starter",
-    price: 1,
-    // price: 25,
+
+    price: 25,
     credits: { resumeRuns: 5, resumeEdits: 10 },
   },
   {
