@@ -83,11 +83,20 @@ class PayoutService {
           ).lean();
           if (user) name = `${user.firstName || ''} ${user.lastName || ''}`.trim() || name;
         }
-        if (mentor?._id) {
-          method = await WithdrawalMethod.findOne({ mentorId: mentor._id, isDefault: true }).lean();
-        }
       } catch {
-        /* name/method khali reh jayega */
+        /* name khali reh jayega */
+      }
+
+      try {
+        // Withdrawal method UUID mentorId se save hota hai (ObjectId se nahi).
+        // Safety ke liye dono id try karte hain.
+        const ids = [mentorId];
+        // (mentor._id ko bhi add karna ho to neeche wale try me mentor fetch karke push kar sakte ho)
+        method = await WithdrawalMethod.findOne({ mentorId: { $in: ids } })
+          .sort({ isDefault: -1, createdAt: -1 }) // default pehle, nahi to latest added
+          .lean();
+      } catch {
+        /* method khali reh jayega */
       }
       const out = {
         name,
