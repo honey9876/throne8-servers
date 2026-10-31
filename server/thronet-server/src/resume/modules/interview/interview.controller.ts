@@ -2,6 +2,8 @@ import { Response } from "express";
 
 import { asyncHandler } from "../../utils/asyncHandler";
 import { ApiError } from "../../utils/ApiError";
+import { withCredit } from "../../services/credit.service";
+import { interviewCreditType } from "../../config/plans";
 
 import { AuthRequest } from "../../middleware/auth.middleware";
 
@@ -51,15 +53,22 @@ export const startInterview = asyncHandler(
       totalQuestions,
     });
 
-    const { session, audio } = await startInterviewSession(req.userId, {
-      resumeId,
-      targetRole,
-      jobDescription,
-      preparationNotes,
-      questionType,
-      difficulty,
-      totalQuestions,
-    });
+    // Validated above, so totalQuestions is 5, 10 or 15. The credit that is
+    // spent has to match that size exactly.
+    const { session, audio } = await withCredit(
+      req.userId,
+      interviewCreditType(totalQuestions),
+      () =>
+        startInterviewSession(req.userId!, {
+          resumeId,
+          targetRole,
+          jobDescription,
+          preparationNotes,
+          questionType,
+          difficulty,
+          totalQuestions,
+        }),
+    );
 
     res.status(201).json({
       success: true,

@@ -29,10 +29,7 @@ import {
   extractContactWithRegex,
 } from "../resume/resume-parse.service";
 import type { RegenerateCoverLetterTarget } from "../../prompts/regenerate-cover-letter.prompt";
-import {
-  getCoverLetterAiCredits,
-  FREE_COVER_LETTER_AI_CREDITS,
-} from "./coverLetterCredits.service";
+import { getCoverCredits, withCredit } from "../../services/credit.service";
 
 export const generateSummary = asyncHandler(
   async (req: AuthRequest, res: Response) => {
@@ -47,7 +44,9 @@ export const generateSummary = asyncHandler(
       throw new ApiError(404, "Resume not found");
     }
 
-    const summary = await generateSummaryService(resume.toObject());
+    const summary = await withCredit(req.userId!, "resumeEdits", () =>
+      generateSummaryService(resume.toObject()),
+    );
 
     await trackAIUsage(req.userId!, "generate-summary");
 
@@ -62,7 +61,9 @@ export const rewriteExperience = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const { experience, targetRole } = req.body;
 
-    const content = await rewriteExperienceService(experience, targetRole);
+    const content = await withCredit(req.userId!, "resumeEdits", () =>
+      rewriteExperienceService(experience, targetRole),
+    );
 
     await trackAIUsage(req.userId!, "rewrite-experience");
 
@@ -86,9 +87,8 @@ export const suggestSkills = asyncHandler(
       throw new ApiError(404, "Resume not found");
     }
 
-    const skills = await suggestSkillsService(
-      resume.toObject(),
-      selectedCategory,
+    const skills = await withCredit(req.userId!, "resumeEdits", () =>
+      suggestSkillsService(resume.toObject(), selectedCategory),
     );
 
     await trackAIUsage(req.userId!, "suggest-skills");
@@ -104,10 +104,8 @@ export const generateExperience = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const { company, position, context } = req.body;
 
-    const responsibilities = await generateExperienceService(
-      company,
-      position,
-      context,
+    const responsibilities = await withCredit(req.userId!, "resumeEdits", () =>
+      generateExperienceService(company, position, context),
     );
 
     await trackAIUsage(req.userId!, "generate-experience");
@@ -123,10 +121,8 @@ export const generateProjectDescription = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const { projectName, technologies, context } = req.body;
 
-    const description = await generateProjectDescriptionService(
-      projectName,
-      technologies,
-      context,
+    const description = await withCredit(req.userId!, "resumeEdits", () =>
+      generateProjectDescriptionService(projectName, technologies, context),
     );
 
     await trackAIUsage(req.userId!, "generate-project-description");
@@ -142,10 +138,8 @@ export const generateCoursework = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const { degree, fieldOfStudy, targetRole } = req.body;
 
-    const coursework = await generateCourseworkService(
-      degree,
-      fieldOfStudy,
-      targetRole,
+    const coursework = await withCredit(req.userId!, "resumeEdits", () =>
+      generateCourseworkService(degree, fieldOfStudy, targetRole),
     );
 
     await trackAIUsage(req.userId!, "generate-coursework");
@@ -161,11 +155,8 @@ export const generateCustomSection = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const { sectionType, itemTitle, itemSubtitle, context } = req.body;
 
-    const description = await generateCustomSectionService(
-      sectionType,
-      itemTitle,
-      itemSubtitle,
-      context,
+    const description = await withCredit(req.userId!, "resumeEdits", () =>
+      generateCustomSectionService(sectionType, itemTitle, itemSubtitle, context),
     );
 
     await trackAIUsage(req.userId!, "generate-custom-section");
@@ -181,7 +172,9 @@ export const generateInternship = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const { company, role, context } = req.body;
 
-    const description = await generateInternshipService(company, role, context);
+    const description = await withCredit(req.userId!, "resumeEdits", () =>
+      generateInternshipService(company, role, context),
+    );
 
     await trackAIUsage(req.userId!, "generate-internship");
 
@@ -200,7 +193,9 @@ export const generateResume = asyncHandler(
       throw new ApiError(400, "Full name and email are required");
     }
 
-    const resume = await generateFullResumeService(formData);
+    const resume = await withCredit(req.userId!, "resumeRuns", () =>
+      generateFullResumeService(formData),
+    );
 
     await trackAIUsage(req.userId!, "generate-resume");
 
@@ -243,57 +238,51 @@ export const generateCoverLetter = asyncHandler(
       );
     }
 
-    const credits = await getCoverLetterAiCredits(req.userId!);
+    const generated = await withCredit(req.userId!, "coverRuns", async () => {
+      let candidateProfile: unknown;
 
-    if (credits.remaining <= 0) {
-      throw new ApiError(
-        403,
-        `You've used all ${FREE_COVER_LETTER_AI_CREDITS} free AI cover letter generations. Buy more credits to continue.`,
-      );
-    }
+      if (req.file) {
+        // Fresh upload — parse in-memory only, never persisted.
+        const text = await extractTextFromPdf(req.file.buffer);
+        const regexContact = extractContactWithRegex(text);
 
-    let candidateProfile: unknown;
+        candidateProfile = await extractResumeStructure(text, regexContact);
+      } else if (resumeId) {
+        const resume = await Resume.findOne({
+          _id: resumeId,
+          userId: req.userId,
+        });
 
-    if (req.file) {
-      // Fresh upload — parse in-memory only, never persisted.
-      const text = await extractTextFromPdf(req.file.buffer);
-      const regexContact = extractContactWithRegex(text);
+        if (!resume) {
+          throw new ApiError(404, "Resume not found");
+        }
 
-      candidateProfile = await extractResumeStructure(text, regexContact);
-    } else if (resumeId) {
-      const resume = await Resume.findOne({
-        _id: resumeId,
-        userId: req.userId,
-      });
-
-      if (!resume) {
-        throw new ApiError(404, "Resume not found");
+        candidateProfile = resume;
+      } else {
+        throw new ApiError(
+          400,
+          "Please select an existing resume or upload one to base the letter on.",
+        );
       }
 
-      candidateProfile = resume;
-    } else {
-      throw new ApiError(
-        400,
-        "Please select an existing resume or upload one to base the letter on.",
-      );
-    }
-
-    const generated = await generateCoverLetterService({
-      targetRole,
-      jobDescription: jobDescription || undefined,
-      companyName: companyName || undefined,
-      companyInfo: companyInfo || undefined,
-      candidateProfile,
+      return generateCoverLetterService({
+        targetRole,
+        jobDescription: jobDescription || undefined,
+        companyName: companyName || undefined,
+        companyInfo: companyInfo || undefined,
+        candidateProfile,
+      });
     });
 
     await trackAIUsage(req.userId!, "generate-cover-letter");
 
-    const updatedCredits = await getCoverLetterAiCredits(req.userId!);
+    const credits = await getCoverCredits(req.userId!);
 
     res.status(200).json({
       success: true,
       coverLetter: generated,
-      credits: updatedCredits,
+      // `remaining` = credits left for this action (generate uses runs)
+      credits: { ...credits, remaining: credits.runs },
     });
   },
 );
@@ -318,44 +307,38 @@ export const regenerateCoverLetterSection = asyncHandler(
       throw new ApiError(400, "Please describe what you'd like changed");
     }
 
-    const credits = await getCoverLetterAiCredits(req.userId!);
-
-    if (credits.remaining <= 0) {
-      throw new ApiError(
-        403,
-        `You've used all ${FREE_COVER_LETTER_AI_CREDITS} free AI cover letter generations. Buy more credits to continue.`,
-      );
-    }
-
-    const result = await regenerateCoverLetterSectionService({
-      currentLetter,
-      target,
-      reason,
-    });
+    const result = await withCredit(req.userId!, "coverEdits", () =>
+      regenerateCoverLetterSectionService({
+        currentLetter,
+        target,
+        reason,
+      }),
+    );
 
     await trackAIUsage(req.userId!, "regenerate-cover-letter");
 
-    const updatedCredits = await getCoverLetterAiCredits(req.userId!);
+    const credits = await getCoverCredits(req.userId!);
 
     res.status(200).json({
       success: true,
       result,
-      credits: updatedCredits,
+      // `remaining` = credits left for this action (regenerate uses edits)
+      credits: { ...credits, remaining: credits.edits },
     });
   },
 );
 
 /**
- * Get the current user's remaining free cover-letter AI credits
- * (shared pool between generate and regenerate).
+ * Get the current user's remaining cover-letter AI credits:
+ * `runs` for generate and `edits` for regenerate.
  */
 export const getCoverLetterCredits = asyncHandler(
   async (req: AuthRequest, res: Response) => {
-    const credits = await getCoverLetterAiCredits(req.userId!);
+    const credits = await getCoverCredits(req.userId!);
 
     res.status(200).json({
       success: true,
-      credits,
+      credits: { ...credits, remaining: credits.runs },
     });
   },
 );

@@ -140,7 +140,11 @@ app.use(express.json({
     // Razorpay webhook signature raw body par verify hota hai.
     // Sirf webhook route ke liye save karte hain, baaki requests ki memory waste nahi hogi.
     verify: (req: any, _res: Response, buf: Buffer) => {
-        if (req.originalUrl && req.originalUrl.includes('/mentorship/payments/webhook')) {
+        if (
+            req.originalUrl &&
+            (req.originalUrl.includes('/mentorship/payments/webhook') ||
+                req.originalUrl.includes('/resume-builder/payments/webhook'))
+        ) {
             req.rawBody = buf;
         }
     },
