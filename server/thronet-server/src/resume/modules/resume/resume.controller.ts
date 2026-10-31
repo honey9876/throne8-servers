@@ -7,6 +7,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { ApiError } from "../../utils/ApiError";
 import { AuthRequest } from "../../middleware/auth.middleware";
 import { getVisitorInfo } from "../../utils/visitor.util";
+import { withUploadCredit } from "../../services/credit.service";
 import { createResumeSchema, updateResumeSchema } from "./resume.validation";
 import { analyticsService } from "../analytics/analytics.service";
 import {
@@ -87,12 +88,18 @@ export const uploadAndParseResume = asyncHandler(
         ? req.body.templateId.trim()
         : undefined;
 
-    const resume = await parseAndCreateResume({
-      userId: req.userId,
-      fileBuffer: req.file.buffer,
-      originalFilename: req.file.originalname,
-      templateId: requestedTemplateId || undefined,
-    });
+    const userId = req.userId;
+    const file = req.file;
+
+    // Spends a free upload (then 1 resume edit credit); refunded on failure.
+    const resume = await withUploadCredit(userId, () =>
+      parseAndCreateResume({
+        userId,
+        fileBuffer: file.buffer,
+        originalFilename: file.originalname,
+        templateId: requestedTemplateId || undefined,
+      }),
+    );
 
     await analyticsService.createAnalytics(resume._id.toString(), req.userId);
 
@@ -412,11 +419,17 @@ export const uploadAndParseIntoResume = asyncHandler(
       ? req.params.id[0]
       : req.params.id;
 
-    const resume = await parseAndFillResume({
-      userId: req.userId,
-      resumeId,
-      fileBuffer: req.file.buffer,
-    });
+    const userId = req.userId;
+    const file = req.file;
+
+    // Spends a free upload (then 1 resume edit credit); refunded on failure.
+    const resume = await withUploadCredit(userId, () =>
+      parseAndFillResume({
+        userId,
+        resumeId,
+        fileBuffer: file.buffer,
+      }),
+    );
 
     await logActivity(
       req.userId,

@@ -1,6 +1,7 @@
 import { AIUsage } from "../models/ai-usage.model";
 import { CreditWallet, ICreditWallet } from "../models/credit-wallet.model";
 import { InterviewSession } from "../models/interview-session.model";
+import { ResumeAnalysis } from "../models/resume-analysis.model";
 
 import {
   COVER_EDIT_FEATURES,
@@ -28,7 +29,13 @@ const LOW_CREDIT_MESSAGE: Record<CreditType, string> = {
     "You have no 10-question AI interview credits left. Buy a pack to continue.",
   interview15:
     "You have no 15-question AI interview credits left. Buy a pack to continue.",
+  atsChecks: "You have no ATS check credits left. Buy a pack to continue.",
+  resumeUploads:
+    "You have used your free resume uploads. Buy a pack to continue.",
 };
+
+const UPLOAD_LOW_CREDIT_MESSAGE =
+  "You have used your free resume uploads. Uploading a resume now uses 1 AI resume edit credit, and you have none left. Buy a pack to continue.";
 
 const isDuplicateKeyError = (error: unknown): boolean =>
   (error as { code?: number })?.code === 11000;
@@ -42,20 +49,66 @@ const toBalances = (wallet: ICreditWallet): CreditBalances => {
 };
 
 /**
+ * Free ATS checks and free uploads. Past ATS analyses count as used, so
+ * launching ATS credits does not give heavy ATS users a fresh set. Uploads
+ * were never logged, so everyone gets the full free amount.
+ */
+const buildAtsFreeSeed = async (
+  userId: string,
+): Promise<Pick<CreditBalances, "atsChecks" | "resumeUploads">> => {
+  const usedChecks = await ResumeAnalysis.countDocuments({ userId });
+
+  return {
+    atsChecks: Math.max(0, FREE_CREDITS.atsChecks - usedChecks),
+    resumeUploads: FREE_CREDITS.resumeUploads,
+  };
+};
+
+/**
+ * Wallets created before ATS credits existed: add the free ATS checks and
+ * uploads exactly once. The filter makes it a one-winner claim, so many
+ * requests at once still grant them a single time.
+ */
+const grantFreeAtsOnce = async (
+  wallet: ICreditWallet,
+): Promise<ICreditWallet> => {
+  const seed = await buildAtsFreeSeed(wallet.userId);
+
+  const updated = await CreditWallet.findOneAndUpdate(
+    { userId: wallet.userId, freeAtsGranted: { $ne: true } },
+    {
+      $set: { freeAtsGranted: true },
+      $inc: { atsChecks: seed.atsChecks, resumeUploads: seed.resumeUploads },
+    },
+    { new: true },
+  );
+
+  if (updated) return updated;
+
+  // Someone else won the claim: read the wallet they updated.
+  return (await CreditWallet.findOne({ userId: wallet.userId })) ?? wallet;
+};
+
+/**
  * Free credits for a brand-new wallet. Users who already used the AI
  * features before payments existed only get what is left of the free
  * allowance, so launching payments never hands existing users a fresh
  * set of free credits.
  */
 const buildFreeSeed = async (userId: string): Promise<CreditBalances> => {
-  const [resumeRuns, resumeEdits, coverRuns, coverEdits, interviews] =
-    await Promise.all([
+  const [
+    [resumeRuns, resumeEdits, coverRuns, coverEdits, interviews],
+    atsSeed,
+  ] = await Promise.all([
+    Promise.all([
       AIUsage.countDocuments({ userId, feature: { $in: RESUME_RUN_FEATURES } }),
       AIUsage.countDocuments({ userId, feature: { $in: RESUME_EDIT_FEATURES } }),
       AIUsage.countDocuments({ userId, feature: { $in: COVER_RUN_FEATURES } }),
       AIUsage.countDocuments({ userId, feature: { $in: COVER_EDIT_FEATURES } }),
       InterviewSession.countDocuments({ userId }),
-    ]);
+    ]),
+    buildAtsFreeSeed(userId),
+  ]);
 
   const left = (free: number, used: number) => Math.max(0, free - used);
 
@@ -67,6 +120,7 @@ const buildFreeSeed = async (userId: string): Promise<CreditBalances> => {
     interview5: left(FREE_CREDITS.interview5, interviews),
     interview10: FREE_CREDITS.interview10,
     interview15: FREE_CREDITS.interview15,
+    ...atsSeed,
   };
 };
 
@@ -79,14 +133,23 @@ export const getOrCreateWallet = async (
   userId: string,
 ): Promise<ICreditWallet> => {
   const existing = await CreditWallet.findOne({ userId });
-  if (existing) return existing;
+  if (existing) {
+    return existing.freeAtsGranted ? existing : grantFreeAtsOnce(existing);
+  }
 
   const seed = await buildFreeSeed(userId);
 
   try {
     return await CreditWallet.findOneAndUpdate(
       { userId },
-      { $setOnInsert: { userId, ...seed, freeGranted: true } },
+      {
+        $setOnInsert: {
+          userId,
+          ...seed,
+          freeGranted: true,
+          freeAtsGranted: true,
+        },
+      },
       { upsert: true, new: true },
     ).then((wallet) => wallet as ICreditWallet);
   } catch (error) {
@@ -204,6 +267,39 @@ export const withCredit = async <T>(
     await refundCredit(userId, type).catch((refundError) => {
       console.error(
         `Failed to refund ${type} credit for user ${userId}:`,
+        refundError,
+      );
+    });
+    throw error;
+  }
+};
+
+/**
+ * Resume upload + parse. Spends a free upload first; once those are used it
+ * spends 1 resume edit credit instead. Gives back whichever it took if the
+ * parse fails. Like withCredit, wrap only the work, after validation.
+ */
+export const withUploadCredit = async <T>(
+  userId: string,
+  run: () => Promise<T>,
+): Promise<T> => {
+  let spent: CreditType | null = null;
+
+  for (const type of ["resumeUploads", "resumeEdits"] as const) {
+    if (await consumeCredit(userId, type)) {
+      spent = type;
+      break;
+    }
+  }
+
+  if (!spent) throw new ApiError(402, UPLOAD_LOW_CREDIT_MESSAGE);
+
+  try {
+    return await run();
+  } catch (error) {
+    await refundCredit(userId, spent).catch((refundError) => {
+      console.error(
+        `Failed to refund ${spent} credit for user ${userId}:`,
         refundError,
       );
     });

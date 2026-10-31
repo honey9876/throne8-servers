@@ -14,6 +14,12 @@ export interface ICreditWallet extends Document, Record<CreditType, number> {
   /** Set once the one-time free credits have been put in this wallet. */
   freeGranted: boolean;
 
+  /**
+   * Set once the free ATS checks and free uploads have been added. Wallets
+   * made before ATS credits existed do not have it, and get them on next use.
+   */
+  freeAtsGranted?: boolean;
+
   /** Payments whose credits were already added, so a grant can never repeat. */
   appliedPaymentIds: string[];
 
@@ -39,8 +45,15 @@ const creditWalletSchema = new Schema<ICreditWallet>(
     interview5: credit,
     interview10: credit,
     interview15: credit,
+    atsChecks: credit,
+    resumeUploads: credit,
 
     freeGranted: {
+      type: Boolean,
+      default: false,
+    },
+
+    freeAtsGranted: {
       type: Boolean,
       default: false,
     },

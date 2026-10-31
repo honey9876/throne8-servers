@@ -4,6 +4,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { ApiError } from "../../utils/ApiError";
 
 import { AuthRequest } from "../../middleware/auth.middleware";
+import { withCredit } from "../../services/credit.service";
 
 import {
   analyzeResumeService,
@@ -40,20 +41,24 @@ export const analyzeATS = asyncHandler(
     });
 
     // --------------------------------------------------------
-    // Run ATS analysis
+    // Run ATS analysis (spends 1 ATS check; refunded if it fails)
     // --------------------------------------------------------
 
-    const result = await analyzeResumeService({
-      userId: req.userId,
+    const userId = req.userId;
 
-      resumeId,
+    const result = await withCredit(userId, "atsChecks", () =>
+      analyzeResumeService({
+        userId,
 
-      targetRole,
+        resumeId,
 
-      jobDescription: jobDescription ?? "",
+        targetRole,
 
-      options,
-    });
+        jobDescription: jobDescription ?? "",
+
+        options,
+      }),
+    );
 
     // --------------------------------------------------------
     // Response
