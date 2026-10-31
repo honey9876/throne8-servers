@@ -13,8 +13,7 @@ import Razorpay from 'razorpay';
 import availabilityService from './availability.service';
 import MentorshipPayment, { PayoutStatus } from '../models/Payment';
 import NotificationService, { NotificationType, NotificationChannel } from './notification.service';
-import { NotFoundError, ForbiddenError, ConflictError, BadRequestError } from '@/shared/errors/app.error';
-
+import { NotFoundError, ForbiddenError, ConflictError, BadRequestError, ExternalServiceError } from '@/shared/errors/app.error';
 
 
 
@@ -546,19 +545,39 @@ class RefundService {
     const accountNumber = process.env.RAZORPAYX_ACCOUNT_NUMBER;
     const keyId = process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
-    if (!accountNumber || !keyId || !keySecret) {
-      throw new Error('RazorpayX not configured - set RAZORPAYX_ACCOUNT_NUMBER in .env');
+    const missing = [
+      !accountNumber && 'RAZORPAYX_ACCOUNT_NUMBER',
+      !keyId && 'RAZORPAY_KEY_ID',
+      !keySecret && 'RAZORPAY_KEY_SECRET',
+    ].filter(Boolean);
+    if (missing.length > 0) {
+      logger.error(`RazorpayX payout config missing: ${missing.join(', ')}`);
+      throw new BadRequestError(`RazorpayX not configured. Missing env: ${missing.join(', ')}`);
     }
 
     const auth = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
     const call = async (path: string, body: any, extraHeaders: Record<string, string> = {}) => {
-      const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: auth, ...extraHeaders },
-        body: JSON.stringify(body),
-      });
-      const json: any = await res.json();
-      if (!res.ok) throw new BadRequestError(json?.error?.description || 'Razorpay payout failed');
+      if (typeof fetch !== 'function') {
+        throw new ExternalServiceError('Razorpay', 'Server Node version does not support fetch (need Node 18+)');
+      }
+      let res: Response;
+      try {
+        res = await fetch(`https://api.razorpay.com/v1/${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: auth, ...extraHeaders },
+          body: JSON.stringify(body),
+        });
+      } catch (netErr: any) {
+        logger.error(`Razorpay ${path} network error: ${netErr?.message}`);
+        throw new ExternalServiceError('Razorpay', `Could not reach Razorpay (${path}): ${netErr?.message}`);
+      }
+      const json: any = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        logger.error(`Razorpay ${path} failed (${res.status}): ${JSON.stringify(json)}`);
+        throw new BadRequestError(
+          `Razorpay ${path}: ${json?.error?.description || json?.error?.code || `HTTP ${res.status}`}`
+        );
+      }
       return json;
     };
 

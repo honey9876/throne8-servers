@@ -705,8 +705,21 @@ class AdminController {
 
       ResponseHandler.success(res, 'Refund payout initiated', result);
     } catch (error: any) {
-      logger.error('Failed to pay refund:', error);
-      next(error);
+      logger.error('Failed to pay refund:', {
+        message: error?.message,
+        stack: error?.stack,
+        gateway: error?.response?.data ?? error?.error,
+      });
+      if (error?.statusCode) {
+        next(error);
+        return;
+      }
+      res.status(500).json({
+        success: false,
+        message: error?.message || 'Refund payout failed',
+        detail: error?.response?.data ?? error?.error ?? null,
+      });
+      return;
     }
   }
 
