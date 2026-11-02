@@ -3,9 +3,10 @@ import { v4 as uuidv4 } from 'uuid';
 
 class NotificationRepository {
 
-  async findByNotificationId(notificationId: string, userId?: string): Promise<any | null> {
+  async findByNotificationId(notificationId: string, userId?: string, module?: string): Promise<any | null> {
     const query: any = { notificationId };
     if (userId) query.userId = userId;
+    if (module) query.module = module;
     return await Notification.findOne(query).lean();
   }
 
@@ -22,10 +23,12 @@ class NotificationRepository {
     userId: string,
     unreadOnly: boolean = false,
     skip: number = 0,
-    limit: number = 20
+    limit: number = 20,
+    module?: string
   ): Promise<any[]> {
     const query: any = { userId };
     if (unreadOnly) query['status.read'] = false;
+    if (module) query.module = module;
 
     return await Notification.find(query)
       .sort({ createdAt: -1 })
@@ -34,30 +37,37 @@ class NotificationRepository {
       .lean();
   }
 
-  async countByUserId(userId: string, unreadOnly: boolean = false): Promise<number> {
+  async countByUserId(userId: string, unreadOnly: boolean = false, module?: string): Promise<number> {
     const query: any = { userId };
     if (unreadOnly) query['status.read'] = false;
+    if (module) query.module = module;
     return await Notification.countDocuments(query);
   }
 
-  async markAsRead(notificationId: string, userId: string): Promise<any | null> {
+  async markAsRead(notificationId: string, userId: string, module?: string): Promise<any | null> {
+    const query: any = { notificationId, userId };
+    if (module) query.module = module;
     return await Notification.findOneAndUpdate(
-      { notificationId, userId },
+      query,
       { $set: { 'status.read': true, 'status.readAt': new Date() } },
       { new: true }
     );
   }
 
-  async markAllAsRead(userId: string): Promise<number> {
+  async markAllAsRead(userId: string, module?: string): Promise<number> {
+    const query: any = { userId, 'status.read': false };
+    if (module) query.module = module;
     const result = await Notification.updateMany(
-      { userId, 'status.read': false },
+      query,
       { $set: { 'status.read': true, 'status.readAt': new Date() } }
     );
     return result.modifiedCount;
   }
 
-  async deleteByNotificationId(notificationId: string, userId: string): Promise<boolean> {
-    const result = await Notification.findOneAndDelete({ notificationId, userId });
+  async deleteByNotificationId(notificationId: string, userId: string, module?: string): Promise<boolean> {
+    const query: any = { notificationId, userId };
+    if (module) query.module = module;
+    const result = await Notification.findOneAndDelete(query);
     return !!result;
   }
 }

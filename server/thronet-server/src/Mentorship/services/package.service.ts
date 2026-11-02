@@ -210,6 +210,7 @@ class PackageService {
 
         NotificationService.sendNotification({
           userId: input.userId,
+        module: 'industry-mentor',
           type: NotificationType.PAYMENT_SUCCESS,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -221,6 +222,7 @@ class PackageService {
         if (mentorDoc?.userId) {
           NotificationService.sendNotification({
             userId: mentorDoc.userId,
+        module: 'industry-mentor',
             type: NotificationType.PACKAGE_PURCHASED,
             channels: [NotificationChannel.IN_APP],
             data: {

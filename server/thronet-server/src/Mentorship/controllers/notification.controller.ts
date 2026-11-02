@@ -8,7 +8,32 @@ import { generateSecureId } from '@/shared/security';
 import ResponseHandler from '@/shared/utils/mentorship/responseHandler';
 import { Request, Response } from 'express';
 import notificationRepository from '../repositories/notification.repository';
+import { emitNotificationCount } from '@/socket/handlers/notificationHandler';
 
+const VALID_MODULES = ['senior-mentor', 'industry-mentor'] as const;
+type NotificationModule = (typeof VALID_MODULES)[number];
+
+function validateModule(
+  moduleParam: any,
+  required: boolean = true
+): { valid: boolean; module?: NotificationModule; error?: string } {
+  if (!moduleParam) {
+    if (required) {
+      return {
+        valid: false,
+        error: 'Module parameter is required and must be either "senior-mentor" or "industry-mentor"',
+      };
+    }
+    return { valid: true, module: undefined };
+  }
+  if (!VALID_MODULES.includes(moduleParam as NotificationModule)) {
+    return {
+      valid: false,
+      error: 'Invalid module parameter. Must be "senior-mentor" or "industry-mentor"',
+    };
+  }
+  return { valid: true, module: moduleParam as NotificationModule };
+}
 
 class NotificationController {
   /**
@@ -23,25 +48,19 @@ class NotificationController {
         return;
       }
 
-      const { page = 1, limit = 20, unreadOnly = false } = req.query;
-
-      const query: any = { userId };
-      if (unreadOnly === 'true') {
-        query['status.read'] = false;
+      const moduleValidation = validateModule(req.query.module, true);
+      if (!moduleValidation.valid) {
+        ResponseHandler.error(res, moduleValidation.error!, 400);
+        return;
       }
+      const module = moduleValidation.module!;
 
+      const { page = 1, limit = 20, unreadOnly = false } = req.query;
       const skip = (Number(page) - 1) * Number(limit);
-      // const notifications = await Notification.find(query)
-      //   .sort({ createdAt: -1 })
-      //   .skip(skip)
-      //   .limit(Number(limit))
-      //   .lean();
-
-      // const total = await Notification.countDocuments(query);
 
       const [notifications, total] = await Promise.all([
-        notificationRepository.findByUserId(userId, unreadOnly === 'true', skip, Number(limit)),
-        notificationRepository.countByUserId(userId, unreadOnly === 'true'),
+        notificationRepository.findByUserId(userId, unreadOnly === 'true', skip, Number(limit), module),
+        notificationRepository.countByUserId(userId, unreadOnly === 'true', module),
       ]);
 
       const uniqueActorIds = Array.from(
@@ -104,8 +123,18 @@ class NotificationController {
       const { id } = req.params;
       const userId = req.user?.id;
 
-      // const notification = await Notification.findOne({ _id: id, userId }).lean();
-      const notification = await Notification.findOne({ notificationId: id, userId }).lean();
+      if (!userId) {
+        ResponseHandler.error(res, 'User ID is required', 401);
+        return;
+      }
+
+      const moduleValidation = validateModule(req.query.module, false);
+      if (!moduleValidation.valid) {
+        ResponseHandler.error(res, moduleValidation.error!, 400);
+        return;
+      }
+
+      const notification = await notificationRepository.findByNotificationId(id, userId, moduleValidation.module);
 
       if (!notification) {
         ResponseHandler.notFound(res, 'Notification not found');
@@ -127,20 +156,33 @@ class NotificationController {
       const { id } = req.params;
       const userId = req.user?.id;
 
-      const notification = await Notification.findOneAndUpdate(
-        { notificationId: id, userId },
-        {
-          $set: {
-            'status.read': true,
-            'status.readAt': new Date()
-          }
-        },
-        { new: true }
-      );
+      if (!userId) {
+        ResponseHandler.error(res, 'User ID is required', 401);
+        return;
+      }
+
+      const moduleParam = req.query.module || req.body?.module;
+      const moduleValidation = validateModule(moduleParam, false);
+      if (!moduleValidation.valid) {
+        ResponseHandler.error(res, moduleValidation.error!, 400);
+        return;
+      }
+
+      const notification = await notificationRepository.markAsRead(id, userId, moduleValidation.module);
 
       if (!notification) {
         ResponseHandler.notFound(res, 'Notification not found');
         return;
+      }
+
+      if (moduleValidation.module) {
+        try {
+          const io = (req.app as any)?.get('io');
+          if (io) {
+            const count = await notificationRepository.countByUserId(userId, true, moduleValidation.module);
+            emitNotificationCount(io, userId, count, moduleValidation.module);
+          }
+        } catch (_) {}
       }
 
       ResponseHandler.success(res, 'Notification marked as read', notification);
@@ -157,20 +199,33 @@ class NotificationController {
     try {
       const userId = req.user?.id;
 
-      const result = await Notification.updateMany(
-        { userId, 'status.read': false },
-        {
-          $set: {
-            'status.read': true,
-            'status.readAt': new Date()
+      if (!userId) {
+        ResponseHandler.error(res, 'User ID is required', 401);
+        return;
+      }
+
+      const moduleParam = req.query.module || req.body?.module;
+      const moduleValidation = validateModule(moduleParam, false);
+      if (!moduleValidation.valid) {
+        ResponseHandler.error(res, moduleValidation.error!, 400);
+        return;
+      }
+
+      const modifiedCount = await notificationRepository.markAllAsRead(userId, moduleValidation.module);
+
+      if (moduleValidation.module) {
+        try {
+          const io = (req.app as any)?.get('io');
+          if (io) {
+            emitNotificationCount(io, userId, 0, moduleValidation.module);
           }
-        }
-      );
+        } catch (_) {}
+      }
 
       ResponseHandler.success(
         res,
         'All notifications marked as read',
-        { modifiedCount: result.modifiedCount }
+        { modifiedCount }
       );
     } catch (error: any) {
       logger.error('Mark all as read error:', error);
@@ -186,9 +241,21 @@ class NotificationController {
       const { id } = req.params;
       const userId = req.user?.id;
 
-      const result = await Notification.findOneAndDelete({ notificationId: id, userId });
+      if (!userId) {
+        ResponseHandler.error(res, 'User ID is required', 401);
+        return;
+      }
 
-      if (!result) {
+      const moduleParam = req.query.module || req.body?.module;
+      const moduleValidation = validateModule(moduleParam, false);
+      if (!moduleValidation.valid) {
+        ResponseHandler.error(res, moduleValidation.error!, 400);
+        return;
+      }
+
+      const success = await notificationRepository.deleteByNotificationId(id, userId, moduleValidation.module);
+
+      if (!success) {
         ResponseHandler.notFound(res, 'Notification not found');
         return;
       }
@@ -207,10 +274,18 @@ class NotificationController {
     try {
       const userId = req.user?.id;
 
-      const count = await Notification.countDocuments({
-        userId,
-        'status.read': false
-      });
+      if (!userId) {
+        ResponseHandler.error(res, 'User ID is required', 401);
+        return;
+      }
+
+      const moduleValidation = validateModule(req.query.module, true);
+      if (!moduleValidation.valid) {
+        ResponseHandler.error(res, moduleValidation.error!, 400);
+        return;
+      }
+
+      const count = await notificationRepository.countByUserId(userId, true, moduleValidation.module!);
 
       ResponseHandler.success(res, 'Unread count retrieved successfully', { count });
     } catch (error: any) {
@@ -227,8 +302,6 @@ class NotificationController {
       const userId = req.user?.id;
       const preferences = req.body;
 
-      // In a real app, you'd store this in a UserPreferences model
-      // For now, we'll just return success
       logger.info(`Updated notification preferences for user ${userId}`, preferences);
 
       ResponseHandler.success(
@@ -249,10 +322,10 @@ class NotificationController {
     try {
       const userId = req.user?.id;
 
-      // Create in-app notification
       const notification = await Notification.create({
-        notificationId: generateSecureId(), // Generate unique ID for notification
+        notificationId: generateSecureId(),
         userId: userId!,
+        module: 'industry-mentor',
         type: NotificationType.PAYMENT_SUCCESS,
         category: 'system',
         title: 'Test Notification',
@@ -283,12 +356,13 @@ class NotificationController {
    */
   async sendNotification(req: Request, res: Response): Promise<void> {
     try {
-      const { userId, type, data, channels, priority } = req.body;
+      const { userId, type, data, channels, priority, module } = req.body;
 
       const result = await notificationService.sendNotification({
         userId,
         type: type as NotificationType,
         channels: channels as NotificationChannel[],
+        module,
         data,
         priority,
         authToken: req.headers.authorization,

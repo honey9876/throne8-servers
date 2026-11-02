@@ -9,7 +9,8 @@ import logger from '@/config/logging/logger.config';
 import { Notification } from '../models';
 import { generateSecureId } from '@/shared/security';
 // ✅ NEW — for realtime push after DB save
-import { emitToUser } from '@/socket/emitter';
+import { emitToUser, getIO } from '@/socket/emitter';
+import { emitNotificationCount } from '@/socket/handlers/notificationHandler';
 import { resolveUserDetails } from '@/Mentorship/utils/userPhotoHelper';
 
 
@@ -66,6 +67,7 @@ interface NotificationInput {
   userId: string;
   type: NotificationType;
   channels?: NotificationChannel[];
+  module?: 'senior-mentor' | 'industry-mentor';
   data: Record<string, any>;
   priority?: 'low' | 'normal' | 'high' | 'urgent';
   scheduledAt?: Date;
@@ -296,6 +298,7 @@ class NotificationService {
         }
       }
 
+      const notifModule = input.module || 'industry-mentor';
       const title = input.data.title || input.type;
       const message = input.data.message || '';
 
@@ -316,6 +319,7 @@ class NotificationService {
         await Notification.create({
           notificationId,
           userId: input.userId,
+          module: notifModule,
           type: input.type,
           category: 'system',
           title,
@@ -333,17 +337,32 @@ class NotificationService {
       // ✅ Realtime push now runs INDEPENDENTLY of the DB save above —
       // mentee still gets the live socket event even if the DB write fails,
       // instead of both being silently blocked by one shared try/catch.
-      try {
-        emitToUser(input.userId, 'notification:new', {
+            try {
+        const payload = {
           notificationId,
           type: input.type,
-
+          module: notifModule,
           title,
           message,
           data: input.data,
           isRead: false,
           createdAt: new Date().toISOString(),
-        });
+        };
+
+        try {
+          getIO().to(`user:${input.userId}:${notifModule}`).emit('notification:new', payload);
+        } catch (_) {
+          emitToUser(input.userId, 'notification:new', payload);
+        }
+
+        try {
+          const unreadCount = await Notification.countDocuments({
+            userId: input.userId,
+            module: notifModule,
+            'status.read': false,
+          });
+          emitNotificationCount(getIO(), input.userId, unreadCount, notifModule);
+        } catch (_) {}
       } catch (socketErr: any) {
         logger.warn('Socket emit failed for mentorship notification:', socketErr.message);
       }

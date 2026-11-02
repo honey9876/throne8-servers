@@ -5,6 +5,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface INotification extends Document {
   notificationId: string; // Unique identifier for notification
   userId: string;
+  module?: 'senior-mentor' | 'industry-mentor';
   type: string;
   category: string;
   title: string;
@@ -50,6 +51,12 @@ const NotificationSchema = new Schema<INotification>(
     userId: {
       type: String,
       required: true,
+      index: true,
+    },
+    module: {
+      type: String,
+      enum: ['senior-mentor', 'industry-mentor'],
+      default: 'industry-mentor',
       index: true,
     },
     type: {
@@ -222,6 +229,7 @@ const NotificationSchema = new Schema<INotification>(
 );
 
 // Compound indexes
+NotificationSchema.index({ userId: 1, module: 1, 'status.read': 1, createdAt: -1 });
 NotificationSchema.index({ userId: 1, 'status.read': 1, createdAt: -1 });
 NotificationSchema.index({ userId: 1, category: 1, createdAt: -1 });
 NotificationSchema.index({ userId: 1, priority: 1, 'status.read': 1 });
@@ -262,20 +270,30 @@ NotificationSchema.statics.createNotification = async function (
 
 // Static method to get unread count
 NotificationSchema.statics.getUnreadCount = async function (
-  userId: string
+  userId: string,
+  module?: string
 ): Promise<number> {
-  return this.countDocuments({
+  const query: any = {
     userId,
     'status.read': false,
-  });
+  };
+  if (module) {
+    query.module = module;
+  }
+  return this.countDocuments(query);
 };
 
 // Static method to mark all as read
 NotificationSchema.statics.markAllAsRead = async function (
-  userId: string
+  userId: string,
+  module?: string
 ): Promise<number> {
+  const query: any = { userId, 'status.read': false };
+  if (module) {
+    query.module = module;
+  }
   const result = await this.updateMany(
-    { userId, 'status.read': false },
+    query,
     {
       $set: {
         'status.read': true,
@@ -308,11 +326,16 @@ NotificationSchema.statics.getUserNotifications = async function (
   options: {
     unreadOnly?: boolean;
     category?: string;
+    module?: string;
     limit?: number;
     skip?: number;
   } = {}
 ) {
   const query: any = { userId };
+
+  if (options.module) {
+    query.module = options.module;
+  }
 
   if (options.unreadOnly) {
     query['status.read'] = false;

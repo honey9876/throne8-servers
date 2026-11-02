@@ -466,6 +466,7 @@ class MentorshipSessionService {
         if (mentorDoc?.userId) {
           NotificationService.sendNotification({
             userId: mentorDoc.userId,
+        module: 'industry-mentor',
             type: NotificationType.NEW_BOOKING_REQUEST,
             channels: [NotificationChannel.IN_APP],
             data: {
@@ -479,6 +480,7 @@ class MentorshipSessionService {
 
         NotificationService.sendNotification({
           userId: input.menteeId,
+        module: 'industry-mentor',
           type: NotificationType.BOOKING_CONFIRMED,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -490,6 +492,7 @@ class MentorshipSessionService {
         if (!isFreeSession) {
           NotificationService.sendNotification({
             userId: input.menteeId,
+        module: 'industry-mentor',
             type: NotificationType.PAYMENT_SUCCESS,
             channels: [NotificationChannel.IN_APP],
             data: {
@@ -927,6 +930,7 @@ class MentorshipSessionService {
       if (menteeIdToNotify) {
         NotificationService.sendNotification({
           userId: menteeIdToNotify,
+        module: 'industry-mentor',
           type: NotificationType.BOOKING_CONFIRMED,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -1007,6 +1011,7 @@ class MentorshipSessionService {
       if (menteeIdToNotify) {
         NotificationService.sendNotification({
           userId: menteeIdToNotify,
+        module: 'industry-mentor',
           type: NotificationType.SESSION_STARTED,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -1152,6 +1157,7 @@ class MentorshipSessionService {
       if (menteeIdToNotify) {
         NotificationService.sendNotification({
           userId: menteeIdToNotify,
+        module: 'industry-mentor',
           type: NotificationType.SESSION_COMPLETED,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -1271,6 +1277,7 @@ class MentorshipSessionService {
 
               NotificationService.sendNotification({
                 userId: endedMenteeId,
+        module: 'industry-mentor',
                 type: menteeAttended ? NotificationType.SESSION_COMPLETED : NotificationType.SESSION_NO_SHOW,
                 channels: [NotificationChannel.IN_APP],
                 data: menteeAttended
@@ -1291,6 +1298,7 @@ class MentorshipSessionService {
               if (!menteeAttended && endedMentor?.userId) {
                 NotificationService.sendNotification({
                   userId: endedMentor.userId,
+        module: 'industry-mentor',
                   type: NotificationType.SESSION_NO_SHOW,
                   channels: [NotificationChannel.IN_APP],
                   data: {
@@ -1383,6 +1391,7 @@ class MentorshipSessionService {
     if (menteeId) {
       NotificationService.sendNotification({
         userId: menteeId,
+        module: 'industry-mentor',
         type: NotificationType.SESSION_MISSED,
         channels: [NotificationChannel.IN_APP, NotificationChannel.EMAIL],
         priority: 'high',
@@ -1405,6 +1414,7 @@ class MentorshipSessionService {
     if (mentorDoc?.userId) {
       NotificationService.sendNotification({
         userId: mentorDoc.userId,
+        module: 'industry-mentor',
         type: NotificationType.SESSION_MISSED,
         channels: [NotificationChannel.IN_APP],
         data: {
@@ -1492,6 +1502,7 @@ class MentorshipSessionService {
           if (menteeId) {
             NotificationService.sendNotification({
               userId: menteeId,
+        module: 'industry-mentor',
               type: NotificationType.SESSION_MISSED,
               channels: [NotificationChannel.IN_APP, NotificationChannel.EMAIL],
               priority: 'high',
@@ -1513,6 +1524,7 @@ class MentorshipSessionService {
           if (mentorDoc?.userId) {
             NotificationService.sendNotification({
               userId: mentorDoc.userId,
+        module: 'industry-mentor',
               type: NotificationType.SESSION_MISSED,
               channels: [NotificationChannel.IN_APP],
               data: {
@@ -1611,6 +1623,7 @@ class MentorshipSessionService {
         if (otherPartyUserId) {
           NotificationService.sendNotification({
             userId: otherPartyUserId,
+        module: 'industry-mentor',
             type: NotificationType.SESSION_CANCELLED,
             channels: [NotificationChannel.IN_APP],
             data: {
@@ -1807,6 +1820,7 @@ class MentorshipSessionService {
         if (otherPartyUserId) {
           NotificationService.sendNotification({
             userId: otherPartyUserId,
+        module: 'industry-mentor',
             type: NotificationType.SESSION_RESCHEDULED,
             channels: [NotificationChannel.IN_APP],
             data: {
@@ -1864,6 +1878,7 @@ class MentorshipSessionService {
         if (reviewedUserId) {
           NotificationService.sendNotification({
             userId: reviewedUserId,
+        module: 'industry-mentor',
             type: NotificationType.REVIEW_RECEIVED,
             channels: [NotificationChannel.IN_APP],
             data: {
