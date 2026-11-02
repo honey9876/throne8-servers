@@ -9,6 +9,10 @@ import { WithdrawalMethod } from '../models/WithdrawalMethod';
 import mentorRepository from '../repositories/mentor.repository';
 import { User } from '@/auth/models';
 import { BadRequestError, NotFoundError } from '@/shared/errors/app.error';
+import logger from '@/config/logging/logger.config';
+import NotificationService, { NotificationType, NotificationChannel } from './notification.service';
+
+
 
 // Purane payments mein payout field nahi hota, unhe bhi "held" maano.
 const HELD_FILTER = {
@@ -49,8 +53,144 @@ async function bookingStatusMap(payments: any[]): Promise<Map<string, string>> {
   return map;
 }
 
+/** Mentor ka payout account: default pehle, nahi to latest. UUID aur Mongo _id dono try. */
+async function findPayoutMethod(mentorId: string, mentor?: any): Promise<any | null> {
+  const ids = [mentorId, mentor?.mentorId, mentor?._id ? String(mentor._id) : undefined].filter(Boolean);
+  return WithdrawalMethod.findOne({ mentorId: { $in: ids } })
+    .sort({ isDefault: -1, createdAt: -1 })
+    .lean();
+}
+
+/** RazorpayX se mentor ko asli paisa bhejta hai. Fail hone par error throw karta hai. */
+async function sendRazorpayXPayout(args: {
+  paymentId: string;
+  mentorName: string;
+  mentorEmail?: string;
+  mentorPhone?: string;
+  method: any;
+  amount: number;
+}): Promise<{ payoutId: string; utr?: string; status: string }> {
+  const accountNumber = process.env.RAZORPAYX_ACCOUNT_NUMBER;
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!accountNumber || !keyId || !keySecret) {
+    throw new BadRequestError(
+      'RazorpayX payout is not configured. Set RAZORPAYX_ACCOUNT_NUMBER, RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET on the server.'
+    );
+  }
+  const amountPaise = Math.round(Number(args.amount) * 100);
+  if (!Number.isFinite(amountPaise) || amountPaise <= 0) {
+    throw new BadRequestError('Mentor payout amount is invalid');
+  }
+
+  const auth = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+  const call = async (path: string, body: any, extraHeaders: Record<string, string> = {}) => {
+    let res: Response;
+    try {
+      res = await fetch(`https://api.razorpay.com/v1/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: auth, ...extraHeaders },
+        body: JSON.stringify(body),
+      });
+    } catch (e: any) {
+      throw new BadRequestError(`RazorpayX API call failed (${path}): ${e?.message || 'Network error'}`);
+    }
+    let json: any;
+    try {
+      json = await res.json();
+    } catch {
+      throw new BadRequestError(`RazorpayX returned a non-JSON response for ${path} (HTTP ${res.status}).`);
+    }
+    if (!res.ok) {
+      logger.error(`RazorpayX ${path} failed: ${JSON.stringify(json?.error || json)}`);
+      throw new BadRequestError(json?.error?.description || `RazorpayX ${path} failed`);
+    }
+    return json;
+  };
+
+  const m = args.method;
+  const isUpi = m.type === 'upi';
+  if (isUpi && !m.upiId) throw new BadRequestError('Mentor UPI ID is missing');
+  if (!isUpi && (!m.accountNumber || !m.ifscCode)) throw new BadRequestError('Mentor bank details are incomplete');
+
+  const contact = await call('contacts', {
+    name: args.mentorName,
+    email: args.mentorEmail || undefined,
+    contact: args.mentorPhone || undefined,
+    type: 'vendor',
+    reference_id: args.paymentId,
+  });
+
+  const fundAccount = await call(
+    'fund_accounts',
+    isUpi
+      ? { contact_id: contact.id, account_type: 'vpa', vpa: { address: m.upiId } }
+      : {
+          contact_id: contact.id,
+          account_type: 'bank_account',
+          bank_account: {
+            name: m.accountHolderName || args.mentorName,
+            ifsc: m.ifscCode,
+            account_number: m.accountNumber,
+          },
+        }
+  );
+
+  const payout = await call(
+    'payouts',
+    {
+      account_number: accountNumber,
+      fund_account_id: fundAccount.id,
+      amount: amountPaise,
+      currency: 'INR',
+      mode: isUpi ? 'UPI' : 'IMPS',
+      purpose: 'payout',
+      queue_if_low_balance: false,
+      reference_id: args.paymentId,
+      narration: 'Throne8 mentor payout',
+    },
+    // Same payment par double click / retry karne par double paisa nahi jayega
+    { 'X-Payout-Idempotency': `mentor_payout_${args.paymentId}` }
+  );
+
+  if (['rejected', 'cancelled', 'failed', 'reversed'].includes(String(payout.status))) {
+    throw new BadRequestError(`Payout ${payout.status}. Please check the mentor's payout account and RazorpayX balance.`);
+  }
+  return { payoutId: payout.id, utr: payout.utr || undefined, status: String(payout.status) };
+}
+
+/** Mentor ko in-app notification (fail hone par payout flow nahi rukta). */
+async function notifyMentor(payment: any, title: string, message: string, extra: Record<string, any> = {}) {
+  try {
+    const mentorId = payment?.context?.mentorId;
+    if (!mentorId) {
+      logger.warn(`Payout notification skipped: no mentorId on payment ${payment?.paymentId}`);
+      return;
+    }
+    const mentor: any = await mentorRepository.findByMentorId(mentorId);
+    if (!mentor?.userId) {
+      logger.warn(`Payout notification skipped: mentor/userId not found for mentorId ${mentorId}`);
+      return;
+    }
+    await NotificationService.sendNotification({
+      userId: mentor.userId,
+      type: NotificationType.PAYMENT_SUCCESS,
+      channels: [NotificationChannel.IN_APP],
+      data: {
+        title,
+        message,
+        paymentId: payment.paymentId,
+        sessionId: payment?.fulfillment?.sessionId || payment?.context?.sessionId,
+        ...extra,
+      },
+    });
+  } catch (e: any) {
+    logger.error(`Payout notification failed for payment ${payment?.paymentId}: ${e?.message}`);
+  }
+}
+
 class PayoutService {
-  /** Admin list. status: held | released | paid */
+    /** Admin list. status: held | released | paid */
   async listForAdmin(status: string, page: number, limit: number) {
     const filter: any =
       status === PayoutStatus.HELD
@@ -145,38 +285,110 @@ class PayoutService {
     return { data, total };
   }
 
-  /** Admin approve: held -> released (sirf completed session ka) */
-  async release(paymentId: string, adminId: string) {
-    const existing: any = await MentorshipPayment.findOne({ paymentId }).lean();
-    if (!existing) throw new NotFoundError('Payment not found');
-
-    const statuses = await bookingStatusMap([existing]);
-    const bookingStatus = statuses.get(String(existing.fulfillment?.bookingId));
-    if (bookingStatus !== 'completed') {
-      throw new BadRequestError(
-        `Session abhi complete nahi hua (status: ${bookingStatus || 'unknown'}). Complete hone ke baad hi release karo.`
-      );
-    }
-
-    const { mentorAmount, platformAmount } = split(existing);
-    const updated = await MentorshipPayment.findOneAndUpdate(
-      { paymentId, ...ELIGIBLE, ...HELD_FILTER },
-      {
-        $set: {
-          'payout.status': PayoutStatus.RELEASED,
-          'payout.mentorAmount': mentorAmount,
-          'payout.platformAmount': platformAmount,
-          'payout.releasedAt': new Date(),
-          'payout.releasedBy': adminId,
+    /**
+   * Admin approve: held -> released -> RazorpayX payout -> paid (sirf completed session ka).
+   * Payout fail hua to status wapas held ho jata hai.
+   */
+    async release(paymentId: string, adminId: string) {
+      const existing: any = await MentorshipPayment.findOne({ paymentId }).lean();
+      if (!existing) throw new NotFoundError('Payment not found');
+  
+      const statuses = await bookingStatusMap([existing]);
+      const bookingStatus = statuses.get(String(existing.fulfillment?.bookingId));
+      if (bookingStatus !== 'completed') {
+        throw new BadRequestError(
+          `Session abhi complete nahi hua (status: ${bookingStatus || 'unknown'}). Complete hone ke baad hi release karo.`
+        );
+      }
+  
+      // Mentor + payout account pehle check karo (claim karne se pehle)
+      const mentorId = existing.context?.mentorId;
+      const mentor: any = mentorId ? await mentorRepository.findByMentorId(mentorId) : null;
+      if (!mentor) throw new BadRequestError('Mentor not found for this payment');
+      const method: any = await findPayoutMethod(mentorId, mentor);
+      if (!method) throw new BadRequestError('Mentor has not added a payout account (UPI / bank)');
+  
+      const user: any = mentor.userId
+        ? await User.findOne(
+            { userId: mentor.userId },
+            { firstName: 1, lastName: 1, email: 1, phoneNumber: 1, _id: 0 }
+          ).lean()
+        : null;
+      const mentorName =
+        `${user?.firstName || ''} ${user?.lastName || ''}`.trim() ||
+        method.upiName ||
+        method.accountHolderName ||
+        'Mentor';
+  
+      const { mentorAmount, platformAmount } = split(existing);
+  
+      // Step 1: atomically claim (double click / do admin ek saath = sirf ek jeetega)
+      const claimed = await MentorshipPayment.findOneAndUpdate(
+        { paymentId, ...ELIGIBLE, ...HELD_FILTER },
+        {
+          $set: {
+            'payout.status': PayoutStatus.RELEASED,
+            'payout.mentorAmount': mentorAmount,
+            'payout.platformAmount': platformAmount,
+            'payout.releasedAt': new Date(),
+            'payout.releasedBy': adminId,
+          },
         },
-      },
-      { new: true }
-    );
-    if (!updated) {
-      throw new BadRequestError('Payment is not eligible for release (already released, refunded or unpaid)');
+        { new: true }
+      );
+      if (!claimed) {
+        throw new BadRequestError('Payment is not eligible for release (already released, refunded or unpaid)');
+      }
+  
+      // Step 2: asli paisa bhejo. Fail hua to held par wapas.
+      let result: { payoutId: string; utr?: string; status: string };
+      try {
+        result = await sendRazorpayXPayout({
+          paymentId,
+          mentorName,
+          mentorEmail: user?.email,
+          mentorPhone: user?.phoneNumber,
+          method,
+          amount: mentorAmount,
+        });
+      } catch (err: any) {
+        logger.error(`Mentor payout failed for payment ${paymentId}: ${err?.message}`);
+        await MentorshipPayment.updateOne(
+          { paymentId, 'payout.status': PayoutStatus.RELEASED },
+          {
+            $set: { 'payout.status': PayoutStatus.HELD },
+            $unset: { 'payout.releasedAt': '', 'payout.releasedBy': '' },
+          }
+        );
+        throw err;
+      }
+  
+      // Step 3: paid mark karo
+      const paid = await MentorshipPayment.findOneAndUpdate(
+        { paymentId },
+        {
+          $set: {
+            'payout.status': PayoutStatus.PAID,
+            'payout.paidAt': new Date(),
+            'payout.paidBy': adminId,
+            'payout.reference': result.utr || result.payoutId,
+          },
+        },
+        { new: true }
+      );
+  
+      void notifyMentor(
+        paid || claimed,
+        'Payout sent',
+        `₹${mentorAmount} for "${existing.context?.title || 'your session'}" has been sent to your ${
+          method.type === 'upi' ? `UPI ID ${method.upiId}` : 'bank account'
+        }. Reference: ${result.utr || result.payoutId}`,
+        { amount: mentorAmount, transactionId: result.utr || result.payoutId }
+      );
+      return paid || claimed;
     }
-    return updated;
-  }
+
+    
 
   /** Admin: mentor ko asli paisa bhej diya, released -> paid */
   async markPaid(paymentId: string, adminId: string, reference: string) {
