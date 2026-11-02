@@ -443,6 +443,7 @@ class RefundService {
 
       NotificationService.sendNotification({
         userId: input.userId,
+        module: 'industry-mentor',
         type: NotificationType.REFUND_PROCESSED,
         channels: isManualRefund
           ? [NotificationChannel.IN_APP]
@@ -478,6 +479,7 @@ class RefundService {
         if (missedMentorDoc?.userId) {
           NotificationService.sendNotification({
             userId: missedMentorDoc.userId,
+        module: 'industry-mentor',
             type: NotificationType.SESSION_CANCELLED,
             channels: [NotificationChannel.IN_APP],
             data: {
@@ -685,6 +687,7 @@ class RefundService {
         const adminUserId = String(admin.userId || admin._id);
         NotificationService.sendNotification({
           userId: adminUserId,
+        module: 'industry-mentor',
           type: NotificationType.REFUND_PROCESSED,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -958,6 +961,7 @@ class RefundService {
         // Mentee cancelled -> notify the mentor only
         NotificationService.sendNotification({
           userId: mentor.userId,
+        module: 'industry-mentor',
           type: NotificationType.SESSION_CANCELLED,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -969,6 +973,7 @@ class RefundService {
         // Mentor cancelled -> notify the mentee only
         NotificationService.sendNotification({
           userId: mentee.userId,
+        module: 'industry-mentor',
           type: NotificationType.SESSION_CANCELLED,
           channels: [NotificationChannel.IN_APP],
           data: {

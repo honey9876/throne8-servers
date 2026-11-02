@@ -70,6 +70,7 @@ export class ForumService {
           if (parentAuthorId && parentAuthorId !== replierId && !notifiedUserIds.has(parentAuthorId)) {
             await notificationService.sendNotification({
               userId: parentAuthorId,
+        module: 'industry-mentor',
               type: NotificationType.FORUM_REPLY,
               channels: [NotificationChannel.IN_APP],
               priority: "normal",
@@ -96,6 +97,7 @@ export class ForumService {
         try {
           await notificationService.sendNotification({
             userId: threadAuthorId,
+        module: 'industry-mentor',
             type: NotificationType.FORUM_REPLY,
             channels: [NotificationChannel.IN_APP],
             priority: "normal",
@@ -126,6 +128,7 @@ export class ForumService {
         try {
           await notificationService.sendNotification({
             userId: mentionedUserId,
+        module: 'industry-mentor',
             type: NotificationType.FORUM_MENTION,
             channels: [NotificationChannel.IN_APP],
             priority: "normal",

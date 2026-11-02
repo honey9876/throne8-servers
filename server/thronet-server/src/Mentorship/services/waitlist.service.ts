@@ -85,6 +85,7 @@ class WaitlistService {
       try {
         await notificationService.sendNotification({
           userId: user.userId,
+        module: 'industry-mentor',
           type: NotificationType.WAITLIST_AVAILABLE,
           channels: [NotificationChannel.IN_APP],
           priority: 'high',
@@ -186,6 +187,7 @@ class WaitlistService {
         const student = await this.safeUser(input.userId);
         await notificationService.sendNotification({
           userId: mentor.userId,
+        module: 'industry-mentor',
           type: NotificationType.WAITLIST_JOINED,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -565,6 +567,7 @@ class WaitlistService {
         if (mentor) {
           await notificationService.sendNotification({
             userId: mentor.userId,
+        module: 'industry-mentor',
             type: NotificationType.WAITLIST_AVAILABLE,
             channels: [NotificationChannel.IN_APP],
             priority: 'normal',

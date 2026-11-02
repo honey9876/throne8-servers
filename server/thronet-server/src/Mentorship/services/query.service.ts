@@ -137,6 +137,7 @@ class QueryService {
       try {
         await notificationService.sendNotification({
           userId: mentor.userId,
+        module: 'industry-mentor',
           type: NotificationType.QUERY_RECEIVED,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -308,6 +309,7 @@ class QueryService {
 
         await notificationService.sendNotification({
           userId: query.menteeId,
+        module: 'industry-mentor',
           type: NotificationType.QUERY_ANSWERED,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -363,6 +365,7 @@ class QueryService {
 
         await notificationService.sendNotification({
           userId: query.mentorId,
+        module: 'industry-mentor',
           type: NotificationType.QUERY_RECEIVED,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -418,6 +421,7 @@ class QueryService {
 
         await notificationService.sendNotification({
           userId: query.menteeId,
+        module: 'industry-mentor',
           type: NotificationType.QUERY_ANSWERED,
           channels: [NotificationChannel.IN_APP],
           data: {

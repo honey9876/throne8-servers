@@ -125,6 +125,7 @@ class CommunityEventService {
       attendees.map((a) =>
         notificationService.sendNotification({
           userId: a.user.toString(),
+        module: 'industry-mentor',
           type: NotificationType.PROFILE_VIEWED, // TODO: EVENT_CANCELLED type add karke swap karna
           channels: [NotificationChannel.IN_APP],
           priority: 'normal',

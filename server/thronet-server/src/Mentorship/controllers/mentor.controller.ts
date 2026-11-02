@@ -201,6 +201,7 @@ class MentorController {
             try {
               await notificationService.sendNotification({
                 userId: mentorUserId,
+        module: 'industry-mentor',
                 type: NotificationType.PROFILE_VIEWED,
                 channels: [NotificationChannel.IN_APP],
                 priority: 'low',

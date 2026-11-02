@@ -100,6 +100,7 @@ class ReviewService {
         if (mentorDoc && mentorDoc.userId && mentorDoc.userId !== input.menteeId) {
           NotificationService.sendNotification({
             userId: mentorDoc.userId,
+        module: 'industry-mentor',
             type: NotificationType.REVIEW_RECEIVED,
             channels: [NotificationChannel.IN_APP],
             data: {
@@ -366,6 +367,7 @@ class ReviewService {
 
           NotificationService.sendNotification({
             userId: review.menteeId,
+        module: 'industry-mentor',
             type: NotificationType.REVIEW_REPLIED,
             channels: [NotificationChannel.IN_APP],
             data: {

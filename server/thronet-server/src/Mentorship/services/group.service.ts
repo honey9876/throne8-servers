@@ -131,6 +131,7 @@ class GroupService {
         menteeIds.map((menteeId) =>
           NotificationService.sendNotification({
             userId: menteeId,
+        module: 'industry-mentor',
             type,
             channels: [NotificationChannel.IN_APP],
             data: { title, message },
@@ -383,6 +384,7 @@ class GroupService {
 
           await NotificationService.sendNotification({
             userId: mentorProfile.userId,
+        module: 'industry-mentor',
             type: NotificationType.NEW_BOOKING_REQUEST,
             channels: [NotificationChannel.IN_APP],
             data: {
@@ -401,6 +403,7 @@ class GroupService {
         try {
           await NotificationService.sendNotification({
             userId: menteeId,
+        module: 'industry-mentor',
             type: NotificationType.NEW_BOOKING_REQUEST,
             channels: [NotificationChannel.IN_APP],
             data: {
@@ -485,6 +488,7 @@ class GroupService {
         try {
           await NotificationService.sendNotification({
             userId: menteeId,
+        module: 'industry-mentor',
             type: NotificationType.BOOKING_CONFIRMED,
             channels: [NotificationChannel.IN_APP],
             data: {
@@ -531,6 +535,7 @@ class GroupService {
         try {
           await NotificationService.sendNotification({
             userId: menteeId,
+        module: 'industry-mentor',
             type: NotificationType.SESSION_CANCELLED,
             channels: [NotificationChannel.IN_APP],
             data: {
@@ -654,6 +659,7 @@ class GroupService {
 
             await NotificationService.sendNotification({
               userId: mentorProfile.userId,
+        module: 'industry-mentor',
               type: NotificationType.SESSION_CANCELLED,
               channels: [NotificationChannel.IN_APP],
               data: {

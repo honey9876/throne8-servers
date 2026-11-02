@@ -256,6 +256,7 @@ class BookingService {
     // ✅ NEW: in-app notification to mentee
     NotificationService.sendNotification({
       userId: mentee.userId,
+        module: 'industry-mentor',
       type: NotificationType.BOOKING_CONFIRMED,
       channels: [NotificationChannel.IN_APP],
       data: {
@@ -267,6 +268,7 @@ class BookingService {
     // ✅ NEW: in-app notification to mentor
     NotificationService.sendNotification({
       userId: mentor.userId,
+        module: 'industry-mentor',
       type: NotificationType.BOOKING_CONFIRMED,
       channels: [NotificationChannel.IN_APP],
       data: {
@@ -356,6 +358,7 @@ class BookingService {
       if (mentee?.userId) {
         NotificationService.sendNotification({
           userId: mentee.userId,
+        module: 'industry-mentor',
           type: NotificationType.REFUND_PROCESSED,
           channels: [NotificationChannel.IN_APP],
           data: {
@@ -620,6 +623,7 @@ class BookingService {
       // ✅ NEW: in-app reminder
       NotificationService.sendNotification({
         userId: mentee.userId,
+        module: 'industry-mentor',
         type: NotificationType.SESSION_REMINDER,
         channels: [NotificationChannel.IN_APP],
         data: {

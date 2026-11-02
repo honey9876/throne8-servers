@@ -76,8 +76,9 @@ class SeniorNotificationService {
       const sessionTitle = session.title || 'Senior Mentorship Session';
 
       // 1) In-App Notification to Senior Mentor
-      NotificationService.sendNotification({
+      await NotificationService.sendNotification({
         userId: mentorUserId,
+        module: 'senior-mentor',
         type: NotificationType.NEW_BOOKING_REQUEST,
         channels: [NotificationChannel.IN_APP],
         priority: 'high',
@@ -100,8 +101,9 @@ class SeniorNotificationService {
 
       // 2) In-App Notification to Mentee
       const isPending = booking.status === 'pending';
-      NotificationService.sendNotification({
+      await NotificationService.sendNotification({
         userId: menteeUserId,
+        module: 'senior-mentor',
         type: NotificationType.BOOKING_CONFIRMED,
         channels: [NotificationChannel.IN_APP],
         priority: 'normal',
@@ -148,6 +150,7 @@ class SeniorNotificationService {
 
       await NotificationService.sendNotification({
         userId: menteeUserId,
+        module: 'senior-mentor',
         type: NotificationType.BOOKING_CONFIRMED,
         channels: [NotificationChannel.IN_APP],
         priority: 'high',
@@ -213,6 +216,7 @@ class SeniorNotificationService {
 
       await NotificationService.sendNotification({
         userId: targetUserId,
+        module: 'senior-mentor',
         type: NotificationType.SESSION_CANCELLED,
         channels: [NotificationChannel.IN_APP],
         priority: 'high',
@@ -283,6 +287,7 @@ class SeniorNotificationService {
 
       await NotificationService.sendNotification({
         userId: targetUserId,
+        module: 'senior-mentor',
         type: NotificationType.SESSION_RESCHEDULED,
         channels: [NotificationChannel.IN_APP],
         priority: 'high',
@@ -344,6 +349,7 @@ class SeniorNotificationService {
       // 1) Persistent In-App Notification
       await NotificationService.sendNotification({
         userId: menteeUserId,
+        module: 'senior-mentor',
         type: NotificationType.SESSION_STARTED,
         channels: [NotificationChannel.IN_APP],
         priority: 'urgent',
@@ -408,6 +414,7 @@ class SeniorNotificationService {
 
       await NotificationService.sendNotification({
         userId: menteeUserId,
+        module: 'senior-mentor',
         type: NotificationType.SESSION_COMPLETED,
         channels: [NotificationChannel.IN_APP],
         priority: 'normal',
@@ -474,6 +481,7 @@ class SeniorNotificationService {
 
       await NotificationService.sendNotification({
         userId: targetUserId,
+        module: 'senior-mentor',
         type: NotificationType.BOOKING_CONFIRMED, // Fallback safe type mapped in frontend notification bell
         channels: [NotificationChannel.IN_APP],
         priority: 'high',

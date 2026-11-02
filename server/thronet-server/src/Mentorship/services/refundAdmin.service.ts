@@ -112,6 +112,7 @@ class RefundAdminService {
     if (menteeId) {
       NotificationService.sendNotification({
         userId: menteeId,
+        module: 'industry-mentor',
         type: NotificationType.REFUND_PROCESSED,
         channels: [NotificationChannel.IN_APP, NotificationChannel.EMAIL],
         data: {
@@ -128,6 +129,7 @@ class RefundAdminService {
       if (mentorDoc?.userId) {
         NotificationService.sendNotification({
           userId: mentorDoc.userId,
+        module: 'industry-mentor',
           type: NotificationType.SESSION_CANCELLED,
           channels: [NotificationChannel.IN_APP],
           data: {
