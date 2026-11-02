@@ -14,7 +14,9 @@ export type CreditType =
   | "coverEdits"
   | "interview5"
   | "interview10"
-  | "interview15";
+  | "interview15"
+  | "atsChecks"
+  | "resumeUploads";
 
 export const CREDIT_TYPES: CreditType[] = [
   "resumeRuns",
@@ -24,6 +26,8 @@ export const CREDIT_TYPES: CreditType[] = [
   "interview5",
   "interview10",
   "interview15",
+  "atsChecks",
+  "resumeUploads",
 ];
 
 export type CreditAmounts = Partial<Record<CreditType, number>>;
@@ -39,6 +43,11 @@ export const interviewCreditType = (
  * One-time free credits every user gets (manual resume and manual cover
  * letter building are always free and are not credit based).
  * The free AI interview is a 5 question session.
+ *
+ * resumeUploads: free "upload a PDF and parse it" runs (one AI call each).
+ * After they are used up, an upload spends 1 resumeEdits credit instead
+ * (see withUploadCredit in services/credit.service.ts). There is no
+ * pack that sells uploads on their own.
  */
 export const FREE_CREDITS: Record<CreditType, number> = {
   resumeRuns: 1,
@@ -48,6 +57,8 @@ export const FREE_CREDITS: Record<CreditType, number> = {
   interview5: 1,
   interview10: 0,
   interview15: 0,
+  atsChecks: 2,
+  resumeUploads: 5,
 };
 
 /** AIUsage features that count as one AI "run" or "edit" of a resume. */
@@ -111,6 +122,18 @@ export const RESUME_PLAN_LIST: ResumePlan[] = [
     name: "Cover letter AI Plus",
     price: 29,
     credits: { coverRuns: 5, coverEdits: 10 },
+  },
+  {
+    id: "ats-ai-3",
+    name: "ATS check Starter",
+    price: 25,
+    credits: { atsChecks: 3 },
+  },
+  {
+    id: "ats-ai-10",
+    name: "ATS check Plus",
+    price: 79,
+    credits: { atsChecks: 10 },
   },
   interviewPlan(5, 2, 26),
   interviewPlan(5, 5, 65),
