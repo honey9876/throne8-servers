@@ -6,7 +6,7 @@ import { BadRequestError } from '@/shared/errors/app.error';
 
 export async function adminList(req: Request, res: Response, next: NextFunction) {
   try {
-    const status = ['held', 'released', 'paid'].includes(String(req.query.status))
+    const status = ['held', 'released', 'paid', 'approved'].includes(String(req.query.status))
       ? String(req.query.status)
       : 'held';
     const page = Math.max(1, Number(req.query.page) || 1);

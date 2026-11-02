@@ -32,7 +32,21 @@ function split(p: any) {
   return { mentorAmount: Math.max(0, base - platformAmount), platformAmount };
 }
 
+
+/** Paid history me full account number nahi dikhana, sirf last 4 digits */
+function maskMethod(m: any) {
+  if (!m || m.type !== 'bank') return m;
+  return {
+    ...m,
+    accountNumber: `••••${String(m.accountNumber || '').slice(-4)}`,
+    ifscCode: undefined,
+  };
+}
+
 /** bookingId -> booking status ("completed", "pending", "cancelled", ...) */
+
+
+
 async function bookingStatusMap(payments: any[]): Promise<Map<string, string>> {
   const sessionIds = [
     ...new Set(
@@ -190,16 +204,21 @@ async function notifyMentor(payment: any, title: string, message: string, extra:
 }
 
 class PayoutService {
-    /** Admin list. status: held | released | paid */
+    /** Admin list. status: held | released | paid | approved (released + paid) */
   async listForAdmin(status: string, page: number, limit: number) {
     const filter: any =
-      status === PayoutStatus.HELD
-        ? { ...ELIGIBLE, ...HELD_FILTER }
+    status === PayoutStatus.HELD
+      ? { ...ELIGIBLE, ...HELD_FILTER }
+      : status === 'approved'
+        ? { ...ELIGIBLE, 'payout.status': { $in: [PayoutStatus.RELEASED, PayoutStatus.PAID] } }
         : { ...ELIGIBLE, 'payout.status': status };
 
-    const [rows, total] = await Promise.all([
-      MentorshipPayment.find(filter)
-        .sort({ paidAt: -1 })
+  // held: nayi payments pehle | approved/paid: jo sabse recent approve hua wo pehle
+  const sort: any = status === PayoutStatus.HELD ? { paidAt: -1 } : { 'payout.releasedAt': -1 };
+
+  const [rows, total] = await Promise.all([
+    MentorshipPayment.find(filter)
+      .sort(sort)
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
@@ -256,7 +275,20 @@ class PayoutService {
       return out;
     };
 
-    const data = await Promise.all(
+
+        // Approve karne wale admin ke naam
+        const adminIds = [...new Set(rows.map((p: any) => p.payout?.releasedBy).filter(Boolean))];
+        const admins: any[] = adminIds.length
+          ? await User.find(
+              { userId: { $in: adminIds } },
+              { userId: 1, firstName: 1, lastName: 1, _id: 0 }
+            ).lean()
+          : [];
+        const adminNames = new Map(
+          admins.map((a) => [a.userId, `${a.firstName || ''} ${a.lastName || ''}`.trim()])
+        );
+    
+        const data = await Promise.all(
       rows.map(async (p: any) => {
         const amounts = split(p);
         const mentor = await resolveMentor(p.context?.mentorId);
@@ -277,7 +309,10 @@ class PayoutService {
           releasedAt: p.payout?.releasedAt,
           payoutPaidAt: p.payout?.paidAt,
           reference: p.payout?.reference,
-          payoutMethod: mentor.method,
+          releasedBy: adminNames.get(p.payout?.releasedBy) || p.payout?.releasedBy || undefined,
+          // Paid ho chuka to account masked; held/released me admin ko full details chahiye
+          payoutMethod:
+            p.payout?.status === PayoutStatus.PAID ? maskMethod(mentor.method) : mentor.method,
         };
       })
     );
@@ -388,7 +423,7 @@ class PayoutService {
       return paid || claimed;
     }
 
-    
+
 
   /** Admin: mentor ko asli paisa bhej diya, released -> paid */
   async markPaid(paymentId: string, adminId: string, reference: string) {
