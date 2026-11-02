@@ -50,6 +50,7 @@ export interface ISession extends Document<string> {
     accessToken?: string;
     refreshTokenHash?: string;
     previousRefreshTokenHash?: string;
+    recentRefreshTokens?: { h: string; at: Date }[];
     rotatedAt?: Date;
     isActive: boolean;
     lastActivity: Date;
@@ -122,6 +123,11 @@ const sessionSchema = new Schema<ISession, ISessionModel>(
         accessToken: { type: String, sparse: true },
         refreshTokenHash: { type: String, select: false },
         previousRefreshTokenHash: { type: String, select: false },
+        recentRefreshTokens: {
+            type: [{ _id: false, h: String, at: Date }],
+            select: false,
+            default: undefined,
+        },
         rotatedAt: { type: Date },
         isActive: { type: Boolean, default: true },
         lastActivity: { type: Date, default: Date.now },
@@ -230,7 +236,7 @@ sessionSchema.statics.setRefreshToken = async function (
         { _id: sessionId },
         {
             $set: { refreshTokenHash: hashToken(refreshToken) },
-            $unset: { previousRefreshTokenHash: 1, rotatedAt: 1 },
+            $unset: { previousRefreshTokenHash: 1, recentRefreshTokens: 1, rotatedAt: 1 },            
         }
     );
 };
@@ -269,6 +275,12 @@ sessionSchema.statics.rotateRefreshToken = async function (
                 lastActivity: now,
                 expiresAt: nextExpiry,
             },
+            $push: {
+                recentRefreshTokens: {
+                    $each: [{ h: presentedHash, at: now }],
+                    $slice: -5,
+                },
+            },
         },
         { projection: { _id: 1 } }
     );
@@ -277,7 +289,7 @@ sessionSchema.statics.rotateRefreshToken = async function (
 
     // 2. Fail kyun hua?
     const session: any = await this.findOne({ _id: sessionId, userId })
-        .select('+refreshTokenHash +previousRefreshTokenHash')
+    .select('+refreshTokenHash +previousRefreshTokenHash +recentRefreshTokens')
         .lean();
 
     if (!session) return { ok: false, reason: 'not_found' };
@@ -286,11 +298,16 @@ sessionSchema.statics.rotateRefreshToken = async function (
         return { ok: false, reason: 'inactive' };
     }
 
-    // 3. Grace window (do tabs ek saath, ya response kho gaya aur client ne retry kiya)
+       // 3. Grace window: recent hashes me se koi bhi (graceMs ke andar) accept
+       const inRecentList = (session.recentRefreshTokens || []).some(
+        (e: { h: string; at: Date }) =>
+            e.h === presentedHash && now.getTime() - new Date(e.at).getTime() <= graceMs
+    );
     const withinGrace =
-        session.previousRefreshTokenHash === presentedHash &&
-        session.rotatedAt &&
-        now.getTime() - new Date(session.rotatedAt).getTime() <= graceMs;
+        inRecentList ||
+        (session.previousRefreshTokenHash === presentedHash &&
+            session.rotatedAt &&
+            now.getTime() - new Date(session.rotatedAt).getTime() <= graceMs);
 
     if (withinGrace) {
         const graceRotated = await this.findOneAndUpdate(
@@ -298,7 +315,6 @@ sessionSchema.statics.rotateRefreshToken = async function (
                 _id: sessionId,
                 userId,
                 isActive: true,
-                previousRefreshTokenHash: presentedHash,
                 refreshTokenHash: session.refreshTokenHash,
             },
             {
@@ -309,10 +325,19 @@ sessionSchema.statics.rotateRefreshToken = async function (
                     lastActivity: now,
                     expiresAt: nextExpiry,
                 },
+                $push: {
+                    recentRefreshTokens: {
+                        $each: [{ h: session.refreshTokenHash, at: now }],
+                        $slice: -5,
+                    },
+                },
             },
             { projection: { _id: 1 } }
         );
 
+
+
+        
         if (graceRotated) return { ok: true, graceUsed: true };
         return { ok: false, reason: 'conflict' };
     }
