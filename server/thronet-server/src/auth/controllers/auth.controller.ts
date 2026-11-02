@@ -84,6 +84,8 @@ interface RegisterBody {
     preferredRole?: string;
     cgpa?: string;
     verificationToken?: string;
+    /** Optional referral code of the friend who shared the link */
+    referralCode?: string;
     deviceType?: string;
     deviceName?: string;
     os?: string;
@@ -456,6 +458,7 @@ class AuthController {
                 preferredRole,
                 cgpa,
                 verificationToken,
+                referralCode,
             } = req.body;
 
             const ipAddress = req.ip || (req as any).connection?.remoteAddress || '0.0.0.0';
@@ -633,6 +636,20 @@ class AuthController {
                 deviceId: result.deviceId,
                 correlationId,
             });
+
+            // Referral bonus (optional). Runs in the background: a referral problem
+            // must never slow down or break a signup.
+            if (referralCode) {
+                // Loaded on demand so auth never depends on the optional resume module at startup
+                import('@/resume/services/referral.service')
+                    .then(({ applyReferral }) => applyReferral(result.userId, referralCode, { ip: ipAddress }))
+                    .catch((referralErr: any) =>
+                        LoggerUtil.warn('Referral could not be applied (non-critical)', {
+                            userId: result.userId,
+                            error: referralErr?.message,
+                        })
+                    );
+            }
 
             // Step 4: Tokens
             const payload: UserPayload = {

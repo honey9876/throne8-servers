@@ -74,6 +74,23 @@ export async function googleRegisterController(req: Request, res: Response): Pro
 
         const result = await GoogleAuthService.registerGoogleUser(req.body, buildContext(req));
 
+        // Referral bonus (optional). Runs in the background: a referral problem
+        // must never slow down or break a signup. registerGoogleUser throws for
+        // existing accounts, so a returned user here is always brand new.
+        const { referralCode } = req.body;
+        const newUserId = result?.user?.userId;
+        if (referralCode && newUserId) {
+            // Loaded on demand so auth never depends on the optional resume module at startup
+            import('@/resume/services/referral.service')
+                .then(({ applyReferral }) => applyReferral(newUserId, referralCode, { ip: req.ip }))
+                .catch((referralErr: any) =>
+                    LoggerUtil.warn('Referral could not be applied (non-critical)', {
+                        userId: newUserId,
+                        error: referralErr?.message,
+                    })
+                );
+        }
+
         LoggerUtil.info('Google register completed', { ms: Date.now() - startedAt });
 
         res.status(200).json({

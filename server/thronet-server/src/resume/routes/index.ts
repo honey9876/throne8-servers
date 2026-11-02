@@ -17,6 +17,7 @@ import dashboardRoutes from '../modules/dashboard/dashboard.routes';
 import interviewRoutes from '../modules/interview/interview.routes';
 import uploadRoutes from '../modules/upload/upload.routes';
 import paymentRoutes from '../modules/payment/payment.routes';
+import referralRoutes from '../modules/referral/referral.routes';
 
 const router = Router();
 
@@ -32,5 +33,6 @@ router.use('/dashboard', dashboardRoutes);
 router.use('/interview', interviewRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/payments', paymentRoutes);
+router.use('/referral', referralRoutes);
 
 export default router;
