@@ -12,8 +12,6 @@ import { BadRequestError, NotFoundError } from '@/shared/errors/app.error';
 import logger from '@/config/logging/logger.config';
 import NotificationService, { NotificationType, NotificationChannel } from './notification.service';
 
-
-
 // Purane payments mein payout field nahi hota, unhe bhi "held" maano.
 const HELD_FILTER = {
   $or: [{ 'payout.status': PayoutStatus.HELD }, { 'payout.status': { $exists: false } }],
@@ -32,7 +30,6 @@ function split(p: any) {
   return { mentorAmount: Math.max(0, base - platformAmount), platformAmount };
 }
 
-
 /** Paid history me full account number nahi dikhana, sirf last 4 digits */
 function maskMethod(m: any) {
   if (!m || m.type !== 'bank') return m;
@@ -44,9 +41,6 @@ function maskMethod(m: any) {
 }
 
 /** bookingId -> booking status ("completed", "pending", "cancelled", ...) */
-
-
-
 async function bookingStatusMap(payments: any[]): Promise<Map<string, string>> {
   const sessionIds = [
     ...new Set(
@@ -204,21 +198,21 @@ async function notifyMentor(payment: any, title: string, message: string, extra:
 }
 
 class PayoutService {
-    /** Admin list. status: held | released | paid | approved (released + paid) */
+  /** Admin list. status: held | released | paid | approved (released + paid) */
   async listForAdmin(status: string, page: number, limit: number) {
     const filter: any =
-    status === PayoutStatus.HELD
-      ? { ...ELIGIBLE, ...HELD_FILTER }
-      : status === 'approved'
-        ? { ...ELIGIBLE, 'payout.status': { $in: [PayoutStatus.RELEASED, PayoutStatus.PAID] } }
-        : { ...ELIGIBLE, 'payout.status': status };
+      status === PayoutStatus.HELD
+        ? { ...ELIGIBLE, ...HELD_FILTER }
+        : status === 'approved'
+          ? { ...ELIGIBLE, 'payout.status': { $in: [PayoutStatus.RELEASED, PayoutStatus.PAID] } }
+          : { ...ELIGIBLE, 'payout.status': status };
 
-  // held: nayi payments pehle | approved/paid: jo sabse recent approve hua wo pehle
-  const sort: any = status === PayoutStatus.HELD ? { paidAt: -1 } : { 'payout.releasedAt': -1 };
+    // held: nayi payments pehle | approved/paid: jo sabse recent approve hua wo pehle
+    const sort: any = status === PayoutStatus.HELD ? { paidAt: -1 } : { 'payout.releasedAt': -1 };
 
-  const [rows, total] = await Promise.all([
-    MentorshipPayment.find(filter)
-      .sort(sort)
+    const [rows, total] = await Promise.all([
+      MentorshipPayment.find(filter)
+        .sort(sort)
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
@@ -250,7 +244,6 @@ class PayoutService {
         // Withdrawal method UUID mentorId se save hota hai (ObjectId se nahi).
         // Safety ke liye dono id try karte hain.
         const ids = [mentorId];
-        // (mentor._id ko bhi add karna ho to neeche wale try me mentor fetch karke push kar sakte ho)
         method = await WithdrawalMethod.findOne({ mentorId: { $in: ids } })
           .sort({ isDefault: -1, createdAt: -1 }) // default pehle, nahi to latest added
           .lean();
@@ -275,20 +268,19 @@ class PayoutService {
       return out;
     };
 
+    // Approve karne wale admin ke naam
+    const adminIds = [...new Set(rows.map((p: any) => p.payout?.releasedBy).filter(Boolean))];
+    const admins: any[] = adminIds.length
+      ? await User.find(
+          { userId: { $in: adminIds } },
+          { userId: 1, firstName: 1, lastName: 1, _id: 0 }
+        ).lean()
+      : [];
+    const adminNames = new Map(
+      admins.map((a) => [a.userId, `${a.firstName || ''} ${a.lastName || ''}`.trim()])
+    );
 
-        // Approve karne wale admin ke naam
-        const adminIds = [...new Set(rows.map((p: any) => p.payout?.releasedBy).filter(Boolean))];
-        const admins: any[] = adminIds.length
-          ? await User.find(
-              { userId: { $in: adminIds } },
-              { userId: 1, firstName: 1, lastName: 1, _id: 0 }
-            ).lean()
-          : [];
-        const adminNames = new Map(
-          admins.map((a) => [a.userId, `${a.firstName || ''} ${a.lastName || ''}`.trim()])
-        );
-    
-        const data = await Promise.all(
+    const data = await Promise.all(
       rows.map(async (p: any) => {
         const amounts = split(p);
         const mentor = await resolveMentor(p.context?.mentorId);
@@ -388,6 +380,10 @@ class PayoutService {
       });
     } catch (err: any) {
       logger.error(`Mentor payout failed for payment ${paymentId}: ${err?.message}`);
+      // Network error: payout may have gone through. Leave as "released" for manual check.
+      if (String(err?.message).includes('API call failed')) {
+        throw err;
+      }
       await MentorshipPayment.updateOne(
         { paymentId, 'payout.status': PayoutStatus.RELEASED },
         {
@@ -410,7 +406,12 @@ class PayoutService {
         },
       },
       { new: true }
-    );
+    ).catch((e: any) => {
+      logger.error(
+        `CRITICAL: payout SENT but DB update failed. paymentId=${paymentId} ref=${result.utr || result.payoutId}: ${e?.message}`
+      );
+      throw e;
+    });
 
     void notifyMentor(
       paid || claimed,
