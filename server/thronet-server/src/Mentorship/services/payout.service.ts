@@ -320,110 +320,108 @@ class PayoutService {
     return { data, total };
   }
 
-    /**
+  /**
    * Admin approve: held -> released -> RazorpayX payout -> paid (sirf completed session ka).
    * Payout fail hua to status wapas held ho jata hai.
    */
-    async release(paymentId: string, adminId: string) {
-      const existing: any = await MentorshipPayment.findOne({ paymentId }).lean();
-      if (!existing) throw new NotFoundError('Payment not found');
-  
-      const statuses = await bookingStatusMap([existing]);
-      const bookingStatus = statuses.get(String(existing.fulfillment?.bookingId));
-      if (bookingStatus !== 'completed') {
-        throw new BadRequestError(
-          `Session abhi complete nahi hua (status: ${bookingStatus || 'unknown'}). Complete hone ke baad hi release karo.`
-        );
-      }
-  
-      // Mentor + payout account pehle check karo (claim karne se pehle)
-      const mentorId = existing.context?.mentorId;
-      const mentor: any = mentorId ? await mentorRepository.findByMentorId(mentorId) : null;
-      if (!mentor) throw new BadRequestError('Mentor not found for this payment');
-      const method: any = await findPayoutMethod(mentorId, mentor);
-      if (!method) throw new BadRequestError('Mentor has not added a payout account (UPI / bank)');
-  
-      const user: any = mentor.userId
-        ? await User.findOne(
-            { userId: mentor.userId },
-            { firstName: 1, lastName: 1, email: 1, phoneNumber: 1, _id: 0 }
-          ).lean()
-        : null;
-      const mentorName =
-        `${user?.firstName || ''} ${user?.lastName || ''}`.trim() ||
-        method.upiName ||
-        method.accountHolderName ||
-        'Mentor';
-  
-      const { mentorAmount, platformAmount } = split(existing);
-  
-      // Step 1: atomically claim (double click / do admin ek saath = sirf ek jeetega)
-      const claimed = await MentorshipPayment.findOneAndUpdate(
-        { paymentId, ...ELIGIBLE, ...HELD_FILTER },
-        {
-          $set: {
-            'payout.status': PayoutStatus.RELEASED,
-            'payout.mentorAmount': mentorAmount,
-            'payout.platformAmount': platformAmount,
-            'payout.releasedAt': new Date(),
-            'payout.releasedBy': adminId,
-          },
-        },
-        { new: true }
+  async release(paymentId: string, adminId: string) {
+    const existing: any = await MentorshipPayment.findOne({ paymentId }).lean();
+    if (!existing) throw new NotFoundError('Payment not found');
+
+    const statuses = await bookingStatusMap([existing]);
+    const bookingStatus = statuses.get(String(existing.fulfillment?.bookingId));
+    if (bookingStatus !== 'completed') {
+      throw new BadRequestError(
+        `Session is not yet completed (status: ${bookingStatus || 'unknown'}). Payouts can only be released after completion.`
       );
-      if (!claimed) {
-        throw new BadRequestError('Payment is not eligible for release (already released, refunded or unpaid)');
-      }
-  
-      // Step 2: asli paisa bhejo. Fail hua to held par wapas.
-      let result: { payoutId: string; utr?: string; status: string };
-      try {
-        result = await sendRazorpayXPayout({
-          paymentId,
-          mentorName,
-          mentorEmail: user?.email,
-          mentorPhone: user?.phoneNumber,
-          method,
-          amount: mentorAmount,
-        });
-      } catch (err: any) {
-        logger.error(`Mentor payout failed for payment ${paymentId}: ${err?.message}`);
-        await MentorshipPayment.updateOne(
-          { paymentId, 'payout.status': PayoutStatus.RELEASED },
-          {
-            $set: { 'payout.status': PayoutStatus.HELD },
-            $unset: { 'payout.releasedAt': '', 'payout.releasedBy': '' },
-          }
-        );
-        throw err;
-      }
-  
-      // Step 3: paid mark karo
-      const paid = await MentorshipPayment.findOneAndUpdate(
-        { paymentId },
-        {
-          $set: {
-            'payout.status': PayoutStatus.PAID,
-            'payout.paidAt': new Date(),
-            'payout.paidBy': adminId,
-            'payout.reference': result.utr || result.payoutId,
-          },
-        },
-        { new: true }
-      );
-  
-      void notifyMentor(
-        paid || claimed,
-        'Payout sent',
-        `₹${mentorAmount} for "${existing.context?.title || 'your session'}" has been sent to your ${
-          method.type === 'upi' ? `UPI ID ${method.upiId}` : 'bank account'
-        }. Reference: ${result.utr || result.payoutId}`,
-        { amount: mentorAmount, transactionId: result.utr || result.payoutId }
-      );
-      return paid || claimed;
     }
 
+    // Mentor + payout account pehle check karo (claim karne se pehle)
+    const mentorId = existing.context?.mentorId;
+    const mentor: any = mentorId ? await mentorRepository.findByMentorId(mentorId) : null;
+    if (!mentor) throw new BadRequestError('Mentor not found for this payment');
+    const method: any = await findPayoutMethod(mentorId, mentor);
+    if (!method) throw new BadRequestError('Mentor has not added a payout account (UPI / bank)');
 
+    const user: any = mentor.userId
+      ? await User.findOne(
+          { userId: mentor.userId },
+          { firstName: 1, lastName: 1, email: 1, phoneNumber: 1, _id: 0 }
+        ).lean()
+      : null;
+    const mentorName =
+      `${user?.firstName || ''} ${user?.lastName || ''}`.trim() ||
+      method.upiName ||
+      method.accountHolderName ||
+      'Mentor';
+
+    const { mentorAmount, platformAmount } = split(existing);
+
+    // Step 1: atomically claim (double click / do admin ek saath = sirf ek jeetega)
+    const claimed = await MentorshipPayment.findOneAndUpdate(
+      { paymentId, ...ELIGIBLE, ...HELD_FILTER },
+      {
+        $set: {
+          'payout.status': PayoutStatus.RELEASED,
+          'payout.mentorAmount': mentorAmount,
+          'payout.platformAmount': platformAmount,
+          'payout.releasedAt': new Date(),
+          'payout.releasedBy': adminId,
+        },
+      },
+      { new: true }
+    );
+    if (!claimed) {
+      throw new BadRequestError('Payment is not eligible for release (already released, refunded or unpaid)');
+    }
+
+    // Step 2: asli paisa bhejo. Fail hua to held par wapas.
+    let result: { payoutId: string; utr?: string; status: string };
+    try {
+      result = await sendRazorpayXPayout({
+        paymentId,
+        mentorName,
+        mentorEmail: user?.email,
+        mentorPhone: user?.phoneNumber,
+        method,
+        amount: mentorAmount,
+      });
+    } catch (err: any) {
+      logger.error(`Mentor payout failed for payment ${paymentId}: ${err?.message}`);
+      await MentorshipPayment.updateOne(
+        { paymentId, 'payout.status': PayoutStatus.RELEASED },
+        {
+          $set: { 'payout.status': PayoutStatus.HELD },
+          $unset: { 'payout.releasedAt': '', 'payout.releasedBy': '' },
+        }
+      );
+      throw err;
+    }
+
+    // Step 3: paid mark karo
+    const paid = await MentorshipPayment.findOneAndUpdate(
+      { paymentId },
+      {
+        $set: {
+          'payout.status': PayoutStatus.PAID,
+          'payout.paidAt': new Date(),
+          'payout.paidBy': adminId,
+          'payout.reference': result.utr || result.payoutId,
+        },
+      },
+      { new: true }
+    );
+
+    void notifyMentor(
+      paid || claimed,
+      'Payout sent',
+      `₹${mentorAmount} for "${existing.context?.title || 'your session'}" has been sent to your ${
+        method.type === 'upi' ? `UPI ID ${method.upiId}` : 'bank account'
+      }. Reference: ${result.utr || result.payoutId}`,
+      { amount: mentorAmount, transactionId: result.utr || result.payoutId }
+    );
+    return paid || claimed;
+  }
 
   /** Admin: mentor ko asli paisa bhej diya, released -> paid */
   async markPaid(paymentId: string, adminId: string, reference: string) {
