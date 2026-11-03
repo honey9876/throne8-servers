@@ -449,6 +449,15 @@ const registerSchema = Joi.object({
             'string.empty': 'Verification token cannot be empty',
             'any.required': 'Verification token is required. Please verify your email first.',
         }),
+
+    // Optional referral code from a friend's share link (/signup?ref=CODE).
+    // Without this entry stripUnknown deletes it before the controller runs.
+    // Deliberately forgiving: a wrong-looking value is dropped silently so it can
+    // never block a signup. The referral service does the real validation.
+    referralCode: Joi.alternatives().try(
+        Joi.string().trim().max(64),
+        Joi.any().strip()
+    ),
 });
 
 const sendRegistrationOtpSchema = Joi.object({
