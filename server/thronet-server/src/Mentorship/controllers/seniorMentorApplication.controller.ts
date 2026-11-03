@@ -33,18 +33,18 @@ class SeniorMentorApplicationController {
   async apply(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
-      const profilePhotoFile = files?.['profilePhoto']?.[0];
-      const resumeFile = files?.['resume']?.[0];
-      const proofDocumentFile = files?.['proofDocument']?.[0];
+      const profilePhotoFile = files?.['profilePhoto']?.[0] || files?.['profilePhotoFile']?.[0];
+      const resumeFile = files?.['resume']?.[0] || files?.['resumeFile']?.[0];
+      const proofDocumentFile = files?.['proofDocument']?.[0] || files?.['proofDocumentFile']?.[0];
 
       if (!profilePhotoFile || !resumeFile || !proofDocumentFile) {
         const missing: { field: string; message: string }[] = [];
         if (!profilePhotoFile) missing.push({ field: 'profilePhoto', message: 'Profile photo is required' });
         if (!resumeFile) missing.push({ field: 'resume', message: 'Resume is required' });
-        if (!proofDocumentFile) missing.push({ field: 'proofDocument', message: 'Proof of experience/achievement is required' });
+        if (!proofDocumentFile) missing.push({ field: 'proofDocument', message: 'Proof of experience is required' });
         ResponseHandler.badRequest(
           res,
-          'Profile photo, resume, and proof of experience/achievement are all required',
+          'Profile photo, resume, and proof of experience are required',
           missing
         );
         return;

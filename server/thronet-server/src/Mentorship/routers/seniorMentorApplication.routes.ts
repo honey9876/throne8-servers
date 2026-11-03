@@ -32,8 +32,11 @@ const parseFormDataFields = (req: Request, _res: Response, next: NextFunction): 
 
 const applicationFileUpload = uploadFields([
   { name: 'profilePhoto', maxCount: 1 },
+  { name: 'profilePhotoFile', maxCount: 1 },
   { name: 'resume', maxCount: 1 },
+  { name: 'resumeFile', maxCount: 1 },
   { name: 'proofDocument', maxCount: 1 },
+  { name: 'proofDocumentFile', maxCount: 1 },
 ]);
 
 /**

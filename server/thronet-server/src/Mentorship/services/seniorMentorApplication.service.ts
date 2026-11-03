@@ -323,6 +323,9 @@ class SeniorMentorApplicationService {
       logger.info(`Senior Mentor application submitted: ${application.seniorMentorId}`);
       return application;
     } catch (error: any) {
+      if (error?.code === 11000) {
+        throw new ConflictError('You already have a Senior Mentor application in progress.');
+      }
       logger.error(`Failed to submit senior mentor application: ${error.message}`);
       throw error;
     }
