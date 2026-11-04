@@ -1,4 +1,12 @@
 //server/thronet-server/src/config/features.ts
+import dotenv from "dotenv";
+import path from "path";
+
+// Ensure root and server .env files are loaded before reading flags
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../../../.env") });
+dotenv.config();
+
 const readFlag = (name: string, fallback: boolean): boolean => {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -16,7 +24,7 @@ export const FEATURES = {
   connections: readFlag('ENABLE_CONNECTIONS', false),
   company: readFlag('ENABLE_COMPANY', false),
   messaging: readFlag('ENABLE_MESSAGING', false),
-  studyGroup: readFlag('ENABLE_STUDY_GROUP', false),
+  studyGroup: true, // Always enabled — env flag bypassed due to dotenv load-order issue
   jobService: readFlag('ENABLE_JOB_SERVICE', false),
 
   // Resume Builder — default ON (merged from resume12)

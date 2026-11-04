@@ -283,6 +283,9 @@ router.use((_req, res) => {
     success: false,
     statusCode: 404,
     message: 'Route not found',
+    // Debug help: frontend ne kaunsa URL maara, response me hi dikh jaata hai
+    method: _req.method,
+    path: _req.originalUrl,
     error: 'The requested endpoint does not exist',
     availableEndpoints: '/api/v1',
   });

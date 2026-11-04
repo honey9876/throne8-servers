@@ -44,7 +44,19 @@
 
       );
 
-      // // Create a new group
+      // Join requests stub for frontend compatibility
+      router.get('/my-requests',
+        AuthMiddleware.authenticate as any,
+        (_req, res) => {
+          res.status(200).json({ success: true, data: [] });
+        }
+      );
+
+      // Create a new group (support both POST / and POST /create)
+      router.post('/',
+        AuthMiddleware.authenticate as any,
+        groupController.createGroup
+      );
       router.post('/create',
         AuthMiddleware.authenticate as any,
         groupController.createGroup
