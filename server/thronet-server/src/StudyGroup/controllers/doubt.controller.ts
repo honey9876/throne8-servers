@@ -109,9 +109,17 @@ export const getAllDoubts = asyncHandler(
     const userId = (req as AuthRequest).user?.id || (req as AuthRequest).user?.userId;
     const result = await doubtService.getGroupDoubts(groupId, params, userId);
 
+    // Per-user thumb state (feed cache shared hota hai, isliye cache ke BAHAR compute karte hain)
+    const doubtsWithVote = Array.isArray((result as any).doubts)
+      ? (result as any).doubts.map((d: any) => ({
+          ...d,
+          isUpvoted: userId ? (d.upvotedBy ?? []).includes(userId) : false,
+        }))
+      : (result as any).doubts;
+
     return ResponseUtil.success(
       res,
-      result,
+      { ...(result as any), doubts: doubtsWithVote },
       "Doubts retrieved successfully",
       // result.pagination
     );
@@ -318,6 +326,44 @@ export const markAsSolved = asyncHandler(
       doubt,
       "Doubt marked as solved successfully",
     );
+  },
+);
+
+/**
+ * @route   POST /api/v1/study-group/doubts/:doubtId/upvote
+ * @desc    Upvote a doubt (idempotent)
+ * @access  Private (Group Members)
+ */
+export const upvoteDoubt = asyncHandler(async (req: Request, res: Response) => {
+  const { doubtId } = req.params;
+  const userId =
+    (req as AuthRequest).user?.id || (req as AuthRequest).user?.userId;
+
+  if (!doubtId) {
+    throw new BadRequestError("Doubt ID is required");
+  }
+
+  const result = await doubtService.setDoubtUpvote(doubtId, userId!, true);
+  return ResponseUtil.success(res, result, "Doubt upvoted successfully");
+});
+
+/**
+ * @route   POST /api/v1/study-group/doubts/:doubtId/remove-upvote
+ * @desc    Remove upvote from a doubt (idempotent)
+ * @access  Private (Group Members)
+ */
+export const removeDoubtUpvote = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { doubtId } = req.params;
+    const userId =
+      (req as AuthRequest).user?.id || (req as AuthRequest).user?.userId;
+
+    if (!doubtId) {
+      throw new BadRequestError("Doubt ID is required");
+    }
+
+    const result = await doubtService.setDoubtUpvote(doubtId, userId!, false);
+    return ResponseUtil.success(res, result, "Doubt upvote removed");
   },
 );
 
@@ -701,6 +747,8 @@ export default {
   updateDoubt,
   deleteDoubt,
   markAsSolved,
+  upvoteDoubt,
+  removeDoubtUpvote,
   searchDoubts,
   getDoubtsByCategory,
   tagMember,

@@ -89,6 +89,16 @@ router.patch(
 
   doubtController.markAsSolved,
 );
+router.post(
+  "/:doubtId/upvote",
+  AuthMiddleware.authenticate as any,
+  doubtController.upvoteDoubt,
+);
+router.post(
+  "/:doubtId/remove-upvote",
+  AuthMiddleware.authenticate as any,
+  doubtController.removeDoubtUpvote,
+);
 router.get(
   "/search/query",
   AuthMiddleware.authenticate as any,

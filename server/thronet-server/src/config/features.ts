@@ -19,12 +19,12 @@ export const FEATURES = {
   profile: true,
   mentorship: true,
   notifications: true,
+  studyGroup: true, // Always enabled — env flag bypassed due to dotenv load-order issue
 
   // Optional: default off
   connections: readFlag('ENABLE_CONNECTIONS', false),
   company: readFlag('ENABLE_COMPANY', false),
   messaging: readFlag('ENABLE_MESSAGING', false),
-  studyGroup: true, // Always enabled — env flag bypassed due to dotenv load-order issue
   jobService: readFlag('ENABLE_JOB_SERVICE', false),
 
   // Resume Builder — default ON (merged from resume12)

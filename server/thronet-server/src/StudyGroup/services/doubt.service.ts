@@ -1,6 +1,5 @@
 // services/doubt.service.ts
 
-import mongoose from "mongoose";
 import doubtRepository from "../repositories/doubt.repository";
 import answerRepository from "../repositories/answer.repository";
 import groupMemberRepository from "../repositories/groupMember.repository";
@@ -74,27 +73,8 @@ class DoubtService {
       search,
     } = params;
 
-    // Verify group privacy: private groups require active membership before serving cached or uncached data
-    const Group = (await import('../models/Group.model')).default;
-    const GroupMember = (await import('../models/GroupMember.model')).default;
-    const groupQuery: any[] = [{ groupId }];
-    if (mongoose.Types.ObjectId.isValid(groupId)) {
-      groupQuery.push({ _id: groupId });
-    }
-    const groupDoc = await Group.findOne({ $or: groupQuery }).lean() as any;
-    if (groupDoc && (groupDoc.visibility === 'private' || groupDoc.visibility === 'PRIVATE')) {
-      if (!userId) {
-        throw new ForbiddenError('Private group doubts require active group membership');
-      }
-      const isMember = await GroupMember.findOne({
-        userId,
-        groupId: groupDoc.groupId || groupId,
-        status: 'active',
-      }).lean();
-      if (!isMember) {
-        throw new ForbiddenError('You are not a member of this private group');
-      }
-    }
+    // Note: Private group membership is already verified by the isMember middleware on the route.
+    // Duplicate check removed — dynamic imports here caused OverwriteModelError (500).
 
     // Check cache for non-search feed queries
     const isSearchQuery = Boolean(search);
@@ -407,6 +387,46 @@ class DoubtService {
 
     await answer.softDelete();
     return { message: "Answer deleted successfully" };
+  }
+
+  /**
+   * Doubt upvote / remove-upvote. Idempotent: already usi state me ho to
+   * bhi current { upvotes, isUpvoted } return hota hai (frontend reducer ko yehi chahiye).
+   */
+  async setDoubtUpvote(
+    doubtId: string,
+    userId: string,
+    add: boolean,
+  ): Promise<{ doubtId: string; upvotes: number; isUpvoted: boolean }> {
+    const doubt = await doubtRepository.findRawByDoubtId(doubtId);
+    if (!doubt || doubt.isDeleted) throw new NotFoundError("Doubt not found");
+
+    const membership = await groupMemberRepository.findActiveOne(
+      String(doubt.group),
+      userId,
+    );
+    if (!membership) {
+      throw new ForbiddenError(
+        "Only active group members can vote on doubts",
+      );
+    }
+
+    const updated = await doubtRepository.applyUpvote(doubtId, userId, add);
+    const current = updated ?? doubt;
+
+    // findOneAndUpdate pe model ke post-save hooks nahi chalte, isliye feed cache
+    // yahin invalidate karna zaroori hai (warna refresh par purana count dikhta).
+    if (updated) {
+      DoubtCacheRepository.invalidateDoubt(doubtId, String(doubt.group)).catch(
+        () => {},
+      );
+    }
+
+    return {
+      doubtId,
+      upvotes: Math.max(0, current.upvotes ?? 0),
+      isUpvoted: (current.upvotedBy ?? []).includes(userId),
+    };
   }
 }
 

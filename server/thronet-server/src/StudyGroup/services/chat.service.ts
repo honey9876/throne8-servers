@@ -12,7 +12,6 @@
 import messageRepository from '../repositories/message.repository';
 import groupRepository from '../repositories/group.repository';
 import groupMemberRepository from '../repositories/groupMember.repository';
-import ProfilePhoto from '@/Profile/models/ProfilePhoto.model';
 import { LoggerUtil } from '@/shared/logger.util';
 import { MessageType } from '../enums/MessageType.enum';
 import { AuthorizationError, BadRequestError, NotFoundError } from '@/shared/errors/app.error';
@@ -73,19 +72,15 @@ export const sendMessage = async (
       .updateById(groupId, { lastActivityAt: new Date() })
       .catch((err) => LoggerUtil.error('Failed to update group lastActivityAt:', err));
 
-    const populatedMessage = await messageRepository.findRawById(message._id.toString());
-    await populatedMessage?.populate('sender', 'fullName username profilePhotoId firstName lastName');
-
-    let responseMessage: any = populatedMessage;
-    if (populatedMessage && populatedMessage.sender && (populatedMessage.sender as any).profilePhotoId) {
-      try {
-        const photo = await ProfilePhoto.findById((populatedMessage.sender as any).profilePhotoId).lean().exec();
-        if (photo) {
-          responseMessage = populatedMessage.toJSON();
-          responseMessage.sender.profileImage = photo.cloudinarySecureUrl;
-        }
-      } catch (e) {}
-    }
+    // FIX: pehle yahan findRawById(message._id) use hota tha, lekin findRawById `messageId`
+    // field pe query karta hai (Mongo _id pe nahi) => hamesha null => API response me message
+    // nahi jaata tha => frontend optimistic message hata deta tha aur chat se message gayab.
+    // Ab created document hi return hota hai, GET /messages jaisa shape: sender = userId string
+    // (frontend naam/avatar apne user cache se resolve karta hai).
+    const responseMessage: any =
+      typeof (message as any).toJSON === 'function'
+        ? (message as any).toJSON()
+        : message;
 
     LoggerUtil.info(`✅ Message sent in group ${groupId} by user ${senderId}`);
     return responseMessage;

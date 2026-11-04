@@ -22,6 +22,28 @@ export class DoubtRepository extends BaseRepository<IDoubt> {
     }
   }
 
+  // Atomic upvote / remove-upvote (double click + race condition safe).
+  // Returns updated doc, ya null agar user already usi state me tha (no change).
+  async applyUpvote(
+    doubtId: string,
+    userId: string,
+    add: boolean
+  ): Promise<IDoubt | null> {
+    try {
+      const filter: any = add
+        ? { doubtId, isDeleted: false, upvotedBy: { $ne: userId } }
+        : { doubtId, isDeleted: false, upvotedBy: userId };
+      const update: any = add
+        ? { $addToSet: { upvotedBy: userId }, $inc: { upvotes: 1 } }
+        : { $pull: { upvotedBy: userId }, $inc: { upvotes: -1 } };
+      return await this.model
+        .findOneAndUpdate(filter, update, { new: true })
+        .exec();
+    } catch (error: any) {
+      throw new Error(`Error updating doubt upvote: ${error}`);
+    }
+  }
+
   // Raw — save() mutations ke liye
   async findRawByDoubtId(doubtId: string, userId?: string): Promise<IDoubt | null> {
     try {
