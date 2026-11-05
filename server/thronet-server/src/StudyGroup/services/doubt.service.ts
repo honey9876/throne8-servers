@@ -174,7 +174,6 @@ class DoubtService {
     Object.assign(doubt, data);
     await doubt.save();
     DoubtCacheRepository.invalidateDoubt(doubtId, doubt.group).catch(() => {});
-    await doubt.populate("postedBy", "name email avatar");
     return doubt;
   }
 
@@ -227,8 +226,6 @@ class DoubtService {
     await doubt.save();
     DoubtCacheRepository.invalidateDoubt(doubtId, doubt.group).catch(() => {});
 
-    await doubt.populate("postedBy", "name email avatar");
-    await doubt.populate("bestAnswer");
     return doubt;
   }
 
@@ -368,7 +365,6 @@ class DoubtService {
     answer.content = content;
     if (links) answer.links = links;
     await answer.save();
-    await answer.populate("answeredBy", "name email avatar");
     return answer;
   }
 

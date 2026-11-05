@@ -4,6 +4,13 @@ import { BaseRepository } from './base.repository';
 import Doubt from '../models/Doubt.model';
 import { IDoubt } from '../interfaces/IDoubt';
 
+/**
+ * NOTE (populate removed): `postedBy` / `group` yahan UUID string (User.userId / Group.groupId)
+ * store hote hain, lekin Mongoose populate unhe User/Group ke ObjectId `_id` se match karta tha
+ * => "CastError: Cast to ObjectId failed" => har doubts read API 500 deti thi
+ * (GET /doubts/:groupId/all, my-doubts, search, category...). Ab ye fields plain ids
+ * return hote hain; frontend naam/avatar apne user cache se id ke through resolve karta hai.
+ */
 export class DoubtRepository extends BaseRepository<IDoubt> {
   constructor() {
     super(Doubt);
@@ -14,8 +21,6 @@ export class DoubtRepository extends BaseRepository<IDoubt> {
     try {
       return await this.model
         .findOne({ doubtId })
-        .populate('postedBy', 'name email avatar')
-        .populate('group', 'title category')
         .exec();
     } catch (error: any) {
       throw new Error(`Error finding doubt by doubtId: ${error}`);
@@ -64,7 +69,6 @@ export class DoubtRepository extends BaseRepository<IDoubt> {
       if (options.isSolved !== undefined) query.isSolved = options.isSolved;
       return await this.model
         .find(query)
-        .populate('postedBy', 'name email avatar')
         .sort(options.sort || { createdAt: -1 })
         .limit(options.limit || 50)
         .exec() as IDoubt[];
@@ -82,7 +86,6 @@ export class DoubtRepository extends BaseRepository<IDoubt> {
     try {
       return await this.model
         .find(filter)
-        .populate('postedBy', 'name email avatar')
         .sort(sort)
         .skip(skip)
         .limit(limit)
@@ -102,7 +105,6 @@ export class DoubtRepository extends BaseRepository<IDoubt> {
     try {
       return await this.model
         .find({ postedBy: userId, isDeleted: false, ...filter })
-        .populate('group', 'title category')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -117,7 +119,6 @@ export class DoubtRepository extends BaseRepository<IDoubt> {
     try {
       return await this.model
         .find({ group: groupId, isUrgent: true, isSolved: false, isDeleted: false })
-        .populate('postedBy', 'name email avatar')
         .sort({ createdAt: -1 })
         .limit(50)
         .lean()
@@ -133,8 +134,6 @@ export class DoubtRepository extends BaseRepository<IDoubt> {
       if (groupId) searchQuery.group = groupId;
       return await this.model
         .find(searchQuery, { score: { $meta: 'textScore' } })
-        .populate('postedBy', 'name email avatar')
-        .populate('group', 'title')
         .sort({ score: { $meta: 'textScore' } })
         .limit(50)
         .lean()
@@ -150,7 +149,6 @@ export class DoubtRepository extends BaseRepository<IDoubt> {
       if (groupId) query.group = groupId;
       return await this.model
         .find(query)
-        .populate('postedBy', 'name email avatar')
         .sort({ createdAt: -1 })
         .limit(100)
         .lean()

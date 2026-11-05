@@ -35,7 +35,6 @@ export class AnswerRepository extends BaseRepository<IAnswer> {
       const skip = (page - 1) * limit;
       return await this.model
         .find({ doubt: doubtId, isDeleted: false })
-        .populate('answeredBy', 'name email avatar')
         .sort({ isBestAnswer: -1, upvotes: -1, createdAt: -1 })
         .skip(skip)
         .limit(limit)
